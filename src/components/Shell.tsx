@@ -7,15 +7,18 @@ import { ROUTES } from '../lib/routes';
 import { signOut, useStore } from '../lib/store';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
-type NavEntry = { to: string; label: string };
+export type NavEntry = { to: string; label: string };
+
+/* Tamu memakai tautan bagian landing; anchor absolut agar tetap benar dari halaman lain. */
+const GUEST_NAV: NavEntry[] = [
+  { to: `${ROUTES.home}#kemampuan`, label: 'Kemampuan' },
+  { to: `${ROUTES.home}#persetujuan`, label: 'Persetujuan' },
+  { to: `${ROUTES.home}#alur`, label: 'Alur' },
+  { to: `${ROUTES.home}#faq`, label: 'FAQ' },
+];
 
 const NAV: Record<ShellKind, NavEntry[]> = {
-  public: [
-    { to: ROUTES.home, label: 'Beranda' },
-    { to: ROUTES.creator, label: 'Survei saya' },
-    { to: ROUTES.privacy, label: 'Privasi' },
-    { to: ROUTES.terms, label: 'Ketentuan' },
-  ],
+  public: GUEST_NAV,
   creator: [
     { to: ROUTES.creator, label: 'Daftar survei' },
     { to: ROUTES.creatorEdit('s_demo1'), label: 'Editor' },
@@ -28,12 +31,7 @@ const NAV: Record<ShellKind, NavEntry[]> = {
     { to: ROUTES.adminAudit, label: 'Log audit' },
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
   ],
-  respondent: [
-    { to: ROUTES.home, label: 'Beranda' },
-    { to: ROUTES.creator, label: 'Survei saya' },
-    { to: ROUTES.privacy, label: 'Privasi' },
-    { to: ROUTES.terms, label: 'Ketentuan' },
-  ],
+  respondent: GUEST_NAV,
 };
 
 /* Sama dengan referensi: sudut atas rata menempel tepi, sudut bawah membulat. */
@@ -68,10 +66,12 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   );
 }
 
-function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }) {
+function PillNavbar({ nav, activePath, guestOnly = false }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean }) {
   const navigate = useNavigate();
   const notify = useToast();
   const { session } = useStore();
+  // Di landing, pengguna dianggap belum masuk walau stor masih menyimpan sesi.
+  const current = guestOnly ? null : session;
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
@@ -91,7 +91,7 @@ function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }
   return (
     <header className="sticky top-0 z-nav">
       <div className="relative mx-auto w-fit max-w-[calc(100%-2rem)]">
-        <div className={`relative flex items-center gap-1.5 bg-dark p-2 sm:gap-2 ${OUTER}`}>
+        <div className={`relative flex items-center gap-3 bg-dark p-2 sm:gap-5 ${OUTER}`}>
           {/* Fillet cekung, path diambil dari SVG nav referensi (20x20 per sudut). */}
           {([-1, 1] as const).map((side) => (
             <span
@@ -104,11 +104,11 @@ function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }
               </svg>
             </span>
           ))}
-          <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
+          <div className="flex min-w-0 items-center gap-5">
             <Wordmark />
 
           {/* Desktop: deretan tautan seperti referensi. */}
-            <nav aria-label="Navigasi utama" className="hidden sm:block ms-2">
+            <nav aria-label="Navigasi utama" className="hidden sm:block">
               <ul className="flex items-center gap-1">
                 {nav.map((item) => (
                   <li key={item.to}>
@@ -130,11 +130,8 @@ function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }
             </button>
           </div>
 
-          {session ? (
+          {current ? (
             <div className="flex shrink-0 items-center gap-1">
-              <span className="hidden max-w-[12ch] truncate px-1 text-caption font-normal text-n400 lg:inline">
-                {session.name}
-              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -142,7 +139,7 @@ function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }
                   notify('Anda telah keluar.');
                   navigate(ROUTES.home);
                 }}
-                className={`inline-flex min-h-[40px] shrink-0 items-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
+                className={`inline-flex min-h-[40px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
               >
                 Keluar
               </button>
@@ -150,7 +147,7 @@ function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }
           ) : (
             <Link
               to={ROUTES.login}
-              className={`inline-flex min-h-[40px] shrink-0 items-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
+              className={`inline-flex min-h-[40px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
             >
               Masuk
             </Link>
@@ -191,17 +188,34 @@ export function Shell({
   children,
   title,
   subtitle,
+  hideHeading = false,
+  guestOnly = false,
+  chromeless = false,
 }: {
   kind: ShellKind;
   children: ReactNode;
   title: string;
   subtitle?: string;
+  /** Halaman yang menyediakan judulnya sendiri (mis. landing) agar tidak ada dua h1. */
+  hideHeading?: boolean;
+  /** Landing: navbar selalu tampil seperti pengunjung yang belum masuk. */
+  guestOnly?: boolean;
+  /** Halaman yang mengatur layout sendiri (mis. login): tanpa navbar dan footer. */
+  chromeless?: boolean;
 }) {
   const location = useLocation();
   const { session } = useStore();
-  const nav = NAV[kind];
+  const sectionNav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
-  const activePath = kind === 'respondent' ? ROUTES.home : location.pathname;
+  // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
+  const activeSession = guestOnly ? null : session;
+  const topNav = activeSession ? (activeSession.role === 'admin' ? NAV.admin : NAV.creator) : GUEST_NAV;
+  const activePath =
+    kind === 'respondent'
+      ? ROUTES.home
+      : location.pathname.startsWith(ROUTES.creator)
+        ? ROUTES.creator
+        : location.pathname;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -212,14 +226,19 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      <PillNavbar nav={nav} activePath={activePath} />
+      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly} />}
 
+      {chromeless ? (
+        <main id="konten-utama" tabIndex={-1} className="flex flex-1 flex-col">
+          {children}
+        </main>
+      ) : (
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:px-6 lg:py-8">
         {inWorkspace && (
           <aside aria-label="Navigasi bagian" className="shrink-0 lg:w-48">
             <p className="mb-3 hidden font-mono text-annotation tracking-mono text-n600 lg:block">WORKSPACE</p>
             <nav className="flex flex-row gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-              {nav.map((item) => (
+              {sectionNav.map((item) => (
                 <PlainLink
                   key={item.to}
                   to={item.to}
@@ -242,14 +261,18 @@ export function Shell({
         )}
 
         <main id="konten-utama" tabIndex={-1} className="min-w-0 flex-1">
-          <div className="mb-6 flex flex-col gap-2">
-            <h1 className="text-h1 font-bold text-ink">{title}</h1>
-            {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
-          </div>
+          {!hideHeading && (
+            <div className="mb-6 flex flex-col gap-2">
+              <h1 className="text-h1 font-bold text-ink">{title}</h1>
+              {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
+            </div>
+          )}
           {children}
         </main>
       </div>
+      )}
 
+      {!chromeless && (
       <footer className="border-t border-n200 bg-n50">
         <div className="mx-auto flex max-w-[1200px] flex-col gap-2 px-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div>
@@ -259,6 +282,7 @@ export function Shell({
           <PolicyLinks />
         </div>
       </footer>
+      )}
     </div>
   );
 }

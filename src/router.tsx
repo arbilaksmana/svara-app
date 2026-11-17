@@ -1,7 +1,8 @@
 import { createBrowserRouter, Outlet } from 'react-router-dom';
 import { ScreenStateProvider } from './lib/state';
 import { ToastProvider } from './components/Toast';
-import { HomePage, LoginPage, NotFoundPage, PrivacyPage, TermsPage } from './pages/Public';
+import { LoginPage, NotFoundPage, PrivacyPage, TermsPage } from './pages/Public';
+import { HomePage } from './pages/Landing';
 import { CreatorListPage, EditorPage, PreviewPage, PublishPage } from './pages/CreatorCore';
 import { SharePage, ResultsPage, SettingsPage, HistoryPage } from './pages/CreatorData';
 import { IntroPage, FormPage, ReviewPage, ReceiptPage } from './pages/Respondent';

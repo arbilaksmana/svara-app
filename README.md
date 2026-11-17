@@ -60,7 +60,7 @@ Semua tautan memakai `ROUTES` di `src/lib/routes.ts`. `:id` dan `:token` memakai
 
 | # | Rute | Layar | `routeId` |
 | --- | --- | --- | --- |
-| 1 | `/` | Landing/demo, tautan ke creator, responden, admin | `home` |
+| 1 | `/` | Landing produk: hero, kemampuan inti, persetujuan, alur kerja, dua konfigurasi contoh, FAQ, penutup | `home` |
 | 2 | `/auth/login` | Login pengelola/siswa | `login` |
 | 3 | `/creator` | Daftar survei | `creator-list` |
 | 4 | `/creator/surveys/:id/edit` | Editor instrumen | `creator-edit` |

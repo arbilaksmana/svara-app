@@ -249,14 +249,14 @@ export function Checkbox({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex min-h-[44px] items-start gap-3">
+    <div className="flex min-h-[44px] items-center gap-3">
       <input
         id={id}
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 size-5 shrink-0 rounded-sm accent-action disabled:accent-n400"
+        className="size-5 shrink-0 rounded-sm accent-action disabled:accent-n400"
       />
       <label htmlFor={id} className={`text-body-sm ${disabled ? 'text-n400' : 'text-ink'}`}>
         {label}

@@ -3,106 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
-  Badge,
   Banner,
   Button,
   Card,
-  Checkbox,
   Field,
   PlainLink,
   PolicyLinks,
   SectionTitle,
   TextInput,
-  TextLink,
 } from '../components/ui';
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { DevStateSwitcher, useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
-import { signIn, useStore } from '../lib/store';
+import { signIn } from '../lib/store';
 import { ROUTES } from '../lib/routes';
-import { surveys } from '../lib/fixtures/surveys';
-import { responses } from '../lib/fixtures/records';
-
-/* ---------------- Landing ---------------- */
-
-export function HomePage() {
-  const { state } = useScreenState('home');
-  const { session, revision } = useStore();
-  void revision;
-  const recent = [...surveys].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3);
-
-  return (
-    <Shell kind="public" title={session ? `Selamat datang, ${session.name}` : 'Kelola survei dari satu tempat'} subtitle="Susun instrumen, terbitkan tautan, pantau jawaban, dan unduh hasil per versi.">
-      <StateView
-        routeId="home"
-        state={state}
-        emptyTitle="Belum ada survei"
-        emptyDetail="Mulai dari draf baru untuk membuat instrumen pertama Anda."
-        emptyAction={<ActionLink to={ROUTES.creator}>Buka daftar survei</ActionLink>}
-      >
-        <div className="flex flex-col gap-6">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Card>
-              <p className="font-mono text-caption font-bold tracking-mono text-n600">SURVEI</p>
-              <p className="mt-2 text-h1 font-bold text-ink">{surveys.length}</p>
-              <p className="text-body-sm text-muted">Total instrumen di workspace</p>
-            </Card>
-            <Card>
-              <p className="font-mono text-caption font-bold tracking-mono text-n600">DITERBITKAN</p>
-              <p className="mt-2 text-h1 font-bold text-ink">{surveys.filter((s) => s.status === 'published').length}</p>
-              <p className="text-body-sm text-muted">Sedang menerima jawaban</p>
-            </Card>
-            <Card>
-              <p className="font-mono text-caption font-bold tracking-mono text-n600">JAWABAN</p>
-              <p className="mt-2 text-h1 font-bold text-ink">{responses.length}</p>
-              <p className="text-body-sm text-muted">Respons final tercatat</p>
-            </Card>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionTitle>Survei terbaru</SectionTitle>
-              <TextLink to={ROUTES.creator}>Lihat semua survei</TextLink>
-            </div>
-            {recent.map((s) => (
-              <Card key={s.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-body font-bold text-ink">{s.title}</p>
-                  <p className="mt-1 text-body-sm text-muted">{s.purpose}</p>
-                </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-3">
-                  <Badge tone={s.status === 'published' ? 'success' : s.status === 'draft' ? 'neutral' : 'info'}>
-                    {s.status === 'published' ? 'Terbit' : s.status === 'draft' ? 'Draf' : s.status === 'closed' ? 'Ditutup' : 'Arsip'}
-                  </Badge>
-                  <TextLink to={ROUTES.creatorEdit(s.id)}>Buka</TextLink>
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Mulai dari sini</SectionTitle>
-            <p className="text-body-sm text-muted">
-              {session
-                ? 'Lanjutkan pekerjaan pada instrumen Anda atau bagikan tautan yang sudah terbit.'
-                : 'Masuk sebagai pengelola untuk menyimpan perubahan, atau langsung isi survei melalui tautan responden.'}
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <ActionLink to={session ? ROUTES.creator : ROUTES.login}>
-                {session ? 'Buka workspace' : 'Masuk sebagai pengelola'}
-              </ActionLink>
-              <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">
-                Isi survei sebagai responden
-              </ActionLink>
-              <ActionLink to={ROUTES.admin} variant="secondary">Panel administrasi</ActionLink>
-            </div>
-          </Card>
-        </div>
-      </StateView>
-      <DevStateSwitcher routeId="home" />
-    </Shell>
-  );
-}
 
 /* ---------------- Login ---------------- */
 
@@ -112,28 +26,46 @@ export function LoginPage() {
   const notify = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [invite, setInvite] = useState(false);
-  const [agreed, setAgreed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const inviteInvalid = invite && !agreed;
-  const formInvalid = !email || !password || inviteInvalid;
+  const formInvalid = !email || !password;
 
   return (
-    <Shell kind="public" title="Masuk ke workspace" subtitle="Gunakan akun pengelola untuk menyusun instrumen, menerbitkan tautan, dan membaca hasil.">
-      <StateView
+    <Shell kind="public" title="Masuk ke workspace" chromeless>
+      <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
+        <div className="relative z-10 flex flex-col bg-n0 lg:rounded-tr-lg lg:rounded-br-lg">
+          <div className="px-5 pt-6 sm:px-8 lg:px-14">
+            <ActionLink to={ROUTES.home} variant="ghost" className="text-ink!">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <path d="M12.5 4.5 7 10l5.5 5.5" />
+              </svg>
+              Kembali
+            </ActionLink>
+          </div>
+          <div className="flex flex-1 flex-col justify-center px-5 pb-12 pt-6 sm:px-8 lg:px-14">
+            <div className="mx-auto flex w-full max-w-[360px] flex-col gap-7">
+              <h1 className="self-center text-h2 font-bold text-ink">Masuk</h1>
+              <StateView
         routeId="login"
         state={state}
         permissionDetail="Akun ini tidak memiliki peran pengelola."
         emptyAction={<ActionLink to={ROUTES.home}>Kembali ke beranda</ActionLink>}
         conflictTo={ROUTES.creator}
       >
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
+              <div className="flex flex-col gap-5">
             {state === 'success' && <SuccessBanner title="Berhasil masuk">Sesi Anda aktif pada peramban ini.</SuccessBanner>}
-            {state === 'validation' && <ValidationSummary items={['Alamat email wajib diisi.', 'Kata sandi wajib diisi.', 'Kode undangan harus disetujui jika dipakai.']} />}
+            {state === 'validation' && <ValidationSummary items={['Email wajib diisi.', 'Kata sandi wajib diisi.']} />}
             {state === 'expired' && <Banner tone="warning" title="Sesi berakhir">Silakan masuk kembali untuk melanjutkan.</Banner>}
-            {state === 'revoked' && <Banner tone="danger" title="Kode undangan tidak berlaku">Kode ini sudah dicabut atau kedaluwarsa.</Banner>}
+            {state === 'revoked' && <Banner tone="danger" title="Sesi tidak berlaku">Sesi ini sudah dicabut atau tidak lagi berlaku. Silakan masuk kembali.</Banner>}
             {state === 'error' && <Banner tone="danger" title="Tidak dapat masuk">Periksa kembali alamat email dan kata sandi Anda.</Banner>}
             {state === 'loading' && <Banner tone="neutral" title="Memeriksa kredensial">Tombol masuk dinonaktifkan sementara.</Banner>}
             {state === 'permission-denied' && <Banner tone="danger" title="Peran tidak memadai">Akses workspace memerlukan peran pengelola.</Banner>}
@@ -145,12 +77,13 @@ export function LoginPage() {
                 e.preventDefault();
                 setSubmitted(true);
                 if (formInvalid) return;
-                signIn(email, email.includes('admin') ? 'admin' : 'creator');
+                const role = email.includes('admin') ? 'admin' : 'creator';
+                signIn(email, role);
                 notify('Berhasil masuk. Selamat datang kembali.');
-                navigate(ROUTES.creator);
+                navigate(role === 'admin' ? ROUTES.admin : ROUTES.creator);
               }}
             >
-              <Field id="login-email" label="Alamat email" required>
+              <Field id="login-email" label="Email" required>
                 {(aria) => (
                   <TextInput {...aria} type="email" autoComplete="username" value={email}
                     onChange={(e) => setEmail(e.target.value)} placeholder="nama@organisasi.id" />
@@ -163,48 +96,36 @@ export function LoginPage() {
                 )}
               </Field>
 
-              <Checkbox id="login-invite" label="Saya memiliki kode undangan" checked={invite} onChange={setInvite} />
-              {invite && (
-                <Field id="login-invite-code" label="Kode undangan" hint="Dapatkan kode dari pengelola survei.">
-                  {(aria) => <TextInput {...aria} placeholder="UND-001" />}
-                </Field>
-              )}
-              {invite && (
-                <Checkbox id="login-invite-agree" label="Saya setuju menggunakan kode undangan ini." checked={agreed} onChange={setAgreed} />
-              )}
-
               {submitted && formInvalid && !['validation', 'loading', 'error', 'permission-denied', 'expired', 'revoked'].includes(state) && (
-                <p role="alert" className="text-caption font-bold text-danger">Lengkapi kolom wajib sebelum melanjutkan.</p>
+                <p role="alert" className="text-caption font-bold text-danger">Isi email dan kata sandi sebelum melanjutkan.</p>
               )}
 
               <Button type="submit" block disabled={state === 'loading'} loading={state === 'loading'}>Masuk</Button>
             </form>
-            <PolicyLinks className="mt-4" />
-          </Card>
 
-          <div className="flex flex-col gap-4">
-            <Card>
-              <SectionTitle>Akses tanpa akun</SectionTitle>
-              <p className="mt-2 text-body-sm text-muted">
-                Responden tidak perlu membuat akun. Cukup buka tautan yang dibagikan pengelola survei.
+              <p className="text-center text-caption text-muted">
+                Responden tidak perlu akun. Administrator memantau operasional tanpa membuka jawaban individual.
               </p>
-              <div className="mt-3 flex flex-col gap-2">
-                <PlainLink to={ROUTES.respondentIntro('link-umum-demo')}>Buka formulir responden</PlainLink>
-                <PlainLink to={ROUTES.privacy}>Kebijakan privasi</PlainLink>
-                <PlainLink to={ROUTES.terms}>Ketentuan layanan</PlainLink>
+
+              <PolicyLinks className="justify-center" />
               </div>
-            </Card>
-            <Card>
-              <SectionTitle>Tentang akses</SectionTitle>
-              <p className="mt-2 text-body-sm text-muted">
-                Pengelola mengelola survei miliknya. Administrator memantau operasional tanpa membuka jawaban individual.
-              </p>
-              <div className="mt-3"><ActionLink to={ROUTES.admin} variant="secondary">Buka panel administrasi</ActionLink></div>
-            </Card>
+            </StateView>
+            </div>
           </div>
         </div>
-      </StateView>
-      <DevStateSwitcher routeId="login" />
+
+        <div aria-hidden="true" className="relative hidden lg:-ml-4 lg:block">
+          {/* Foto: Fiqih Alfarish / Unsplash (lisensi Unsplash). */}
+          <img
+            src="/login-visual.webp"
+            alt=""
+            width={1200}
+            height={1600}
+            decoding="async"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        </div>
+      </div>
     </Shell>
   );
 }
