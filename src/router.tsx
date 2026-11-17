@@ -1,22 +1,23 @@
 import { createBrowserRouter, Outlet } from 'react-router-dom';
 import { ScreenStateProvider } from './lib/state';
+import { ToastProvider } from './components/Toast';
 import { HomePage, LoginPage, NotFoundPage, PrivacyPage, TermsPage } from './pages/Public';
 import { CreatorListPage, EditorPage, PreviewPage, PublishPage } from './pages/CreatorCore';
 import { SharePage, ResultsPage, SettingsPage, HistoryPage } from './pages/CreatorData';
 import { IntroPage, FormPage, ReviewPage, ReceiptPage } from './pages/Respondent';
 import { AdminSummaryPage, AdminAccountsPage, AdminAuditPage, AdminIntegrationPage } from './pages/Admin';
 
-/**
- * Provider state dipasang di elemen rute induk agar useSearchParams aktif,
- * lalu Outlet merender halaman yang cocok di dalamnya.
- */
+/** Provider dibungkus di rute induk agar state URL dan notifikasi tersedia di semua halaman. */
 function RootLayout() {
   return (
-    <ScreenStateProvider>
-      <Outlet />
-    </ScreenStateProvider>
+    <ToastProvider>
+      <ScreenStateProvider>
+        <Outlet />
+      </ScreenStateProvider>
+    </ToastProvider>
   );
 }
+
 
 export const router = createBrowserRouter([
   {

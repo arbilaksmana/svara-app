@@ -337,17 +337,20 @@ export function BlockedNotice({ state }: { state: 'closed' | 'expired' | 'revoke
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-      <table className="w-full min-w-[480px] border-collapse text-left text-body-sm">
-        <thead>
-          <tr className="border-b border-n200">
-            {head.map((h) => (
-              <th key={h} scope="col" className="py-2 pr-4 font-bold text-muted">{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
+    <div>
+      <p className="mb-2 text-caption text-muted sm:hidden">Geser tabel ke samping untuk melihat semua kolom.</p>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[480px] border-collapse text-left text-body-sm">
+          <thead>
+            <tr className="border-b border-n200">
+              {head.map((h) => (
+                <th key={h} scope="col" className="py-2 pr-4 font-bold text-muted">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
     </div>
   );
 }

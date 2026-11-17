@@ -67,19 +67,19 @@ export const responses: Response[] = [
 export const consentRecords: ConsentRecord[] = [
   {
     id: 'c_demo01', survey_id: 's_demo1', version_id: 'v_demo1_1',
-    notice_version: 'notice-sintetis-1.0', basis: 'Persetujuan wali (simulasi)',
+    notice_version: '1.0', basis: 'Persetujuan wali',
     status: 'granted', recorded_at: '2026-11-09T04:58:00Z', respondent_click: true,
     guardian_evidence_status: 'verified', guardian_evidence_ref: 'ref-wali-sintetis-01',
   },
   {
     id: 'c_demo02', survey_id: 's_demo1', version_id: 'v_demo1_1',
-    notice_version: 'notice-sintetis-1.0', basis: 'Persetujuan wali (simulasi)',
+    notice_version: '1.0', basis: 'Persetujuan wali',
     status: 'pending', recorded_at: '2026-11-09T05:02:00Z', respondent_click: false,
     guardian_evidence_status: 'pending', guardian_evidence_ref: null,
   },
   {
     id: 'c_perpus01', survey_id: 's_demo2', version_id: 'v_demo2_1',
-    notice_version: 'notice-sintetis-1.0', basis: 'Persetujuan diri',
+    notice_version: '1.0', basis: 'Persetujuan diri',
     status: 'granted', recorded_at: '2026-11-10T03:08:00Z', respondent_click: true,
     guardian_evidence_status: 'not_required', guardian_evidence_ref: null,
   },
@@ -98,11 +98,11 @@ export const auditLogs: AuditLog[] = [
 ];
 
 export const accounts: Account[] = [
-  { id: 'u_admin', display_name: 'Admin contoh', role: 'super_admin', status: 'active' },
-  { id: 'u_creator_a', display_name: 'Pengelola A', role: 'creator', status: 'active' },
-  { id: 'u_creator_b', display_name: 'Pengelola B', role: 'creator', status: 'active' },
-  { id: 'u_petugas', display_name: 'Petugas berizin', role: 'authorized_officer', status: 'active' },
-  { id: 'u_nonaktif', display_name: 'Akun dinonaktifkan', role: 'creator', status: 'suspended' },
+  { id: 'u_admin', display_name: 'Rani Wijaya', role: 'super_admin', status: 'active' },
+  { id: 'u_creator_a', display_name: 'Andi Pratama', role: 'creator', status: 'active' },
+  { id: 'u_creator_b', display_name: 'Sinta Maharani', role: 'creator', status: 'active' },
+  { id: 'u_petugas', display_name: 'Dedi Kurniawan', role: 'authorized_officer', status: 'active' },
+  { id: 'u_nonaktif', display_name: 'Bayu Setiawan', role: 'creator', status: 'suspended' },
 ];
 
 /** Izin baca individual, ekspor, dan teks bebas dipisah (PRD §3 / §9.1). */

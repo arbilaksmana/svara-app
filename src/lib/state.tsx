@@ -125,9 +125,11 @@ export function DevStateSwitcher({ routeId }: { routeId: RouteId }) {
   const { state, setState, allowed } = useScreenState(routeId);
   if (!import.meta.env.DEV) return null;
   return (
-    <aside aria-label="Pemilih state pengembangan" className="border-t border-n200 bg-n100">
-      <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-2 px-4 py-2 lg:px-6">
-        <span className="font-mono text-caption font-bold text-n600">DEV · state</span>
+    <details className="border-t border-n200 bg-n50">
+      <summary className="min-h-[40px] cursor-pointer px-4 py-2 font-mono text-caption text-n600 lg:px-6">
+        Mode pengembangan · state: {state}
+      </summary>
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-3 lg:px-6">
         {allowed.map((code) => (
           <button
             key={code}
@@ -135,16 +137,14 @@ export function DevStateSwitcher({ routeId }: { routeId: RouteId }) {
             onClick={() => setState(code)}
             aria-pressed={state === code}
             className={`min-h-[32px] rounded-sm px-2 font-mono text-annotation font-bold transition-colors duration-fast ${
-              state === code
-                ? 'bg-action text-n0'
-                : 'border border-n200 bg-n0 text-n600 hover:bg-action-soft'
+              state === code ? 'bg-action text-n0' : 'border border-n200 bg-n0 text-n600 hover:bg-action-soft'
             }`}
           >
             {code}
           </button>
         ))}
       </div>
-    </aside>
+    </details>
   );
 }
 

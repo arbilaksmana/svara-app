@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -29,9 +29,14 @@ import { ROUTES } from '../lib/routes';
 import { optionsFor, questionsFor, resolveToken } from '../lib/fixtures/surveys';
 import { profileForSurvey, noticeForSurvey } from '../lib/fixtures/profiles';
 import { receiptFixture } from '../lib/fixtures/records';
+import { useToast } from '../components/Toast';
 import { formatWIB } from '../lib/summary';
 import { RECEIPT_KEY, useDraft } from '../lib/draft';
 import type { Question } from '../lib/types';
+
+const INVITE_LABEL_ID: Record<string, string> = {
+  active: 'Aktif', used: 'Terpakai', revoked: 'Dicabut', expired: 'Kedaluwarsa',
+};
 
 function useContext() {
   const { token = 'link-umum-demo' } = useParams();
@@ -67,7 +72,7 @@ function Progress({ step }: { step: 1 | 2 | 3 | 4 }) {
 
 function MissingToken() {
   return (
-    <Shell kind="respondent" routeId="respondent-intro" title="Tautan tidak dikenal">
+    <Shell kind="respondent" title="Tautan tidak dikenal">
       <Card>
         <p className="text-body text-ink">Token pada URL tidak cocok dengan fixture pratinjau.</p>
         <div className="mt-4 flex flex-wrap gap-3">
@@ -97,7 +102,7 @@ export function IntroPage() {
   const consentComplete = consent && eligibility && (!guardianRequired || guardianEvidence);
 
   return (
-    <Shell kind="respondent" routeId="respondent-intro" title={survey.title} subtitle={`Pengantar dan pemberitahuan · versi ${version.number}`}>
+    <Shell kind="respondent" title={survey.title} subtitle={`Pengantar dan pemberitahuan · versi ${version.number}`}>
       <StateView
         routeId="respondent-intro"
         state={state}
@@ -106,7 +111,7 @@ export function IntroPage() {
         <div className="mx-auto flex max-w-[720px] flex-col gap-5">
           <Progress step={1} />
           <StateDebugHint routeId="respondent-intro" state={state} />
-          {state === 'success' && <SuccessBanner title="Persetujuan tercatat (simulasi)">Lanjutkan ke formulir.</SuccessBanner>}
+          {state === 'success' && <SuccessBanner title="Persetujuan tercatat">Lanjutkan ke formulir.</SuccessBanner>}
           {state === 'validation' && <ValidationSummary items={['Persetujuan wajib belum lengkap.', 'Konfirmasi kelayakan konteks belum dicentang.']} />}
 
           <Panel className="flex flex-col gap-2">
@@ -122,7 +127,7 @@ export function IntroPage() {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Pemberitahuan sebelum item pertama</SectionTitle>
-            <p className="font-mono text-caption tracking-mono text-muted">Versi notice {notice.version} · berlaku {notice.effective_date}</p>
+            <p className="font-mono text-caption tracking-mono text-muted">Versi notice Versi {notice.version} · berlaku {notice.effective_date}</p>
             <Table head={['Hal', 'Keterangan']}>
               <tr><Th>Tujuan</Th><Td>{notice.purpose}</Td></tr>
               <tr><Th>Jenis data</Th><Td>{notice.data_categories}</Td></tr>
@@ -134,8 +139,8 @@ export function IntroPage() {
               <tr><Th>Data anak</Th><Td>{notice.child_data_text}</Td></tr>
               <tr><Th>Transfer lintas negara</Th><Td>{notice.cross_border_text}</Td></tr>
             </Table>
-            <Banner tone="warning" title="Teks placeholder sintetis">
-              Isi final ditetapkan pengendali sebelum data nyata. Notice tetap dapat dibaca tanpa login dan setelah versi ditutup.
+            <Banner tone="info" title="Tentang pemberitahuan ini">
+              Pemberitahuan dapat dibaca tanpa akun dan tetap tersedia setelah versi survei ditutup.
             </Banner>
             <PolicyLinks className="border-t border-n200 pt-3" />
           </Card>
@@ -158,12 +163,12 @@ export function IntroPage() {
               <div className="rounded-md border border-warning-soft bg-n50 p-3">
                 <p className="text-body-sm font-bold text-ink">Bukti wali wajib</p>
                 <p className="mt-1 text-body-sm text-muted">
-                  Profil ini menetapkan responden anak. Kiriman baru ditolak bila bukti verifikasi wali belum tersedia, dicabut, atau tidak sah (PRD §9.2).
+                  Survei ini ditujukan untuk responden anak. Kiriman baru ditolak bila bukti verifikasi wali belum tersedia atau dicabut.
                 </p>
                 <div className="mt-2">
                   <Checkbox
                     id="consent-wali"
-                    label="Bukti wali berstatus terverifikasi (simulasi)."
+                    label="Bukti wali telah diverifikasi."
                     checked={guardianEvidence}
                     onChange={setGuardianEvidence}
                   />
@@ -175,7 +180,7 @@ export function IntroPage() {
             )}
             {invitation && (
               <p className="text-caption text-muted">
-                Undangan individual: <Code>{invitation.code}</Code>. Status <Badge tone={invitation.status === 'active' ? 'success' : 'neutral'}>{invitation.status}</Badge>
+                Undangan individual: <Code>{invitation.code}</Code>. Status <Badge tone={invitation.status === 'active' ? 'success' : 'neutral'}>{INVITE_LABEL_ID[invitation.status]}</Badge>
               </p>
             )}
           </Card>
@@ -285,7 +290,6 @@ export function FormPage() {
   const items = questionsFor(versionId);
   const { draft, setOption, setText } = useDraft(token, items.map((q) => q.code));
   const [checked, setChecked] = useState(false);
-  const [offline, setOffline] = useState(false);
 
   const emptyRequired = items.filter((q) =>
     q.required && (q.type === 'likert' ? draft[q.code]?.optionId == null : (draft[q.code]?.text ?? '').trim() === ''),
@@ -293,13 +297,13 @@ export function FormPage() {
   const answeredCount = items.filter((q) =>
     q.type === 'likert' ? draft[q.code]?.optionId != null : (draft[q.code]?.text ?? '').trim() !== '',
   ).length;
-  const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(state) || offline;
+  const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(state);
 
   if (!ctx) return <MissingToken />;
   const { survey, version, isPublicLink } = ctx;
 
   return (
-    <Shell kind="respondent" routeId="respondent-form" title={`Formulir · ${survey.title}`} subtitle={`Versi ${version.number} · ${items.length} item · ${isPublicLink ? 'tautan umum' : 'undangan individual'}`}>
+    <Shell kind="respondent" title={`Formulir · ${survey.title}`} subtitle={`Versi ${version.number} · ${items.length} item · ${isPublicLink ? 'tautan umum' : 'undangan individual'}`}>
       <StateView
         routeId="respondent-form"
         state={state}
@@ -322,7 +326,7 @@ export function FormPage() {
           {checked && emptyRequired.length > 0 && state === 'default' && (
             <ValidationSummary items={emptyRequired.map((q) => `Item ${q.code} wajib belum diisi.`)} />
           )}
-          {(state === 'error' || offline) && (
+          {(state === 'error') && (
             <Banner tone="danger" title="Koneksi terputus">
               Jawaban yang sudah diketik tetap tersimpan di perangkat selama halaman terbuka. Coba kirim ulang setelah koneksi kembali.
               Gangguan setelah penyimpanan tidak membatalkan respons.
@@ -355,7 +359,6 @@ export function FormPage() {
             <div className="h-2 w-full overflow-hidden rounded-full bg-n100" role="progressbar" aria-valuenow={answeredCount} aria-valuemin={0} aria-valuemax={items.length} aria-label="Progres pengisian">
               <div className="h-full bg-action" style={{ width: `${items.length ? (answeredCount / items.length) * 100 : 0}%` }} />
             </div>
-            <Checkbox id="simulasi-offline" label="Simulasikan koneksi putus" checked={offline} onChange={setOffline} />
             <button
               type="button"
               onClick={() => setChecked(true)}
@@ -395,7 +398,9 @@ export function FormPage() {
 
 export function ReviewPage() {
   const { token, ctx } = useContext();
+  const notify = useToast();
   const { state, link } = useScreenState('respondent-review');
+  const navigate = useNavigate();
   const versionId = ctx?.version.id ?? '';
   const items = questionsFor(versionId);
   const { draft } = useDraft(token, items.map((q) => q.code));
@@ -413,7 +418,7 @@ export function ReviewPage() {
   if (!ctx) return <MissingToken />;
   const { survey, version } = ctx;
   return (
-    <Shell kind="respondent" routeId="respondent-review" title="Tinjau jawaban" subtitle="Sediakan tinjauan sebelum kirim. Respons final terkunci setelah transaksi berhasil (PRD §5).">
+    <Shell kind="respondent" title="Tinjau jawaban" subtitle="Periksa kembali jawaban sebelum mengirim. Respons final tidak dapat diubah setelah terkirim.">
       <StateView
         routeId="respondent-review"
         state={state}
@@ -474,7 +479,8 @@ export function ReviewPage() {
                   try { sessionStorage.setItem(RECEIPT_KEY, JSON.stringify({ token, at: new Date().toISOString() })); } catch { /* abaikan */ }
                   window.setTimeout(() => {
                     setSubmitting(false);
-                    window.location.assign(link(ROUTES.respondentReceipt(token)));
+                    notify('Jawaban terkirim. Bukti pengiriman siap dilihat.');
+                    navigate(link(ROUTES.respondentReceipt(token)));
                   }, 450);
                 }}
               >
@@ -500,13 +506,14 @@ export function ReviewPage() {
 
 export function ReceiptPage() {
   const { token, ctx } = useContext();
+  const notify = useToast();
   const { state, link } = useScreenState('respondent-receipt');
   const [retried, setRetried] = useState(false);
   if (!ctx) return <MissingToken />;
   const { version } = ctx;
 
   return (
-    <Shell kind="respondent" routeId="respondent-receipt" title="Bukti pengiriman" subtitle="ID bukti dan waktu server ditampilkan setelah transaksi final.">
+    <Shell kind="respondent" title="Bukti pengiriman" subtitle="ID bukti dan waktu server ditampilkan setelah transaksi final.">
       <StateView
         routeId="respondent-receipt"
         state={state}
@@ -518,21 +525,21 @@ export function ReceiptPage() {
           {state === 'success' && <SuccessBanner title="Bukti berhasil dipulihkan">Retry identik mengembalikan bukti yang sama, bukan respons kedua.</SuccessBanner>}
           {state === 'conflict' && (
             <Banner tone="warning" title="Retry dengan kunci yang sama">
-              Kunci yang sama dan isi sama mengembalikan bukti lama. Kunci sama dengan isi berubah ditolak (PRD §6.1).
+              Kunci yang sama dan isi sama mengembalikan bukti lama. Kunci sama dengan isi berubah ditolak.
             </Banner>
           )}
 
           <Card className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SectionTitle>Respons final terkunci</SectionTitle>
-              <Badge tone="success">{receiptFixture.status}</Badge>
+              <Badge tone="success">Terkirim</Badge>
             </div>
             <Table head={['Field', 'Nilai']}>
               <tr><Th>ID bukti</Th><Td><Code>{receiptFixture.response_id}</Code></Td></tr>
               <tr><Th>Versi</Th><Td><Code>{version.id}</Code> · versi {version.number}</Td></tr>
               <tr><Th>Waktu server</Th><Td>{formatWIB(receiptFixture.submitted_at)}</Td></tr>
               <tr><Th>Status</Th><Td>terkirim</Td></tr>
-              <tr><Th>Kunci retry</Th><Td><Code>{receiptFixture.idempotency_key}</Code></Td></tr>
+              <tr><Th>Kunci pengiriman</Th><Td><Code>{receiptFixture.idempotency_key}</Code></Td></tr>
             </Table>
             <p className="text-caption text-muted">
               Token, kredensial, dan isi jawaban tidak ditampilkan pada bukti maupun log audit.
@@ -545,8 +552,8 @@ export function ReceiptPage() {
               Bila jaringan gagal sesudah commit, klien mengirim ulang dengan kunci yang sama dan menerima bukti yang sama.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={() => setRetried(true)} disabled={state === 'loading'} loading={state === 'loading'}>
-                {retried ? 'Bukti sama dipulihkan' : 'Coba pulihkan bukti'}
+              <Button variant="secondary" onClick={() => { setRetried(true); notify('Bukti yang sama berhasil dipulihkan.'); }} disabled={state === 'loading'} loading={state === 'loading'}>
+                {retried ? 'Bukti sama dipulihkan' : 'Pulihkan bukti'}
               </Button>
               <ActionLink to={ROUTES.respondentIntro(token)} variant="secondary">Kembali ke pengantar</ActionLink>
             </div>

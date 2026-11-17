@@ -1,6 +1,6 @@
-# Modul 14 · Preview UI Statis Pembuat Survei
+# Svara · Pembuat Survei Modul 14
 
-> **Status: preview UI statis sebelum backend.** Seluruh data berasal dari fixture lokal. Tidak ada API, basis data, autentikasi nyata, email, atau integrasi Modul 13/15.
+> **Status: aplikasi antarmuka interaktif dengan penyimpanan lokal.** Data awal berasal dari fixture. Aksi seperti masuk, membuat draf, menyimpan editor, menerbitkan versi, membuat dan mencabut undangan, menyalin tautan, mengunduh CSV, menyimpan izin, serta mengulang event bekerja dan bertahan di `localStorage` peramban. Tidak ada API, basis data, autentikasi server, email, atau integrasi Modul 13/15 yang nyata.
 >
 > **Dokumen ini BUKAN bukti lulus AC01 sampai AC17.** Matriks di bawah memetakan *tampilan* state, bukan hasil uji penerimaan. Tidak ada metrik kinerja, hasil uji lapangan, atau klaim kepatuhan yang dilaporkan di sini.
 
@@ -13,7 +13,8 @@ Sumber kebenaran:
 
 Kedua dokumen tidak diubah. `passport-design-system.md` adalah lampiran ekstraksi sumber desain, bukan acuan implementasi.
 
-**Verifikasi yang benar-benar dijalankan (17 November 2026):** `pnpm lint`, `pnpm typecheck`, `pnpm build` lulus; `pnpm dev` dan `pnpm preview` membuka 23 URL (21 rute + 2 varian token + 404) tanpa error konsol; visual diperiksa pada 390px dan 1440px tanpa overflow horizontal; alur klik intro ke formulir ke tinjau ke bukti berhasil; 353 anchor internal tanpa tautan mati. Ini bukan hasil uji kinerja, integrasi nyata, atau uji lapangan.
+**Verifikasi yang benar-benar dijalankan:** `pnpm lint`, `pnpm typecheck`, `pnpm build` lulus; `pnpm dev` dan `pnpm preview` membuka seluruh rute tanpa error konsol; visual diperiksa pada 390px dan 1440px tanpa overflow horizontal; alur klik login, buat draf, simpan, terbitkan, salin, cabut, unduh CSV, simpan izin, ulang event, kirim jawaban, dan keluar diuji di browser. Ini bukan hasil uji kinerja, integrasi nyata, atau uji lapangan.
+
 
 ---
 
@@ -96,11 +97,32 @@ Dua set memakai **komponen yang sama**. Kode item dan nama studi kasus hanya ada
 | 1 · SMK / Figma | `organization_type=school`, `respondent_age_category=minor`, `consent_mode=guardian`, `retention_days=null`, `data_request_contact=null`, `cross_border_transfer=null` | `s_demo1` | Likert 1 sampai 5 pada AD01 dan TS01, isian singkat opsional K02 | Wajib bukti wali |
 | 2 · Perpustakaan | `organization_type=organization`, `respondent_age_category=adult`, `consent_mode=self`, `retention_days=90`, `data_request_contact` kontak sintetis, `cross_border_transfer=false` | `s_demo2` | Skala 4 opsi pada P01 dan P02, komentar singkat opsional K01 | Persetujuan diri |
 
-`retention_days`, `data_request_contact`, dan teks kebijakan pada set 1 sengaja kosong atau berlabel **"placeholder sintetis, belum disetujui pengendali"** sesuai PRD §9.3, §9.7, dan §14. Tidak ada kebijakan sekolah rekaan.
+Nilai yang belum ditetapkan pengendali ditampilkan dengan bahasa netral pada pengaturan; tidak ada kebijakan organisasi rekaan.
 
 Tipe di `src/lib/types.ts`: `DeploymentProfile`, `Survey`, `SurveyVersion`, `Question`, `QuestionOption`, `Assignment`, `Invitation`, `Response`, `ConsentRecord`, `AuditLog`, plus `Answer`, `Account`, `AccessGrant`, `IntegrationEvent`, `Notice`.
 
 Fixture agregat mengikuti PRD §7: 5 respons final, nilai AD01 = 2, 4, 4, 5, kosong. Ringkasan dihitung dari fixture oleh `src/lib/summary.ts` (bukan angka hardcode): total 5, terjawab 4, dilewati 1, frekuensi opsi 1 sampai 5 = 0, 1, 0, 2, 1.
+
+### Perilaku interaktif
+
+`src/lib/store.ts` menyimpan perubahan di `localStorage` dan menyinkronkan koleksi fixture di tempat, sehingga `findSurvey`, `questionsFor`, dan `computeSummary` tetap membaca data terkini. Komponen berlangganan lewat `useSyncExternalStore`; umpan balik aksi memakai `ToastProvider`.
+
+| Aksi | Hasil yang terlihat |
+| --- | --- |
+| Masuk / keluar | Nama akun dan peran tampil di header; sesi bertahan saat halaman dimuat ulang |
+| Buat draf baru | Survei, versi draf, dan item salinan dibuat; langsung membuka editor |
+| Simpan draf | Judul dan kode item tersimpan, dengan cap waktu |
+| Terbitkan versi | Status berubah, tautan responden baru dibuat dan ditampilkan |
+| Salin tautan | URL absolut ditulis ke papan klip; tombol berubah menjadi "Tersalin" |
+| Buat / cabut undangan | Baris baru muncul; status berubah menjadi "Dicabut" |
+| Tutup versi / arsipkan | Status versi dan survei diperbarui, riwayat tetap terbaca |
+| Unduh CSV | File CSV UTF-8 nyata diunduh per versi, dengan header kode item |
+| Simpan pengaturan / izin | Nilai tersimpan dan dipakai ulang saat halaman dibuka |
+| Ulangi event | Jumlah percobaan bertambah dengan ID kejadian tetap |
+| Kirim jawaban | Bukti ditampilkan; retry memulihkan bukti yang sama |
+
+Reset ke data awal: hapus kunci `svara.workspace.v1` dari `localStorage` peramban.
+
 
 ---
 
@@ -166,7 +188,7 @@ Cakupan minimum yang diminta: `default`, `empty`, `loading`, `error`, `validatio
 
 - Query `?state=<kode>` dibaca `ScreenStateProvider`. Kode tidak dikenal atau tidak termasuk daftar layar jatuh ke `default`.
 - `StateLink` meneruskan `?state=` antarhalaman sehingga satu skenario bisa diikuti dari awal sampai akhir.
-- **State switcher hanya dirender saat `import.meta.env.DEV`.** Panel itu tidak ada di build produksi (`pnpm build` / `pnpm preview`). Tidak ada kontrol debug pada UI produksi.
+- **State switcher hanya dirender saat `import.meta.env.DEV`**, dan diciutkan menjadi `<details>` berlabel "Mode pengembangan" di kaki halaman. Tidak ada kontrol debug pada build produksi (`pnpm build` / `pnpm preview`).
 - Daftar state yang diizinkan per layar ada di `ROUTE_STATES` dalam `src/lib/state.tsx`, sama persis dengan matriks di atas.
 
 ---

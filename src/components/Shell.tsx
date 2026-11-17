@@ -1,16 +1,17 @@
 import type { ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
-import { PlainLink, PolicyLinks, Code } from './ui';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { PlainLink, PolicyLinks, Badge } from './ui';
+import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
+import { signOut, useStore } from '../lib/store';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
 
 const NAV: Record<ShellKind, { to: string; label: string }[]> = {
   public: [
     { to: ROUTES.home, label: 'Beranda' },
-    { to: ROUTES.login, label: 'Masuk pengelola' },
-    { to: ROUTES.creator, label: 'Creator' },
-    { to: ROUTES.admin, label: 'Admin' },
+    { to: ROUTES.creator, label: 'Survei saya' },
+    { to: ROUTES.login, label: 'Masuk' },
     { to: ROUTES.privacy, label: 'Privasi' },
   ],
   creator: [
@@ -18,15 +19,12 @@ const NAV: Record<ShellKind, { to: string; label: string }[]> = {
     { to: ROUTES.creatorEdit('s_demo1'), label: 'Editor' },
     { to: ROUTES.creatorResults('s_demo1'), label: 'Hasil' },
     { to: ROUTES.creatorSettings('s_demo1'), label: 'Pengaturan' },
-    { to: ROUTES.admin, label: 'Admin' },
-    { to: ROUTES.login, label: 'Keluar (simulasi)' },
   ],
   admin: [
     { to: ROUTES.admin, label: 'Ringkasan' },
     { to: ROUTES.adminAccounts, label: 'Akun & izin' },
     { to: ROUTES.adminAudit, label: 'Log audit' },
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
-    { to: ROUTES.creator, label: 'Ke creator' },
   ],
   respondent: [
     { to: ROUTES.home, label: 'Beranda' },
@@ -41,7 +39,7 @@ function Wordmark() {
       <span aria-hidden="true" className="grid size-8 place-items-center rounded-sm bg-action font-mono text-caption font-bold text-n0">
         14
       </span>
-      <span className="text-body font-bold text-ink no-underline">Modul 14</span>
+      <span className="text-body font-bold text-ink no-underline">Svara</span>
     </PlainLink>
   );
 }
@@ -51,16 +49,18 @@ export function Shell({
   children,
   title,
   subtitle,
-  routeId,
 }: {
   kind: ShellKind;
   children: ReactNode;
   title: string;
   subtitle?: string;
-  routeId: string;
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const notify = useToast();
+  const { session } = useStore();
   const nav = NAV[kind];
+  const inWorkspace = kind === 'creator' || kind === 'admin';
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -74,9 +74,26 @@ export function Shell({
       <header className="sticky top-0 z-nav border-b border-n200 bg-n0/95 backdrop-blur-sm">
         <div className="mx-auto flex min-h-[64px] max-w-[1200px] flex-wrap items-center justify-between gap-2 px-4 py-2 lg:px-6">
           <Wordmark />
-          <span className="hidden font-mono text-annotation tracking-mono text-n600 sm:inline">
-            PRATINJAU UI · DATA SINTETIS
-          </span>
+          {inWorkspace && session ? (
+            <div className="order-2 flex items-center gap-3 sm:order-none">
+              <span className="hidden text-body-sm text-muted sm:inline">{session.name}</span>
+              <Badge tone="neutral">{session.role === 'admin' ? 'Administrator' : 'Pengelola'}</Badge>
+              <button
+                type="button"
+                onClick={() => {
+                  signOut();
+                  notify('Anda telah keluar.');
+                  navigate(ROUTES.home);
+                }}
+                className="min-h-[40px] rounded-sm border border-n200 px-3 text-body-sm font-bold text-n600 hover:bg-n100"
+              >
+                Keluar
+              </button>
+            </div>
+          ) : (
+            <span className="hidden text-caption text-muted sm:inline">Pembuat survei</span>
+          )}
+
           <nav aria-label="Navigasi utama" className="order-3 w-full overflow-x-auto lg:order-none lg:w-auto lg:overflow-visible">
             <ul className="flex min-w-max items-center gap-1 lg:gap-2">
               {nav.map((item) => {
@@ -100,10 +117,11 @@ export function Shell({
       </header>
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:px-6 lg:py-8">
-        {kind !== 'public' && kind !== 'respondent' && (
+        {inWorkspace && (
           <aside aria-label="Navigasi bagian" className="shrink-0 lg:w-48">
+            <p className="mb-3 hidden font-mono text-annotation tracking-mono text-n600 lg:block">WORKSPACE</p>
             <nav className="flex flex-row gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-              {nav.slice(0, kind === 'creator' ? 4 : 4).map((item) => (
+              {nav.map((item) => (
                 <PlainLink
                   key={item.to}
                   to={item.to}
@@ -115,12 +133,13 @@ export function Shell({
                 </PlainLink>
               ))}
             </nav>
-            <div className="mt-6 hidden lg:block">
-              <p className="font-mono text-annotation tracking-mono text-n600">PROFIL AKTIF</p>
-              <p className="mt-1 text-caption text-muted">
-                <Code>{routeId}</Code>
-              </p>
-            </div>
+            {session && (
+              <div className="mt-6 hidden lg:block">
+                <p className="font-mono text-annotation tracking-mono text-n600">AKUN</p>
+                <p className="mt-1 text-body-sm font-bold text-ink">{session.name}</p>
+                <p className="text-caption text-muted">{session.email}</p>
+              </div>
+            )}
           </aside>
         )}
 
@@ -134,27 +153,14 @@ export function Shell({
       </div>
 
       <footer className="border-t border-n200 bg-n50">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-3 px-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+        <div className="mx-auto flex max-w-[1200px] flex-col gap-2 px-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div>
-            <p className="text-body-sm font-bold text-ink">Modul 14 · pratinjau antarmuka statis</p>
-            <p className="text-caption text-muted">
-              Seluruh data sintetis. Tidak ada backend, basis data, atau autentikasi nyata.
-            </p>
+            <p className="text-body-sm font-bold text-ink">Svara</p>
+            <p className="text-caption text-muted">Lingkungan demonstrasi dengan data contoh. Perubahan tersimpan di peramban ini.</p>
           </div>
           <PolicyLinks />
         </div>
       </footer>
-    </div>
-  );
-}
-
-export function LegalPageTitle({ children, version }: { children: ReactNode; version: string }) {
-  return (
-    <div className="mb-6 flex flex-col gap-2 border-b border-n200 pb-4">
-      <h1 className="text-h1 font-bold text-ink">{children}</h1>
-      <p className="font-mono text-caption tracking-mono text-muted">
-        Versi {version} · berlaku 17 November 2026 · placeholder sintetis
-      </p>
     </div>
   );
 }

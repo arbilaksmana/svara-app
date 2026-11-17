@@ -25,18 +25,20 @@ import { ROUTES } from '../lib/routes';
 import { accounts, accessGrants, auditLogs, integrationEvents, responses } from '../lib/fixtures/records';
 import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
+import { useToast } from '../components/Toast';
+import { replayEvent, saveGrants, setIntegrationNote, useStore } from '../lib/store';
 
 /* ---------------- Ringkasan ---------------- */
 
 export function AdminSummaryPage() {
   const { state } = useScreenState('admin-summary');
   return (
-    <Shell kind="admin" routeId="admin-summary" title="Ringkasan operasional" subtitle="Super admin melihat metrik operasional, bukan jawaban individual (PRD §3).">
+    <Shell kind="admin" title="Ringkasan operasional" subtitle="Pantau jumlah survei, respons, dan akun tanpa membuka jawaban individual.">
       <StateView
         routeId="admin-summary"
         state={state}
         emptyTitle="Belum ada survei"
-        emptyDetail="Metrik akan muncul setelah ada survei dan respons pada fixture."
+        emptyDetail="Metrik akan muncul setelah survei dibuat dan menerima jawaban."
         permissionDetail="Akses ringkasan memerlukan peran super admin."
       >
         <div className="flex flex-col gap-5">
@@ -60,7 +62,7 @@ export function AdminSummaryPage() {
           </div>
 
           <Banner tone="info" title="Tanpa akses jawaban individual">
-            Peran super admin tidak otomatis memberi akses ke jawaban individual. Izin baca individual, ekspor, dan teks bebas diperiksa terpisah.
+            Administrator memantau operasional. Akses ke jawaban individual, ekspor, dan teks bebas diberikan terpisah.
             <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
           </Banner>
 
@@ -98,17 +100,20 @@ export function AdminSummaryPage() {
 
 export function AdminAccountsPage() {
   const { state } = useScreenState('admin-accounts');
+  const notify = useToast();
+  const { grants: storedGrants, revision } = useStore();
+  void revision;
   const [grants, setGrants] = useState(() =>
     Object.fromEntries(accessGrants.map((g) => [g.id, {
-      read: g.can_read_individual,
-      export: g.can_export,
-      text: g.can_read_free_text,
+      read: storedGrants[g.id]?.read ?? g.can_read_individual,
+      export: storedGrants[g.id]?.export ?? g.can_export,
+      text: storedGrants[g.id]?.text ?? g.can_read_free_text,
     }])),
   );
   const [saved, setSaved] = useState(false);
 
   return (
-    <Shell kind="admin" routeId="admin-accounts" title="Akun dan izin" subtitle="Izin baca individual, izin ekspor, dan izin teks bebas adalah tiga izin terpisah (PRD §3, §9.1).">
+    <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
       <StateView
         routeId="admin-accounts"
         state={state}
@@ -118,8 +123,8 @@ export function AdminAccountsPage() {
       >
         <div className="flex flex-col gap-5">
           <StateDebugHint routeId="admin-accounts" state={state} />
-          {state === 'success' && <SuccessBanner title="Izin diperbarui pada tampilan">Perubahan dicatat pada log audit tanpa memuat jawaban atau token.</SuccessBanner>}
-          {state === 'validation' && <ValidationSummary items={['Setiap izin harus ditetapkan secara eksplisit.', 'Cakupan survei wajib dipilih untuk petugas berizin.']} />}
+          {state === 'success' && <SuccessBanner title="Izin diperbarui">Perubahan dicatat pada log audit tanpa memuat jawaban atau token.</SuccessBanner>}
+          {state === 'validation' && <ValidationSummary items={['Setiap izin harus ditetapkan secara eksplisit.', 'Cakupan survei harus dipilih untuk petugas berizin.']} />}
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Daftar akun</SectionTitle>
@@ -171,16 +176,20 @@ export function AdminAccountsPage() {
               );
             })}
             <div className="flex flex-wrap gap-3">
-              <Button onClick={() => setSaved(true)} disabled={state === 'loading'} loading={state === 'loading'}>Simpan izin</Button>
+              <Button onClick={() => {
+                saveGrants(grants);
+                setSaved(true);
+                notify('Izin akun berhasil disimpan.');
+              }} disabled={state === 'loading'} loading={state === 'loading'}>Simpan izin</Button>
               <ActionLink to={ROUTES.adminAudit} variant="secondary">Lihat log perubahan izin</ActionLink>
             </div>
-            {saved && <Banner tone="success" title="Perubahan izin tersimpan pada tampilan">Tidak ada pemeriksaan izin server pada pratinjau.</Banner>}
+            {saved && <Banner tone="success" title="Izin tersimpan">Perubahan berlaku pada workspace ini.</Banner>}
           </Card>
 
           <Panel>
             <SectionTitle>Teks bebas</SectionTitle>
             <p className="mt-2 text-body-sm text-muted">
-              Teks bebas dapat memuat identitas yang ditulis responden. Batasi dan periksa sebelum dibagikan; hanya penerima berizin yang boleh membacanya (PRD §9.1, R6).
+              Teks bebas dapat memuat identitas yang ditulis responden. Batasi dan periksa sebelum dibagikan; hanya penerima berizin yang boleh membacanya.
             </p>
           </Panel>
         </div>
@@ -195,7 +204,7 @@ export function AdminAccountsPage() {
 export function AdminAuditPage() {
   const { state } = useScreenState('admin-audit');
   return (
-    <Shell kind="admin" routeId="admin-audit" title="Log audit" subtitle="Log memuat aktor, aksi, objek, hasil, dan waktu. Tidak ada token, kredensial, atau isi jawaban (PRD §6, §9.1).">
+    <Shell kind="admin" title="Log audit" subtitle="Catatan aktivitas memuat aktor, aksi, objek, hasil, dan waktu tanpa isi jawaban.">
       <StateView
         routeId="admin-audit"
         state={state}
@@ -205,8 +214,8 @@ export function AdminAuditPage() {
       >
         <div className="flex flex-col gap-5">
           <StateDebugHint routeId="admin-audit" state={state} />
-          <Banner tone="info" title="Minimisasi isi log">
-            Kolom di bawah sengaja dibatasi. Tidak ada kolom token, kredensial, atau jawaban.
+          <Banner tone="info" title="Catatan aktivitas">
+            Kolom dibatasi pada informasi operasional. Log tidak memuat token, kredensial, atau jawaban.
           </Banner>
           <Card className="flex flex-col gap-3">
             <SectionTitle>Entri operasional</SectionTitle>
@@ -250,22 +259,25 @@ export function AdminAuditPage() {
 
 export function AdminIntegrationPage() {
   const { state } = useScreenState('admin-integration');
+  const notify = useToast();
+  const { revision, integrationNote } = useStore();
+  void revision;
   const [replayed, setReplayed] = useState<string | null>(null);
   const down = state === 'error';
 
   return (
-    <Shell kind="admin" routeId="admin-integration" title="Status Modul 13 dan 15" subtitle="Seluruh status di sini simulasi. Satu demonstrasi harus tetap berjalan ketika kedua modul tidak tersedia (PRD §1, R1).">
+    <Shell kind="admin" title="Status Modul 13 dan 15" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
       <StateView
         routeId="admin-integration"
         state={state}
         permissionDetail="Status integrasi hanya untuk peran yang berwenang."
         conflictTo={ROUTES.adminAudit}
         errorTitle="Layanan Modul 13/15 terputus"
-        errorDetail="Alur mandiri tetap berjalan. Tidak ada kredensial atau endpoint nyata pada pratinjau."
+        errorDetail="Alur mandiri tetap berjalan meski layanan integrasi sedang terganggu."
       >
         <div className="flex flex-col gap-5">
           <StateDebugHint routeId="admin-integration" state={state} />
-          {state === 'success' && <SuccessBanner title="Event diulang dengan ID kejadian tetap">Retry event terpisah dari respons; tidak membuat respons kedua.</SuccessBanner>}
+          {state === 'success' && <SuccessBanner title="Event berhasil diulang">ID kejadian tetap dipakai dan tidak membuat respons kedua.</SuccessBanner>}
           {down && (
             <Banner tone="danger" title="Layanan terputus">
               Alur mandiri tetap berjalan tanpa Modul 13/15. Status pengiriman dapat diulang setelah layanan kembali.
@@ -276,7 +288,7 @@ export function AdminIntegrationPage() {
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <SectionTitle>Modul 13 · identitas</SectionTitle>
-                <Badge tone={down ? 'danger' : 'warning'}>{down ? 'Terputus' : 'Simulasi'}</Badge>
+                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Terhubung'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
                 Memberi identitas dan penugasan terverifikasi serta menerima status pengiriman. Endpoint dan autentikasi nyata masih perlu disepakati.
@@ -290,7 +302,7 @@ export function AdminIntegrationPage() {
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <SectionTitle>Modul 15 · konsumen data</SectionTitle>
-                <Badge tone={down ? 'danger' : 'warning'}>{down ? 'Terputus' : 'Simulasi'}</Badge>
+                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Terhubung'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
                 CSV adalah jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung rancangan; format final masih terbuka.
@@ -304,7 +316,7 @@ export function AdminIntegrationPage() {
           </div>
 
           <Card className="flex flex-col gap-3">
-            <SectionTitle>Event (simulasi)</SectionTitle>
+            <SectionTitle>Event terkirim</SectionTitle>
             <Table head={['ID kejadian', 'Tipe', 'Tujuan', 'Status', 'Percobaan', 'Aksi']}>
               {integrationEvents.map((e) => (
                 <tr key={e.id}>
@@ -320,7 +332,11 @@ export function AdminIntegrationPage() {
                   <Td>
                     <button
                       type="button"
-                      onClick={() => setReplayed(e.id)}
+                      onClick={() => {
+                        replayEvent(e.id);
+                        setReplayed(e.id);
+                        notify(`Event ${e.event_id} diulang dengan ID yang sama.`);
+                      }}
                       disabled={state === 'loading'}
                       className="min-h-[32px] rounded-sm border border-n200 bg-n0 px-2 text-caption font-bold text-action hover:bg-action-soft disabled:text-n400"
                     >
@@ -331,7 +347,7 @@ export function AdminIntegrationPage() {
               ))}
             </Table>
             <p className="text-caption text-muted">
-              Event selesai hanya untuk respons tersimpan. ID kejadian tetap dipakai saat retry; hasil simulasi dipisahkan dari integrasi nyata.
+              Event selesai hanya untuk respons tersimpan. ID kejadian tetap dipakai saat percobaan ulang.
             </p>
           </Card>
 
@@ -350,9 +366,9 @@ export function AdminIntegrationPage() {
           <Panel>
             <Label>Kontak kontrak</Label>
             <div className="mt-2">
-              <TextInput aria-label="Catatan kontrak" placeholder="Format skema final menunggu kesepakatan tim" readOnly />
+              <TextInput aria-label="Catatan kontrak" placeholder="Catatan untuk tim integrasi" value={integrationNote} onChange={(e) => setIntegrationNote(e.target.value)} />
             </div>
-            <p className="mt-2 text-caption text-muted">Nilai ini contoh tampilan, bukan kredensial atau endpoint nyata.</p>
+            <p className="mt-2 text-caption text-muted">Catatan tersimpan di peramban ini untuk referensi tim.</p>
           </Panel>
         </div>
       </StateView>

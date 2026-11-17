@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
 import { Shell } from '../components/Shell';
 import {
@@ -26,7 +27,10 @@ import { StateView, StateDebugHint, SuccessBanner, ValidationSummary } from '../
 import { DevStateSwitcher, useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, questionsFor, optionsFor, surveys, versionsFor } from '../lib/fixtures/surveys';
+import { formatWIB } from '../lib/summary';
 import { profileForSurvey } from '../lib/fixtures/profiles';
+import { useToast } from '../components/Toast';
+import { createSurvey, publishVersion, saveDraft, useStore } from '../lib/store';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -72,6 +76,10 @@ export function SurveyNav({ id }: { id: string }) {
 
 export function CreatorListPage() {
   const { state, link } = useScreenState('creator-list');
+  const navigate = useNavigate();
+  const notify = useToast();
+  const { revision } = useStore();
+  void revision;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'semua' | 'draft' | 'published' | 'closed' | 'archived'>('semua');
   const visible = surveys.filter((s) => s.status !== 'draft' || s.id === 's_demo3');
@@ -83,19 +91,19 @@ export function CreatorListPage() {
   });
 
   return (
-    <Shell kind="creator" routeId="creator-list" title="Daftar survei" subtitle="Hanya survei milik sendiri yang tampil. Pemeriksaan kepemilikan nyata berada pada server (AC03).">
+    <Shell kind="creator" title="Daftar survei" subtitle="Kelola seluruh instrumen Anda, dari draf hingga versi yang diterbitkan.">
       <StateView
         routeId="creator-list"
         state={state}
         emptyTitle="Belum memiliki survei"
-        emptyDetail="Buat draf pertama atau salin survei contoh. Pratinjau ini belum menyimpan perubahan ke mana pun."
+        emptyDetail="Buat draf pertama untuk mulai menyusun pertanyaan dan skala."
         emptyAction={<ActionLink to={ROUTES.creatorEdit('s_demo1')}>Buka editor draf</ActionLink>}
         permissionDetail="Daftar survei milik creator lain tidak dapat dibaca."
       >
         <div className="flex flex-col gap-5">
           <StateDebugHint routeId="creator-list" state={state} />
           {state === 'success' && (
-            <SuccessBanner title="Draf tersimpan secara lokal">
+            <SuccessBanner title="Draf tersimpan">
               <ActionLink to={ROUTES.creatorEdit('s_demo1')} variant="secondary">Buka editor</ActionLink>
             </SuccessBanner>
           )}
@@ -103,7 +111,7 @@ export function CreatorListPage() {
 
           <Card className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="min-w-0 flex-1">
-              <Field id="cari-survei" label="Cari survei" hint="Pencarian hanya memfilter fixture lokal.">
+              <Field id="cari-survei" label="Cari survei" hint="Cari berdasarkan judul survei.">
                 {(aria) => (
                   <TextInput
                     {...aria}
@@ -130,7 +138,11 @@ export function CreatorListPage() {
                 <option value="archived">Arsip</option>
               </select>
             </div>
-            <ActionLink to={ROUTES.creatorEdit('s_demo1')}>Buat draf baru</ActionLink>
+            <Button onClick={() => {
+              const newId = createSurvey();
+              notify('Draf baru dibuat.');
+              navigate(link(ROUTES.creatorEdit(newId)));
+            }}>Buat draf baru</Button>
           </Card>
 
           {rows.length === 0 && query !== '' ? (
@@ -154,7 +166,7 @@ export function CreatorListPage() {
                     <tr key={s.id}>
                       <Th>
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{s.id}</Code></span>
+                        <span className="mt-1 block text-caption text-muted">{vs.length} versi · diperbarui {s.updated_at.slice(0, 10)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>
@@ -173,7 +185,7 @@ export function CreatorListPage() {
           )}
 
           <div className="flex flex-wrap gap-3">
-            <ActionLink to={ROUTES.creatorShare('s_demo1')} variant="secondary">Bagikan survei contoh</ActionLink>
+            <ActionLink to={ROUTES.creatorShare('s_demo1')} variant="secondary">Bagikan survei</ActionLink>
             <ActionLink to={ROUTES.creatorHistory('s_demo1')} variant="secondary">Lihat riwayat versi</ActionLink>
           </div>
         </div>
@@ -187,16 +199,19 @@ export function CreatorListPage() {
 
 export function EditorPage() {
   const id = useSurveyId();
+  const notify = useToast();
+  const { drafts, revision } = useStore();
+  void revision;
   const survey = findSurvey(id)!;
   const { state } = useScreenState('creator-edit');
   const versions = versionsFor(id);
   const activeVersion = versions.find((v) => v.id === survey.current_version_id) ?? versions[0];
   const items = activeVersion ? questionsFor(activeVersion.id) : [];
-  const [title, setTitle] = useState(survey.title);
+  const [title, setTitle] = useState(drafts[id]?.title ?? survey.title);
   const [codes, setCodes] = useState<Record<string, string>>(() =>
-    Object.fromEntries(items.map((q) => [q.id, q.code])),
+    Object.fromEntries(items.map((q) => [q.id, drafts[id]?.codes[q.id] ?? q.code])),
   );
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
 
   const duplicate = Object.values(codes).filter((c, i, arr) => arr.indexOf(c) !== i);
   const missingLabel = items.filter((q) => q.label.trim() === '');
@@ -206,11 +221,11 @@ export function EditorPage() {
     ...(missingLabel.length > 0 ? [`Item tanpa label: ${missingLabel.map((q) => q.code).join(', ')}.`] : []),
   ];
   if (state === 'validation') {
-    issues.push('Draf belum lengkap: kode duplikat dan item tanpa label ditemukan pada contoh.');
+    issues.push('Draf belum lengkap: periksa kembali kode dan label item.');
   }
 
   return (
-    <Shell kind="creator" routeId="creator-edit" title="Editor instrumen" subtitle="Draf boleh disimpan meski belum lengkap. Publikasi memvalidasi konfigurasi item (F-04).">
+    <Shell kind="creator" title="Editor instrumen" subtitle="Susun judul, petunjuk, kode item, dan urutan. Draf tersimpan di peramban ini.">
       <StateView
         routeId="creator-edit"
         state={state}
@@ -223,11 +238,11 @@ export function EditorPage() {
           <StateDebugHint routeId="creator-edit" state={state} />
           <SurveyNav id={id} />
 
-          {state === 'success' && <SuccessBanner title="Draf disimpan">Nilai isian tetap tersedia selama halaman terbuka.</SuccessBanner>}
+          {state === 'success' && <SuccessBanner title="Draf disimpan">Perubahan tersimpan dan tetap tersedia saat Anda kembali.</SuccessBanner>}
           {(issues.length > 0) && (
             <ValidationSummary items={issues} />
           )}
-          {saved && <Banner tone="success" title="Perubahan tersimpan pada tampilan">Tidak ada backend; perubahan tidak dikirim ke server.</Banner>}
+          {saved && <Banner tone="success" title="Draf tersimpan">Disimpan pukul {formatWIB(saved)}.</Banner>}
 
           <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
             <div className="flex min-w-0 flex-col gap-5">
@@ -310,12 +325,16 @@ export function EditorPage() {
               <Panel className="h-fit">
                 <SectionTitle>Tindakan</SectionTitle>
                 <div className="mt-3 flex flex-col gap-2">
-                  <Button variant="secondary" block onClick={() => setSaved(true)}>Simpan draf</Button>
+                  <Button variant="secondary" block onClick={() => {
+                    const at = saveDraft(id, title, codes);
+                    setSaved(at);
+                    notify('Draf berhasil disimpan.');
+                  }}>Simpan draf</Button>
                   <ActionLink to={ROUTES.creatorPreview(id)} variant="secondary" block>Lihat pratinjau</ActionLink>
                   <ActionLink to={ROUTES.creatorPublish(id)} block>Lanjut ke publikasi</ActionLink>
                 </div>
                 <p className="mt-3 text-caption text-muted">
-                  Menyalin survei tidak membawa respons, undangan, izin khusus, atau bukti persetujuan (PRD §5.2).
+                  Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
                 </p>
               </Panel>
             </div>
@@ -337,7 +356,7 @@ export function PreviewPage() {
   const items = version ? questionsFor(version.id) : [];
 
   return (
-    <Shell kind="creator" routeId="creator-preview" title="Pratinjau tampilan responden" subtitle="Pratinjau terpisah dari data produksi.">
+    <Shell kind="creator" title="Pratinjau tampilan responden" subtitle="Pratinjau terpisah dari data produksi.">
       <StateView
         routeId="creator-preview"
         state={state}
@@ -348,11 +367,11 @@ export function PreviewPage() {
         <div className="flex flex-col gap-5">
           <StateDebugHint routeId="creator-preview" state={state} />
           <SurveyNav id={id} />
-          <Banner tone="warning" title="Data pratinjau tidak disimpan">
-            Jawaban pada layar ini tidak menambah respons, tidak masuk statistik, dan tidak pernah masuk ekspor (F-08, AC02).
+          <Banner tone="info" title="Mode pratinjau">
+            Jawaban di sini hanya untuk memeriksa tampilan. Tidak ada yang tercatat sebagai respons.
           </Banner>
           {state === 'validation' && <ValidationSummary items={['Pada simulasi ini satu item wajib belum berlabel.', 'Periksa nilai opsi sebelum publikasi.']} />}
-          {state === 'success' && <SuccessBanner title="Pratinjau selesai">Lanjutkan ke publikasi untuk membuat versi tetap.</SuccessBanner>}
+          {state === 'success' && <SuccessBanner title="Pratinjau selesai">Lanjutkan ke publikasi untuk menerbitkan versi.</SuccessBanner>}
 
           <Card className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -387,7 +406,7 @@ export function PreviewPage() {
 
           <div className="flex flex-wrap gap-3">
             <ActionLink to={ROUTES.creatorPublish(id)}>Lanjut ke publikasi</ActionLink>
-            <ActionLink to={link(ROUTES.creatorResults(id))} variant="secondary">Lihat hasil (tetap kosong dari pratinjau)</ActionLink>
+            <ActionLink to={link(ROUTES.creatorResults(id))} variant="secondary">Lihat hasil</ActionLink>
           </div>
         </div>
       </StateView>
@@ -400,14 +419,18 @@ export function PreviewPage() {
 
 export function PublishPage() {
   const id = useSurveyId();
+  const notify = useToast();
+  const { revision, session } = useStore();
+  void revision;
   const survey = findSurvey(id)!;
   const { state, link } = useScreenState('creator-publish');
   const [confirm, setConfirm] = useState(false);
+  const [publishedToken, setPublishedToken] = useState<string | null>(null);
   const items = questionsFor(survey.current_version_id ?? '');
   const blocking = state === 'validation' || state === 'closed' || state === 'permission-denied' || state === 'error' || state === 'loading';
 
   return (
-    <Shell kind="creator" routeId="creator-publish" title="Publikasi versi" subtitle="Publikasi membekukan konfigurasi menjadi versi tetap dan membuat tautan (PRD §5.2).">
+    <Shell kind="creator" title="Publikasi versi" subtitle="Terbitkan versi tetap dan bagikan tautan kepada responden.">
       <StateView
         routeId="creator-publish"
         state={state}
@@ -418,9 +441,9 @@ export function PublishPage() {
           <SurveyNav id={id} />
 
           {state === 'success' && (
-            <SuccessBanner title="Versi diterbitkan (simulasi)">
-              Tautan umum: <PlainLink to={ROUTES.respondentIntro('link-umum-demo')}>/s/link-umum-demo</PlainLink>.
-              <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Kelola pembagian</ActionLink></div>
+            <SuccessBanner title="Versi diterbitkan">
+              Tautan responden siap dibagikan.
+              <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Kelola tautan</ActionLink></div>
             </SuccessBanner>
           )}
           {state === 'validation' && (
@@ -438,7 +461,7 @@ export function PublishPage() {
               <tr><Th>Jumlah item</Th><Td>{items.length} item</Td></tr>
               <tr><Th>Kode unik per versi</Th><Td>{state === 'validation' ? <Badge tone="danger">Duplikat</Badge> : <Badge tone="success">Unik</Badge>}</Td></tr>
               <tr><Th>Label tiap item</Th><Td>{state === 'validation' ? <Badge tone="danger">Ada yang kosong</Badge> : <Badge tone="success">Lengkap</Badge>}</Td></tr>
-              <tr><Th>Versi pemberitahuan</Th><Td><Code>notice-sintetis-1.0</Code></Td></tr>
+              <tr><Th>Versi pemberitahuan</Th><Td><Code>1.0</Code></Td></tr>
             </Table>
             {state === 'closed' && <Banner tone="warning" title="Versi ini ditutup">Publikasi baru memerlukan draf versi berikutnya.</Banner>}
           </Card>
@@ -451,17 +474,28 @@ export function PublishPage() {
               onChange={setConfirm}
             />
             <div className="flex flex-wrap gap-3">
-              <Button disabled={!confirm || blocking} loading={state === 'loading'}>
+              <Button disabled={!confirm || blocking} loading={state === 'loading'} onClick={() => {
+                const token = publishVersion(id);
+                if (!token) { notify('Tidak ada draf yang dapat diterbitkan.', 'danger'); return; }
+                setPublishedToken(token);
+                notify('Versi diterbitkan dan tautan dibuat.');
+              }}>
                 Terbitkan versi
               </Button>
               <ActionLink to={ROUTES.creatorEdit(id)} variant="secondary">Kembali ke editor</ActionLink>
-              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={state !== 'success'}>
+              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!publishedToken}>
                 Kelola tautan
               </ActionLink>
             </div>
             <p className="text-caption text-muted">
-              Tombol utama nonaktif sampai konfirmasi dicentang. Tidak ada versi yang benar-benar dibuat pada pratinjau statis.
+              {session ? `Diterbitkan oleh ${session.name}. ` : ''}Perubahan isi setelah terbit memerlukan versi baru.
             </p>
+            {publishedToken && (
+              <Banner tone="success" title="Tautan responden">
+                <PlainLink to={ROUTES.respondentIntro(publishedToken)}>/s/{publishedToken}</PlainLink>
+                <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Buka halaman pembagian</ActionLink></div>
+              </Banner>
+            )}
           </Card>
         </div>
       </StateView>

@@ -91,7 +91,7 @@ export function StateView({
     case 'empty':
       return (
         <EmptyState title={emptyTitle} action={emptyAction}>
-          {emptyDetail ?? 'Belum ada entri pada tampilan ini. Gunakan tautan yang tersedia untuk memulai.'}
+          {emptyDetail ?? 'Belum ada entri. Gunakan tautan yang tersedia untuk memulai.'}
         </EmptyState>
       );
 
@@ -143,20 +143,7 @@ export function ValidationSummary({ items }: { items: string[] }) {
   );
 }
 
-export function StateDebugHint({ routeId, state }: { routeId: RouteId; state: StateCode }) {
-  const { setState } = useScreenState(routeId);
-  if (state === 'default') return null;
-  return (
-    <p className="mb-4 flex flex-wrap items-center gap-2 font-mono text-caption text-muted">
-      State aktif: <span className="font-bold text-n700">{state}</span>
-
-      <button
-        type="button"
-        onClick={() => setState('default')}
-        className="min-h-[32px] rounded-sm border border-n200 px-2 text-caption font-bold text-n600 hover:bg-n100"
-      >
-        Atur default
-      </button>
-    </p>
-  );
+/** Hint state tidak ditampilkan pada permukaan produk; ?state= tetap bekerja. */
+export function StateDebugHint(_props: { routeId: RouteId; state: StateCode }): null {
+  return null;
 }
