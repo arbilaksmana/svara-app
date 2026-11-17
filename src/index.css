@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* Semua token di bawah bersumber dari DESIGN.md §Quick Start.
+   Tidak ada warna, font, radius, atau shadow baru di luar dokumen itu. */
+@theme {
+  /* Neutrals */
+  --color-n0: #ffffff;
+  --color-n50: #fbfcff;
+  --color-n100: #f4f7fe;
+  --color-n200: #d8dce8;
+  --color-n400: #aeb2be;
+  --color-n600: #71747d;
+  --color-n700: #4d4f56;
+  --color-n800: #303135;
+  --color-dark: #171918;
+
+  /* Brand & status */
+  --color-action: #0064d2;
+  --color-action-hover: #0534c1;
+  --color-action-soft: #e7f2ff;
+  --color-action-subtle: #a3cfff;
+  --color-action-light: #5baaff;
+  --color-danger-text: #c4382f;
+  --color-danger-fill: #f15c59;
+  --color-danger-soft: #ffdfdf;
+  --color-success-text: #0a7a3b;
+  --color-success-fill: #0bae54;
+  --color-success-soft: #e2fbed;
+  --color-warning-soft: #fef8d0;
+  --color-analytic-text: #8a4f00;
+  --color-analytic-icon: #a85c00;
+  --color-usp-text: #0b7a6b;
+
+  /* Alias pendek dari DESIGN.md §Tailwind v4 */
+  --color-canvas: #ffffff;
+  --color-ink: #303135;
+  --color-muted: #71747d;
+  --color-border: #d8dce8;
+  --color-danger: #c4382f;
+  --color-success: #0a7a3b;
+
+  /* Tipografi */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-display: 3.5rem;
+  --text-display--line-height: 1.11;
+  --text-h1: 2.375rem;
+  --text-h1--line-height: 1.16;
+  --text-h2: 1.75rem;
+  --text-h2--line-height: 1.21;
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.33;
+  --text-body: 1rem;
+  --text-body--line-height: 1.38;
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.43;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.33;
+  --text-annotation: 0.625rem;
+  --text-annotation--line-height: 1.4;
+
+  --tracking-heading: -0.01em;
+  --tracking-body: 0;
+  --tracking-mono: 0.03em;
+
+  /* Spacing: --spacing adalah pengali internal Tailwind.
+     p-1=4, p-2=8, p-3=12, p-4=16, p-6=24, p-8=32, p-12=48,
+     p-16=64, p-24=96, p-32=128 = skala --space-0..9 DESIGN.md. */
+  --spacing: 4px;
+
+  /* Radius */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* Elevation */
+  --shadow-raised: 0 2px 8px 0 rgba(48, 49, 53, 0.16);
+  --shadow-overlay: 0 4px 12px 0 rgba(48, 49, 53, 0.2);
+}
+
+/* Token skala penuh dari DESIGN.md §Quick Start yang tidak menjadi utility Tailwind. */
+:root {
+  --space-0: 4px;
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --space-7: 64px;
+  --space-8: 96px;
+  --space-9: 128px;
+
+  --shadow-0: none;
+  --shadow-1: 0 2px 8px 0 rgba(48, 49, 53, 0.16);
+  --shadow-2: 0 4px 12px 0 rgba(48, 49, 53, 0.2);
+
+  --text-high: var(--color-n800);
+  --text-low: var(--color-n600);
+  --text-disabled: var(--color-n400);
+  --text-activity: var(--color-action);
+  --text-alert: var(--color-danger-text);
+  --text-positive: var(--color-success-text);
+  --text-analytic: var(--color-analytic-text);
+  --text-usp: var(--color-usp-text);
+  --text-invert: var(--color-n0);
+  --icon-high: var(--color-n700);
+  --icon-low: var(--color-n400);
+  --icon-activity: var(--color-action);
+  --icon-alert: var(--color-danger-fill);
+  --icon-positive: var(--color-success-fill);
+
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --banner-delay: 4s;
+
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  color-scheme: light;
+}
+
+button:not(:disabled), label[for] { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+
+html {
+  font-family: var(--font-sans);
+  scroll-padding-block-start: 84px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  font-feature-settings: "kern" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  letter-spacing: var(--tracking-heading);
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-action);
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: var(--color-action-soft);
+  color: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

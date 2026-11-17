@@ -1,0 +1,88 @@
+import type { Question, QuestionOption, Response } from './types';
+import { optionsFor } from './fixtures/surveys';
+
+export interface OptionFrequency {
+  option: QuestionOption;
+  count: number;
+}
+
+export interface QuestionSummary {
+  question: Question;
+  total: number;
+  answered: number;
+  skipped: number;
+  frequencies: OptionFrequency[];
+  freeTextCount: number;
+}
+
+export interface VersionSummary {
+  versionId: string;
+  totalResponses: number;
+  questions: QuestionSummary[];
+}
+
+/** Menghitung agregat dari respons final, bukan angka hardcode (PRD §7). */
+export function computeSummary(
+  versionId: string,
+  questions: Question[],
+  responses: Response[],
+): VersionSummary {
+  const finalResponses = responses.filter((r) => r.version_id === versionId);
+  const total = finalResponses.length;
+
+  const questionSummaries: QuestionSummary[] = questions.map((q) => {
+    if (q.type === 'short_text') {
+      const values = finalResponses.map((r) => r.answers.find((a) => a.question_code === q.code));
+      const freeTextCount = values.filter((a) => a && a.text !== null && a.text !== '').length;
+      const answered = values.filter((a) => a && !a.skipped && a.text !== null && a.text !== '').length;
+      return {
+        question: q,
+        total,
+        answered,
+        skipped: total - answered,
+        frequencies: [],
+        freeTextCount,
+      };
+    }
+
+    const qOptions = optionsFor(q.id);
+    const values = finalResponses.map((r) => r.answers.find((a) => a.question_code === q.code));
+    const answered = values.filter((a) => a && !a.skipped && a.value !== null).length;
+    const frequencies: OptionFrequency[] = qOptions.map((option) => ({
+      option,
+      count: values.filter((a) => a && !a.skipped && a.value === option.value).length,
+    }));
+
+    return {
+      question: q,
+      total,
+      answered,
+      skipped: total - answered,
+      frequencies,
+      freeTextCount: 0,
+    };
+  });
+
+  return { versionId, totalResponses: total, questions: questionSummaries };
+}
+
+/** Persentase memakai jumlah yang menjawab item; penyebut nol tidak dibagi. */
+export function percentage(count: number, answered: number): string {
+  if (answered === 0) return 'Belum ada jawaban';
+  return `${Math.round((count / answered) * 100)}%`;
+}
+
+const WIB = new Intl.DateTimeFormat('id-ID', {
+  dateStyle: 'long',
+  timeStyle: 'short',
+  timeZone: 'Asia/Jakarta',
+});
+
+/** Waktu server UTC ditampilkan WIB (PRD §5.1). */
+export function formatWIB(iso: string): string {
+  return `${WIB.format(new Date(iso))} WIB`;
+}
+
+export function formatDate(iso: string): string {
+  return new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'Asia/Jakarta' }).format(new Date(iso));
+}
