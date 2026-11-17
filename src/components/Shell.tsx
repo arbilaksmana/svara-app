@@ -41,10 +41,10 @@ const PRESS = 'transition-[transform,background-color,color] duration-150 ease-o
 const PRESS_LINK = `${PRESS} motion-safe:active:scale-[0.96]`;
 const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
 
-function Wordmark() {
+function Wordmark({ to }: { to: string }) {
   return (
     <Link
-      to={ROUTES.home}
+      to={to}
       className={`inline-flex min-h-[40px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       Svara
@@ -66,7 +66,7 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   );
 }
 
-function PillNavbar({ nav, activePath, guestOnly = false }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean }) {
+function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; homeTo: string }) {
   const navigate = useNavigate();
   const notify = useToast();
   const { session } = useStore();
@@ -105,7 +105,7 @@ function PillNavbar({ nav, activePath, guestOnly = false }: { nav: NavEntry[]; a
             </span>
           ))}
           <div className="flex min-w-0 items-center gap-5">
-            <Wordmark />
+            <Wordmark to={homeTo} />
 
           {/* Desktop: deretan tautan seperti referensi. */}
             <nav aria-label="Navigasi utama" className="hidden sm:block">
@@ -209,6 +209,11 @@ export function Shell({
   const inWorkspace = kind === 'creator' || kind === 'admin';
   // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
   const activeSession = guestOnly ? null : session;
+  const homeTo = activeSession
+    ? activeSession.role === 'admin'
+      ? ROUTES.admin
+      : ROUTES.creator
+    : ROUTES.home;
   const topNav = activeSession ? (activeSession.role === 'admin' ? NAV.admin : NAV.creator) : GUEST_NAV;
   const activePath =
     kind === 'respondent'
@@ -226,7 +231,7 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly} />}
+      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly} homeTo={homeTo} />}
 
       {chromeless ? (
         <main id="konten-utama" tabIndex={-1} className="flex flex-1 flex-col">
