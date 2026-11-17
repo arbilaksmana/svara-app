@@ -96,7 +96,6 @@ export function HomePage() {
               </ActionLink>
               <ActionLink to={ROUTES.admin} variant="secondary">Panel administrasi</ActionLink>
             </div>
-            <PolicyLinks className="mt-1" />
           </Card>
         </div>
       </StateView>

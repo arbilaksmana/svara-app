@@ -1,12 +1,15 @@
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PlainLink, PolicyLinks, Badge } from './ui';
+import { PlainLink, PolicyLinks } from './ui';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
 import { signOut, useStore } from '../lib/store';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
-const NAV: Record<ShellKind, { to: string; label: string }[]> = {
+type NavEntry = { to: string; label: string };
+
+const NAV: Record<ShellKind, NavEntry[]> = {
   public: [
     { to: ROUTES.home, label: 'Beranda' },
     { to: ROUTES.creator, label: 'Survei saya' },
@@ -32,28 +35,154 @@ const NAV: Record<ShellKind, { to: string; label: string }[]> = {
     { to: ROUTES.terms, label: 'Ketentuan' },
   ],
 };
+
+/* Sama dengan referensi: sudut atas rata menempel tepi, sudut bawah membulat. */
+const OUTER = 'rounded-b-[18px] corner-squircle';
+const INNER = 'rounded-[10px] corner-squircle';
+const PRESS = 'transition-[transform,background-color,color] duration-150 ease-out';
+const PRESS_LINK = `${PRESS} motion-safe:active:scale-[0.96]`;
+const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
+
 function Wordmark() {
   return (
-    <Link to={ROUTES.home} className="inline-flex min-h-[40px] items-center text-body font-bold text-ink no-underline">
+    <Link
+      to={ROUTES.home}
+      className={`inline-flex min-h-[40px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
+    >
       Svara
     </Link>
   );
 }
 
-/** Tautan navbar tanpa garis bawah; status aktif ditandai warna dan latar saja. */
-function NavItem({ to, label, active }: { to: string; label: string; active: boolean }) {
+function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   return (
-    <li>
-      <Link
-        to={to}
-        aria-current={active ? 'page' : undefined}
-        className={`inline-flex min-h-[44px] items-center rounded-sm px-2 text-body-sm font-bold no-underline transition-colors duration-fast lg:px-3 ${
-          active ? 'bg-action-soft text-action' : 'text-n600 hover:bg-n100'
-        }`}
-      >
-        {label}
-      </Link>
-    </li>
+    <Link
+      to={to}
+      aria-current={active ? 'page' : undefined}
+      className={`inline-flex min-h-[40px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
+        active ? 'text-n0' : 'text-n400 hover:text-n0'
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function PillNavbar({ nav, activePath }: { nav: NavEntry[]; activePath: string }) {
+  const navigate = useNavigate();
+  const notify = useToast();
+  const { session } = useStore();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  return (
+    <header className="sticky top-0 z-nav">
+      <div className="relative mx-auto w-fit max-w-[calc(100%-2rem)]">
+        <div className={`relative flex items-center gap-1.5 bg-dark p-2 sm:gap-2 ${OUTER}`}>
+          {/* Fillet cekung, path diambil dari SVG nav referensi (20x20 per sudut). */}
+          {([-1, 1] as const).map((side) => (
+            <span
+              key={side}
+              aria-hidden="true"
+              className={`pointer-events-none absolute top-0 size-[20px] ${side === -1 ? '-start-[20px]' : '-end-[20px]'}`}
+            >
+              <svg viewBox="0 0 20 20" className={`size-full ${side === -1 ? '-scale-x-100' : ''}`} fill="var(--color-dark)">
+                <path d="M 0 0 L 20 0 C 8.954 0 0 8.954 0 20 Z" />
+              </svg>
+            </span>
+          ))}
+          <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
+            <Wordmark />
+
+          {/* Desktop: deretan tautan seperti referensi. */}
+            <nav aria-label="Navigasi utama" className="hidden sm:block ms-2">
+              <ul className="flex items-center gap-1">
+                {nav.map((item) => (
+                  <li key={item.to}>
+                    <NavItem {...item} active={activePath === item.to} />
+                  </li>
+                ))}
+              </ul>
+            </nav>
+
+            {/* Mobile: satu pemicu menu, jadi tidak ada tautan yang terpotong. */}
+            <button
+              type="button"
+              aria-expanded={menuOpen}
+              aria-controls="pill-menu"
+              onClick={() => setMenuOpen((v) => !v)}
+              className={`inline-flex min-h-[40px] items-center rounded-full px-2.5 text-body-sm font-normal text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
+            >
+              Menu
+            </button>
+          </div>
+
+          {session ? (
+            <div className="flex shrink-0 items-center gap-1">
+              <span className="hidden max-w-[12ch] truncate px-1 text-caption font-normal text-n400 lg:inline">
+                {session.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  signOut();
+                  notify('Anda telah keluar.');
+                  navigate(ROUTES.home);
+                }}
+                className={`inline-flex min-h-[40px] shrink-0 items-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
+              >
+                Keluar
+              </button>
+            </div>
+          ) : (
+            <Link
+              to={ROUTES.login}
+              className={`inline-flex min-h-[40px] shrink-0 items-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
+            >
+              Masuk
+            </Link>
+          )}
+        </div>
+
+        {menuOpen && (
+          <nav
+            id="pill-menu"
+            aria-label="Navigasi seluler"
+            className={`absolute inset-x-0 top-full mt-2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
+          >
+            <ul className="flex flex-col gap-1">
+              {nav.map((item) => (
+                <li key={item.to}>
+                  <Link
+                    to={item.to}
+                    onClick={() => setMenuOpen(false)}
+                    aria-current={activePath === item.to ? 'page' : undefined}
+                    className={`flex min-h-[44px] items-center px-3 text-body-sm font-normal no-underline ${INNER} transition-colors duration-150 ease-out ${
+                      activePath === item.to ? 'bg-action-soft text-action' : 'text-ink hover:bg-n100'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+      </div>
+    </header>
   );
 }
 
@@ -69,12 +198,9 @@ export function Shell({
   subtitle?: string;
 }) {
   const location = useLocation();
-  const navigate = useNavigate();
-  const notify = useToast();
   const { session } = useStore();
   const nav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
-  const showAccount = inWorkspace && session !== null;
   const activePath = kind === 'respondent' ? ROUTES.home : location.pathname;
 
   return (
@@ -86,40 +212,7 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      <header className="sticky top-0 z-nav border-b border-n200 bg-n0/95 backdrop-blur-sm">
-        <div className="mx-auto flex min-h-[64px] max-w-[1200px] flex-wrap items-center justify-between gap-2 px-4 py-2 lg:px-6">
-          <Wordmark />
-
-          {/* Slot tengah selalu ada dan berupa elemen yang sama di semua halaman. */}
-          <div className="order-2 flex min-h-[40px] items-center gap-3 sm:order-none">
-            {showAccount && session ? (
-              <>
-                <span className="hidden text-body-sm text-muted sm:inline">{session.name}</span>
-                <Badge tone="neutral">{session.role === 'admin' ? 'Administrator' : 'Pengelola'}</Badge>
-                <button
-                  type="button"
-                  onClick={() => {
-                    signOut();
-                    notify('Anda telah keluar.');
-                    navigate(ROUTES.home);
-                  }}
-                  className="min-h-[40px] rounded-sm border border-n200 px-3 text-body-sm font-bold text-n600 hover:bg-n100"
-                >
-                  Keluar
-                </button>
-              </>
-            ) : null}
-          </div>
-
-          <nav aria-label="Navigasi utama" className="order-3 w-full overflow-x-auto lg:order-none lg:w-auto lg:overflow-visible">
-            <ul className="flex min-w-max items-center gap-1 lg:gap-2">
-              {nav.map((item) => (
-                <NavItem key={item.to} to={item.to} label={item.label} active={activePath === item.to} />
-              ))}
-            </ul>
-          </nav>
-        </div>
-      </header>
+      <PillNavbar nav={nav} activePath={activePath} />
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:px-6 lg:py-8">
         {inWorkspace && (
