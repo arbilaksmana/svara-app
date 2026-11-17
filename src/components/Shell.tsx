@@ -1,18 +1,17 @@
 import type { ReactNode } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PlainLink, PolicyLinks, Badge } from './ui';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
 import { signOut, useStore } from '../lib/store';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
-
 const NAV: Record<ShellKind, { to: string; label: string }[]> = {
   public: [
     { to: ROUTES.home, label: 'Beranda' },
     { to: ROUTES.creator, label: 'Survei saya' },
-    { to: ROUTES.login, label: 'Masuk' },
     { to: ROUTES.privacy, label: 'Privasi' },
+    { to: ROUTES.terms, label: 'Ketentuan' },
   ],
   creator: [
     { to: ROUTES.creator, label: 'Daftar survei' },
@@ -28,19 +27,33 @@ const NAV: Record<ShellKind, { to: string; label: string }[]> = {
   ],
   respondent: [
     { to: ROUTES.home, label: 'Beranda' },
+    { to: ROUTES.creator, label: 'Survei saya' },
     { to: ROUTES.privacy, label: 'Privasi' },
     { to: ROUTES.terms, label: 'Ketentuan' },
   ],
 };
-
 function Wordmark() {
   return (
-    <PlainLink to={ROUTES.home} className="flex items-center gap-2 no-underline">
-      <span aria-hidden="true" className="grid size-8 place-items-center rounded-sm bg-action font-mono text-caption font-bold text-n0">
-        14
-      </span>
-      <span className="text-body font-bold text-ink no-underline">Svara</span>
-    </PlainLink>
+    <Link to={ROUTES.home} className="inline-flex min-h-[40px] items-center text-body font-bold text-ink no-underline">
+      Svara
+    </Link>
+  );
+}
+
+/** Tautan navbar tanpa garis bawah; status aktif ditandai warna dan latar saja. */
+function NavItem({ to, label, active }: { to: string; label: string; active: boolean }) {
+  return (
+    <li>
+      <Link
+        to={to}
+        aria-current={active ? 'page' : undefined}
+        className={`inline-flex min-h-[44px] items-center rounded-sm px-2 text-body-sm font-bold no-underline transition-colors duration-fast lg:px-3 ${
+          active ? 'bg-action-soft text-action' : 'text-n600 hover:bg-n100'
+        }`}
+      >
+        {label}
+      </Link>
+    </li>
   );
 }
 
@@ -61,6 +74,8 @@ export function Shell({
   const { session } = useStore();
   const nav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
+  const showAccount = inWorkspace && session !== null;
+  const activePath = kind === 'respondent' ? ROUTES.home : location.pathname;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -74,43 +89,33 @@ export function Shell({
       <header className="sticky top-0 z-nav border-b border-n200 bg-n0/95 backdrop-blur-sm">
         <div className="mx-auto flex min-h-[64px] max-w-[1200px] flex-wrap items-center justify-between gap-2 px-4 py-2 lg:px-6">
           <Wordmark />
-          {inWorkspace && session ? (
-            <div className="order-2 flex items-center gap-3 sm:order-none">
-              <span className="hidden text-body-sm text-muted sm:inline">{session.name}</span>
-              <Badge tone="neutral">{session.role === 'admin' ? 'Administrator' : 'Pengelola'}</Badge>
-              <button
-                type="button"
-                onClick={() => {
-                  signOut();
-                  notify('Anda telah keluar.');
-                  navigate(ROUTES.home);
-                }}
-                className="min-h-[40px] rounded-sm border border-n200 px-3 text-body-sm font-bold text-n600 hover:bg-n100"
-              >
-                Keluar
-              </button>
-            </div>
-          ) : (
-            <span className="hidden text-caption text-muted sm:inline">Pembuat survei</span>
-          )}
+
+          {/* Slot tengah selalu ada dan berupa elemen yang sama di semua halaman. */}
+          <div className="order-2 flex min-h-[40px] items-center gap-3 sm:order-none">
+            {showAccount && session ? (
+              <>
+                <span className="hidden text-body-sm text-muted sm:inline">{session.name}</span>
+                <Badge tone="neutral">{session.role === 'admin' ? 'Administrator' : 'Pengelola'}</Badge>
+                <button
+                  type="button"
+                  onClick={() => {
+                    signOut();
+                    notify('Anda telah keluar.');
+                    navigate(ROUTES.home);
+                  }}
+                  className="min-h-[40px] rounded-sm border border-n200 px-3 text-body-sm font-bold text-n600 hover:bg-n100"
+                >
+                  Keluar
+                </button>
+              </>
+            ) : null}
+          </div>
 
           <nav aria-label="Navigasi utama" className="order-3 w-full overflow-x-auto lg:order-none lg:w-auto lg:overflow-visible">
             <ul className="flex min-w-max items-center gap-1 lg:gap-2">
-              {nav.map((item) => {
-                const active = location.pathname === item.to;
-                return (
-                  <li key={item.to}>
-                    <PlainLink
-                      to={item.to}
-                      className={`min-h-[44px] rounded-sm px-2 text-body-sm no-underline lg:px-3 ${
-                        active ? 'bg-action-soft font-bold text-action' : 'font-bold text-n600 hover:bg-n100'
-                      }`}
-                    >
-                      {item.label}
-                    </PlainLink>
-                  </li>
-                );
-              })}
+              {nav.map((item) => (
+                <NavItem key={item.to} to={item.to} label={item.label} active={activePath === item.to} />
+              ))}
             </ul>
           </nav>
         </div>
