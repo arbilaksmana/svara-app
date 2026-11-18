@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { BrandMark } from './Brand';
 import { PlainLink, PolicyLinks } from './ui';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
@@ -46,9 +47,10 @@ function Wordmark({ to }: { to: string }) {
   return (
     <Link
       href={to}
-      className={`inline-flex min-h-[44px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
+      className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
-      Svara
+      <BrandMark />
+      <span>Svara</span>
     </Link>
   );
 }

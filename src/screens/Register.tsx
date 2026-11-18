@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { BrandMark } from '../components/Brand';
 import { Shell } from '../components/Shell';
 import {
   Banner,
@@ -67,8 +68,9 @@ export function RegisterPage() {
           <div className="flex flex-1 flex-col justify-center px-5 pb-12 pt-6 sm:px-8 lg:px-14">
             <div className="mx-auto flex w-full max-w-[380px] flex-col gap-7">
               <div className="flex justify-center">
-                <Link href={ROUTES.home} className="inline-flex min-h-[44px] items-center text-h3 font-bold text-ink">
-                  Svara
+                <Link href={ROUTES.home} className="inline-flex min-h-[44px] items-center gap-2.5 text-h3 font-bold text-ink">
+                  <BrandMark className="size-8" />
+                  <span>Svara</span>
                 </Link>
               </div>
 

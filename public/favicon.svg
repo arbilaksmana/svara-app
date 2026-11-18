@@ -1,4 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#0064d2"/>
-  <path d="M20 22h24M20 32h18M20 42h12" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Three-line S app icon</title>
+  <desc id="desc">Three rounded horizontal bars staggered left and right to suggest the letter S, on a glossy navy-to-blue rounded square.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#02050d"/>
+      <stop offset="0.34" stop-color="#06152f"/>
+      <stop offset="0.68" stop-color="#0755c8"/>
+      <stop offset="1" stop-color="#83b2ff"/>
+    </linearGradient>
+    <radialGradient id="blueGlow" cx="50%" cy="78%" r="66%">
+      <stop offset="0" stop-color="#3f8cff" stop-opacity=".58"/>
+      <stop offset="1" stop-color="#1262e8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.48" stop-color="#f7f9ff"/>
+      <stop offset="1" stop-color="#d1def3"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".20"/>
+      <stop offset=".45" stop-color="#ffffff" stop-opacity=".035"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="barShadow" x="-20%" y="-80%" width="140%" height="260%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="9" result="blur"/>
+      <feOffset dy="8" result="offset"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".38"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="tileClip">
+      <rect x="16" y="16" width="480" height="480" rx="116"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tileClip)">
+    <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#tile)"/>
+    <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#blueGlow)"/>
+
+    <!-- Soft reflected light, similar to a polished glass app icon -->
+    <ellipse cx="178" cy="82" rx="220" ry="118" fill="#ffffff" opacity=".10" filter="url(#softGlow)"/>
+    <path d="M20 132 C74 35 192 12 310 25 C206 42 125 93 82 174 C54 228 28 224 20 132Z" fill="url(#gloss)" opacity=".7"/>
+    <path d="M22 22 H490" stroke="#ffffff" stroke-opacity=".18" stroke-width="4"/>
+
+    <!-- Three straight, rounded horizontal bars; alternating alignment suggests an S -->
+    <g fill="#001638" opacity=".48" filter="url(#softGlow)">
+      <rect x="184" y="174" width="184" height="54" rx="27"/>
+      <rect x="144" y="240" width="184" height="54" rx="27"/>
+      <rect x="184" y="306" width="184" height="54" rx="27"/>
+    </g>
+    <g fill="url(#pill)">
+      <rect x="184" y="163" width="184" height="54" rx="27"/>
+      <rect x="144" y="229" width="184" height="54" rx="27"/>
+      <rect x="184" y="295" width="184" height="54" rx="27"/>
+    </g>
+    <!-- Fine top-edge reflections give the bars a soft, dimensional finish -->
+    <g fill="none" stroke="#ffffff" stroke-opacity=".56" stroke-width="5" stroke-linecap="round">
+      <path d="M210 172 H342"/>
+      <path d="M170 238 H302"/>
+      <path d="M210 304 H342"/>
+    </g>
+  </g>
+  <rect x="17.5" y="17.5" width="477" height="477" rx="114.5" fill="none" stroke="#ffffff" stroke-opacity=".15" stroke-width="3"/>
 </svg>
