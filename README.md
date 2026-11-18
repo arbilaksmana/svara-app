@@ -133,6 +133,12 @@ pnpm admin:bootstrap
 - Jangan menaruh sandi nyata di shell history, `.env` yang ter-commit, atau argumen command line; gunakan secret manager/environment.
 - `NODE_ENV=production SEED_DEMO=1` akan menghentikan startup. Data demo hanya untuk lokal/CI.
 
+### Registrasi creator
+
+`/auth/register` membuat akun baru dengan peran `creator`, langsung memasang sesi, dan mengarahkan ke `/creator`. Backend memberlakukan email unik, sandi 12-256 karakter dengan minimal tiga kelas karakter, persetujuan kebijakan/ketentuan, rate limit per alamat IP, dan mencatat registrasi ke audit log.
+
+Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin tetap mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk.
+
 ## Arsitektur
 
 - `server/` — Express 5, PostgreSQL via `pg` Pool (semua akses data async), migrasi versioned, cookie sesi HttpOnly, hash kata sandi `scrypt`, header `X-Svara-Client` untuk mutasi, pembatasan laju kiriman, audit append-only.
@@ -150,7 +156,7 @@ pnpm admin:bootstrap
 
 UI mempertahankan URL lama:
 
-`/`, `/auth/login`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s/[token]/*` tetap publik tanpa guard.
+`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s/[token]/*` tetap publik tanpa guard.
 
 `super_admin` yang membuka `/creator` mendapat tampilan “Akses ditolak”, dan peran creator yang membuka `/admin` juga ditolak; ini sama dengan guard klien sebelumnya.
 

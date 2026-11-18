@@ -40,6 +40,18 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
+/** Aturan sandi akun baru dan bootstrap; pesan dipakai langsung oleh API/UI. */
+export function passwordPolicyError(password: string): string | null {
+  if (password.length < 12 || password.length > 256) {
+    return 'Kata sandi harus 12-256 karakter.';
+  }
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(password)).length;
+  if (classes < 3) {
+    return 'Kata sandi harus memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol.';
+  }
+  return null;
+}
+
 export function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;

@@ -245,6 +245,18 @@ export async function signIn(email: string, password: string): Promise<Session> 
   return session;
 }
 
+export async function register(input: api.RegisterInput): Promise<Session> {
+  const result = await api.register(input);
+  session = mapSession(result.account);
+  if (!session) throw new Error('Akun tidak dikenali.');
+  const data = await api.bootstrap();
+  hydrate(data);
+  ready = true;
+  error = null;
+  emit();
+  return session;
+}
+
 export async function signOut(): Promise<void> {
   try {
     await api.logout();

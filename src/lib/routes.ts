@@ -3,6 +3,7 @@
 export const ROUTE_IDS = [
   'home',
   'login',
+  'register',
   'creator-list',
   'creator-edit',
   'creator-preview',
@@ -35,6 +36,7 @@ export const DEMO_TOKENS = ['link-umum-demo', 'link-umum-perpus', 'undangan-demo
 export const ROUTES = {
   home: '/',
   login: '/auth/login',
+  register: '/auth/register',
   creator: '/creator',
   creatorEdit: (id: string) => `/creator/surveys/${id}/edit`,
   creatorPreview: (id: string) => `/creator/surveys/${id}/preview`,

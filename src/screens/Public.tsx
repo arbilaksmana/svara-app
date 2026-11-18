@@ -145,6 +145,10 @@ export function LoginPage() {
               <Button type="submit" block disabled={busy || state === 'loading'} loading={busy || state === 'loading'}>Masuk</Button>
             </form>
 
+            <p className="text-center text-body-sm text-muted">
+              Belum punya akun? <PlainLink to={ROUTES.register} className="min-h-[44px]">Daftar</PlainLink>
+            </p>
+
               <details className="group rounded-md border border-n200 bg-n50 p-3">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 py-2 text-body-sm font-bold text-ink [&::marker]:hidden [&::-webkit-details-marker]:hidden">
                   <span>Saya memiliki kode undangan</span>

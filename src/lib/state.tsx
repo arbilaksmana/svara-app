@@ -28,6 +28,7 @@ export type StateCode = (typeof STATE_CODES)[number];
 export const ROUTE_STATES: Record<RouteId, readonly StateCode[]> = {
   home: ['default', 'empty', 'loading', 'error'],
   login: ['default', 'loading', 'error', 'validation', 'permission-denied', 'expired', 'revoked', 'success'],
+  register: ['default', 'loading', 'error', 'validation', 'success'],
   'creator-list': ['default', 'empty', 'search-empty', 'loading', 'error', 'permission-denied', 'closed', 'success'],
   'creator-edit': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   'creator-preview': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'closed', 'expired', 'success'],

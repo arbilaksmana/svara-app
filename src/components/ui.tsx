@@ -250,12 +250,16 @@ export function Checkbox({
   checked,
   onChange,
   disabled,
+  invalid,
+  describedBy,
 }: {
   id: string;
   label: ReactNode;
   checked: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
 }) {
   return (
     <label
@@ -267,6 +271,8 @@ export function Checkbox({
         type="checkbox"
         checked={checked}
         disabled={disabled}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         onChange={(e) => onChange(e.target.checked)}
         className="size-5 shrink-0 rounded-sm accent-action disabled:accent-n400"
       />

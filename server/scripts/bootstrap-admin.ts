@@ -1,7 +1,7 @@
 import { closePool, get, nowIso, run, withTx } from '../db.ts';
 import { newId } from '../http.ts';
 import { migrate } from '../migrate.ts';
-import { hashPassword } from '../security.ts';
+import { hashPassword, passwordPolicyError } from '../security.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -9,16 +9,6 @@ function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} wajib diisi.`);
   return value;
-}
-
-function assertStrongPassword(password: string): void {
-  if (password.length < 12 || password.length > 256) {
-    throw new Error('BOOTSTRAP_ADMIN_PASSWORD harus 12-256 karakter.');
-  }
-  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(password)).length;
-  if (classes < 3) {
-    throw new Error('BOOTSTRAP_ADMIN_PASSWORD harus memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol.');
-  }
 }
 
 async function main(): Promise<void> {
@@ -29,7 +19,8 @@ async function main(): Promise<void> {
   if (email.length > 254 || !EMAIL_RE.test(email)) {
     throw new Error('BOOTSTRAP_ADMIN_EMAIL tidak valid.');
   }
-  assertStrongPassword(password);
+  const passwordError = passwordPolicyError(password);
+  if (passwordError) throw new Error(`BOOTSTRAP_ADMIN_PASSWORD tidak valid: ${passwordError}`);
 
   await migrate();
   const existing = await get<{ role: string; status: string }>('SELECT role, status FROM accounts WHERE email = ?', email);

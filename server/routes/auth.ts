@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import type { Response } from 'express';
-import { get, nowIso, run } from '../db.ts';
+import { get, nowIso, run, withTx } from '../db.ts';
 import type { AccountRow, AuthedRequest } from '../security.ts';
 import {
   SESSION_COOKIE,
   clearSessionCookie,
   createSession,
   destroySession,
+  hashPassword,
   parseCookies,
+  passwordPolicyError,
   rateLimit,
   requireAuth,
   sessionCookie,
@@ -85,6 +87,83 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
     res.json({
       data: {
         account: { id: row.id, email: row.email, display_name: row.display_name, role: row.role, status: row.status },
+        expiresAt: session.expiresAt,
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
+  try {
+    const displayName = typeof req.body?.name === 'string' ? req.body.name.replace(/\s+/g, ' ').trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const acceptTerms = req.body?.acceptTerms === true;
+
+    if (displayName.length < 2 || displayName.length > 120) {
+      throw new ApiError(422, 'validation_error', 'Nama harus 2-120 karakter.');
+    }
+    if (!email || email.length > 254 || !EMAIL_RE.test(email)) {
+      throw new ApiError(422, 'validation_error', 'Alamat email tidak valid.');
+    }
+    if (!acceptTerms) {
+      throw new ApiError(422, 'terms_required', 'Persetujuan kebijakan privasi dan ketentuan layanan wajib dicentang.');
+    }
+    const passwordError = passwordPolicyError(password);
+    if (passwordError) {
+      throw new ApiError(422, 'weak_password', passwordError);
+    }
+    if (!rateLimit({ key: `register:${req.ip}`, limit: 5, windowMs: 15 * 60 * 1000 })) {
+      throw new ApiError(429, 'rate_limited', 'Terlalu banyak pendaftaran dari alamat ini. Coba lagi beberapa menit lagi.');
+    }
+
+    const existing = await get<{ id: string }>('SELECT id FROM accounts WHERE email = ?', email);
+    if (existing) {
+      throw new ApiError(409, 'email_taken', 'Email sudah terdaftar. Masuk atau gunakan email lain.');
+    }
+
+    const accountId = newId('u');
+    try {
+      await withTx(async () => {
+        await run(
+          'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          accountId,
+          email,
+          displayName,
+          'creator',
+          'active',
+          hashPassword(password),
+          nowIso(),
+        );
+        await run(
+          'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          newId('log'),
+          accountId,
+          'Registrasi',
+          'akun',
+          'berhasil',
+          nowIso(),
+          null,
+        );
+      });
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+      if (code === '23505') {
+        throw new ApiError(409, 'email_taken', 'Email sudah terdaftar. Masuk atau gunakan email lain.');
+      }
+      throw error;
+    }
+
+    const session = await createSession(accountId);
+    res.setHeader('Set-Cookie', sessionCookie(session.token, isSecure(req)));
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(201).json({
+      data: {
+        account: { id: accountId, email, display_name: displayName, role: 'creator', status: 'active' },
         expiresAt: session.expiresAt,
       },
     });

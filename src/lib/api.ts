@@ -102,6 +102,20 @@ export async function login(email: string, password: string): Promise<{ account:
   });
 }
 
+export interface RegisterInput {
+  name: string;
+  email: string;
+  password: string;
+  acceptTerms: boolean;
+}
+
+export async function register(input: RegisterInput): Promise<{ account: Account & { email: string } }> {
+  return call<{ account: Account & { email: string } }>('/auth/register', {
+    method: 'POST',
+    body: input,
+  });
+}
+
 export async function logout(): Promise<void> {
   await call('/auth/logout', { method: 'POST' });
 }

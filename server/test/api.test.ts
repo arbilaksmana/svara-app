@@ -745,3 +745,52 @@ test('Permintaan data publik dapat ditindaklanjuti admin tanpa memuat jawaban', 
   });
   assert.equal(patched.status, 200);
 });
+
+test('Registrasi publik membuat creator baru dan langsung memberi sesi', async () => {
+  const email = 'creator.baru@contoh.test';
+  const password = 'SandiBaru123!';
+
+  const weak = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Creator Baru', email, password: 'pendek', acceptTerms: true },
+  });
+  assert.equal(weak.status, 422);
+  assert.equal((weak.json as { code?: string }).code, 'weak_password');
+
+  const withoutTerms = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Creator Baru', email, password, acceptTerms: false },
+  });
+  assert.equal(withoutTerms.status, 422);
+  assert.equal((withoutTerms.json as { code?: string }).code, 'terms_required');
+
+  const created = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Creator Baru', email, password, acceptTerms: true },
+  });
+  assert.equal(created.status, 201, created.text);
+  const rawCookie = created.headers.get('set-cookie') ?? '';
+  assert.ok(rawCookie.startsWith('svara_session='), 'registrasi harus memasang cookie sesi');
+  const cookie = rawCookie.split(';')[0]!;
+  const account = (created.json as { data: { account: { email: string; role: string; status: string } } }).data.account;
+  assert.equal(account.email, email);
+  assert.equal(account.role, 'creator');
+  assert.equal(account.status, 'active');
+
+  const bootstrap = data<{ account: { email: string }; surveys: unknown[]; accounts: unknown[] }>(
+    await call('/bootstrap', { cookie }),
+  );
+  assert.equal(bootstrap.account.email, email);
+  assert.deepEqual(bootstrap.surveys, []);
+  assert.deepEqual(bootstrap.accounts, []);
+
+  const duplicate = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Creator Lain', email, password, acceptTerms: true },
+  });
+  assert.equal(duplicate.status, 409);
+  assert.equal((duplicate.json as { code?: string }).code, 'email_taken');
+
+  const login = await call('/auth/login', { method: 'POST', body: { email, password } });
+  assert.equal(login.status, 200, login.text);
+});
