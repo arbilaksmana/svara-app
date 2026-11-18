@@ -1,6 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { attachSession, csrfGuard, requireAuth } from './security.ts';
+import type { AuthedRequest } from './security.ts';
 import { authRouter } from './routes/auth.ts';
 import { publicRouter } from './routes/public.ts';
 import { surveysRouter } from './routes/surveys.ts';
@@ -36,12 +37,14 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 app.use(express.json({ limit: '512kb' }));
-app.use(attachSession);
+app.use((req, res, next) => {
+  attachSession(req as AuthedRequest, res, next).catch(next);
+});
 app.use('/api', csrfGuard);
 
-app.get('/api/v1/health', (_req: Request, res: Response) => {
+app.get('/api/v1/health', async (_req: Request, res: Response) => {
   try {
-    get('SELECT 1 AS ok');
+    await get('SELECT 1 AS ok');
     res.setHeader('Cache-Control', 'no-store');
     res.json({ data: { ok: true } });
   } catch {

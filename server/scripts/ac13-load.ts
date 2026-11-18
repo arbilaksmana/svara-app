@@ -3,15 +3,15 @@
  * Membuat survei 20 item, menerbitkan tautan umum, lalu mengirim 30 respons
  * paralel dengan kunci idempotensi berbeda ke satu tautan.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
 
 const PORT = 3199;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
-const DB_PATH = resolve(tmpdir(), 'svara-ac13-load.sqlite');
 const EVIDENCE_PATH = resolve('docs/test-evidence/ac13-load.json');
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'SvaraDemo123!';
 
 interface ApiResult {
   status: number;
@@ -47,34 +47,18 @@ function data<T>(result: ApiResult): T {
   return result.body.data as T;
 }
 
-let stopping = false;
-
-async function waitForServer(child: ChildProcess): Promise<void> {
-  const signal = new Promise<void>((resolveSignal) => {
-    let output = '';
-    const onData = (chunk: unknown) => {
-      output += String(chunk);
-      if (output.includes('Svara berjalan')) resolveSignal();
-    };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', onData);
-    child.once('exit', (code) => {
-      if (!stopping) throw new Error(`server demo berhenti (kode ${code}): ${output}`);
-    });
-  });
-  await signal;
-}
-
 const p95 = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
 };
 
+const database = await resetDemoDatabase();
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
   env: {
     ...process.env,
     PORT: String(PORT),
-    DB_PATH,
+    DATABASE_URL: database.databaseUrl,
+    SEED_DEMO: '1',
     COOKIE_SECURE: '0',
     APP_ORIGIN: `http://127.0.0.1:${PORT}`,
   },
@@ -82,14 +66,11 @@ const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
 });
 
 try {
-  rmSync(DB_PATH, { force: true });
-  rmSync(`${DB_PATH}-wal`, { force: true });
-  rmSync(`${DB_PATH}-shm`, { force: true });
-  await waitForServer(server);
+  await waitForServer(server, 'server demo AC13');
 
   data(await call('/auth/login', {
     method: 'POST',
-    body: { email: 'creator.a@svara.local', password: 'SvaraDemo123!' },
+    body: { email: 'creator.a@svara.local', password: SEED_PASSWORD },
   }));
 
   const created = data<{ survey: { id: string } }>(
@@ -206,7 +187,9 @@ try {
       platform: `${process.platform} ${process.arch}`,
       cpu_count: (await import('node:os')).cpus().length,
       server: `127.0.0.1:${PORT}`,
-      storage: 'SQLite node:sqlite',
+      storage: 'PostgreSQL via pg Pool',
+      postgres_server_version: database.serverVersion,
+      database: new URL(database.databaseUrl).pathname.replace(/^\//, ''),
     },
     scenario: { concurrent_submissions: 30, items_per_survey: 20, keys: 'distinct' },
     results: {
@@ -230,13 +213,5 @@ try {
   console.log(JSON.stringify(report, null, 2));
   console.log(`\nBukti ditulis ke ${EVIDENCE_PATH}`);
 } finally {
-  stopping = true;
-  server.kill();
-  await new Promise<void>((resolveExit) => {
-    if (server.exitCode !== null) resolveExit();
-    else server.once('exit', () => resolveExit());
-  });
-  rmSync(DB_PATH, { force: true });
-  rmSync(`${DB_PATH}-wal`, { force: true });
-  rmSync(`${DB_PATH}-shm`, { force: true });
+  await stopServer(server);
 }

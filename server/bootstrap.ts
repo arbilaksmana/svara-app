@@ -162,7 +162,7 @@ function optionalBoolean(value: number | null): boolean | null {
   return value === null ? null : boolean(value);
 }
 
-function accessibleSurveys(account: AccountRow): SurveyRow[] {
+async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[]> {
   if (account.role === 'super_admin') {
     return all<SurveyRow>('SELECT * FROM surveys ORDER BY updated_at DESC, id');
   }
@@ -199,13 +199,13 @@ export interface BootstrapPayload {
   serverTime: string;
 }
 
-export function buildBootstrap(account: AccountRow | undefined): BootstrapPayload {
-  const profiles = all<ProfileRow>('SELECT * FROM profiles ORDER BY id').map((row) => ({
+export async function buildBootstrap(account: AccountRow | undefined): Promise<BootstrapPayload> {
+  const profiles = (await all<ProfileRow>('SELECT * FROM profiles ORDER BY id')).map((row) => ({
     ...row,
     cross_border_transfer: optionalBoolean(row.cross_border_transfer),
     synthetic_placeholder: boolean(row.synthetic_placeholder),
   }));
-  const notices = all<NoticeRow>('SELECT * FROM notices ORDER BY profile_id, version').map((row) => ({
+  const notices = (await all<NoticeRow>('SELECT * FROM notices ORDER BY profile_id, version')).map((row) => ({
     ...row,
     synthetic_placeholder: boolean(row.synthetic_placeholder),
   }));
@@ -233,24 +233,24 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
     };
   }
 
-  const surveys = accessibleSurveys(account);
+  const surveys = await accessibleSurveys(account);
   const surveyIds = surveys.map((row) => row.id);
   const versions = surveyIds.length
-    ? all<VersionRow>(
+    ? await all<VersionRow>(
         `SELECT * FROM survey_versions WHERE survey_id IN (${placeholders(surveyIds)}) ORDER BY survey_id, number`,
         ...surveyIds,
       )
     : [];
   const versionIds = versions.map((row) => row.id);
   const questions = versionIds.length
-    ? all<QuestionRow>(
+    ? await all<QuestionRow>(
         `SELECT * FROM questions WHERE version_id IN (${placeholders(versionIds)}) ORDER BY version_id, ord`,
         ...versionIds,
       )
     : [];
   const questionIds = questions.map((row) => row.id);
   const options = questionIds.length
-    ? all<OptionRow>(
+    ? await all<OptionRow>(
         `SELECT * FROM question_options WHERE question_id IN (${placeholders(questionIds)}) ORDER BY question_id, ord`,
         ...questionIds,
       )
@@ -273,9 +273,11 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
     .filter((survey) => account.role === 'super_admin' || survey.owner_id === account.id)
     .map((survey) => survey.id);
   const invitations = manageableSurveyIds.length
-    ? all<InvitationRow>(
-        `SELECT * FROM invitations WHERE survey_id IN (${placeholders(manageableSurveyIds)}) ORDER BY created_at DESC`,
-        ...manageableSurveyIds,
+    ? (
+        await all<InvitationRow>(
+          `SELECT * FROM invitations WHERE survey_id IN (${placeholders(manageableSurveyIds)}) ORDER BY created_at DESC`,
+          ...manageableSurveyIds,
+        )
       ).map((row) => ({
         ...row,
         status:
@@ -286,9 +288,11 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
       }))
     : [];
   const publicLinks = manageableSurveyIds.length
-    ? all<PublicLinkRow>(
-        `SELECT * FROM public_links WHERE survey_id IN (${placeholders(manageableSurveyIds)}) ORDER BY created_at DESC`,
-        ...manageableSurveyIds,
+    ? (
+        await all<PublicLinkRow>(
+          `SELECT * FROM public_links WHERE survey_id IN (${placeholders(manageableSurveyIds)}) ORDER BY created_at DESC`,
+          ...manageableSurveyIds,
+        )
       ).map((row) => {
         const version = versions.find((item) => item.id === row.version_id);
         const status =
@@ -301,7 +305,7 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
       })
     : [];
   const assignments = manageableSurveyIds.length
-    ? all<AssignmentRow>(
+    ? await all<AssignmentRow>(
         `SELECT * FROM assignments WHERE survey_id IN (${placeholders(manageableSurveyIds)}) ORDER BY id`,
         ...manageableSurveyIds,
       )
@@ -309,27 +313,27 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
 
   const grants =
     account.role === 'super_admin'
-      ? all<GrantRow>('SELECT * FROM access_grants ORDER BY account_id, survey_id')
-      : all<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? ORDER BY survey_id', account.id);
+      ? await all<GrantRow>('SELECT * FROM access_grants ORDER BY account_id, survey_id')
+      : await all<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? ORDER BY survey_id', account.id);
   const accounts =
     account.role === 'super_admin'
-      ? all<AccountAdminRow>('SELECT id, email, display_name, role, status FROM accounts ORDER BY display_name')
+      ? await all<AccountAdminRow>('SELECT id, email, display_name, role, status FROM accounts ORDER BY display_name')
       : [];
   const auditLogs =
     account.role === 'super_admin'
-      ? all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')
+      ? await all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')
       : [];
   const integrationEvents =
     account.role === 'super_admin'
-      ? all<IntegrationRow>('SELECT * FROM integration_events ORDER BY at DESC LIMIT 250')
+      ? await all<IntegrationRow>('SELECT * FROM integration_events ORDER BY at DESC LIMIT 250')
       : [];
   const dataRequests =
     account.role === 'super_admin'
-      ? all<DataRequestRow>('SELECT * FROM data_requests ORDER BY created_at DESC LIMIT 250')
+      ? await all<DataRequestRow>('SELECT * FROM data_requests ORDER BY created_at DESC LIMIT 250')
       : [];
 
   const settingsRows = surveyIds.length
-    ? all<{ survey_id: string; allow_results: number; allow_individual: number }>(
+    ? await all<{ survey_id: string; allow_results: number; allow_individual: number }>(
         `SELECT * FROM survey_settings WHERE survey_id IN (${placeholders(surveyIds)})`,
         ...surveyIds,
       )
@@ -344,8 +348,8 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
   const summaries: Record<string, VersionSummary> = {};
   for (const version of versions) {
     const survey = surveys.find((item) => item.id === version.survey_id);
-    if (survey && canReadAggregate(account, survey)) {
-      summaries[version.id] = summaryFor(version.id);
+    if (survey && (await canReadAggregate(account, survey))) {
+      summaries[version.id] = await summaryFor(version.id);
     }
   }
 
@@ -381,12 +385,15 @@ export function buildBootstrap(account: AccountRow | undefined): BootstrapPayloa
   };
 }
 
-export function sidebarCounts(account: AccountRow): { surveys: number; responses: number } {
-  const surveyIds = accessibleSurveys(account).map((row) => row.id);
+export async function sidebarCounts(account: AccountRow): Promise<{ surveys: number; responses: number }> {
+  const surveyIds = (await accessibleSurveys(account)).map((row) => row.id);
   if (surveyIds.length === 0) return { surveys: 0, responses: 0 };
-  const responses = get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM responses WHERE survey_id IN (${placeholders(surveyIds)})`,
-    ...surveyIds,
-  )?.count ?? 0;
+  const responses =
+    (
+      await get<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM responses WHERE survey_id IN (${placeholders(surveyIds)})`,
+        ...surveyIds,
+      )
+    )?.count ?? 0;
   return { surveys: surveyIds.length, responses: Number(responses) };
 }

@@ -42,25 +42,27 @@ export interface ExportResponse {
   answers: ExportAnswer[];
 }
 
-export function responsesForVersion(versionId: string): ExportResponse[] {
-  const responses = all<Omit<ExportResponse, 'answers'>>(
+export async function responsesForVersion(versionId: string): Promise<ExportResponse[]> {
+  const responses = await all<Omit<ExportResponse, 'answers'>>(
     `SELECT id, respondent_id, survey_id, version_id, assignment_id, collection_mode, identity_source, submitted_at
        FROM responses WHERE version_id = ? ORDER BY submitted_at, id`,
     versionId,
   );
-  return responses.map((response) => ({
-    ...response,
-    answers: all<ExportAnswer>(
-      'SELECT question_code, option_id, value, text, skipped FROM answers WHERE response_id = ? ORDER BY question_code',
-      response.id,
-    ),
-  }));
+  return Promise.all(
+    responses.map(async (response) => ({
+      ...response,
+      answers: await all<ExportAnswer>(
+        'SELECT question_code, option_id, value, text, skipped FROM answers WHERE response_id = ? ORDER BY question_code',
+        response.id,
+      ),
+    })),
+  );
 }
 
 /** CSV standar PRD §7.1: satu baris per respons, satu versi, tanpa token dan nama. */
-export function buildCsv(version: VersionRow, includeFreeText: boolean): string {
-  const questions = questionsFor(version.id);
-  const responses = responsesForVersion(version.id);
+export async function buildCsv(version: VersionRow, includeFreeText: boolean): Promise<string> {
+  const questions = await questionsFor(version.id);
+  const responses = await responsesForVersion(version.id);
   const header = [
     'response_id',
     'respondent_id',
@@ -104,8 +106,8 @@ export function buildCsv(version: VersionRow, includeFreeText: boolean): string 
 }
 
 /** Kodebook per versi; teks item teks bebas hanya untuk penerima berizin. */
-export function buildCodebook(version: VersionRow, includeFreeText: boolean): string {
-  const questions = questionsFor(version.id);
+export async function buildCodebook(version: VersionRow, includeFreeText: boolean): Promise<string> {
+  const questions = await questionsFor(version.id);
   const rows: Array<Array<string | number | null>> = [
     [
       'survey_version',
@@ -124,7 +126,7 @@ export function buildCodebook(version: VersionRow, includeFreeText: boolean): st
   ];
   for (const question of questions) {
     if (question.type === 'short_text' && !includeFreeText) continue;
-    const options = optionsFor(question.id);
+    const options = await optionsFor(question.id);
     rows.push([
       version.number,
       question.code,
@@ -144,10 +146,10 @@ export function buildCodebook(version: VersionRow, includeFreeText: boolean): st
 }
 
 /** Data individual untuk API; hanya dipanggil setelah izin `can_read_individual`. */
-export function individualResponses(version: VersionRow, includeFreeText: boolean) {
-  const questions = questionsFor(version.id);
+export async function individualResponses(version: VersionRow, includeFreeText: boolean) {
+  const questions = await questionsFor(version.id);
   const questionMap = new Map(questions.map((question) => [question.code, question]));
-  return responsesForVersion(version.id).map((response) => ({
+  return (await responsesForVersion(version.id)).map((response) => ({
     id: response.id,
     respondent_id: response.respondent_id,
     assignment_id: response.assignment_id,

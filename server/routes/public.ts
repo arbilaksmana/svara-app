@@ -149,43 +149,58 @@ interface ValidAnswer {
   skipped: boolean;
 }
 
+interface ConsentRow {
+  id: string;
+  survey_id: string;
+  version_id: string;
+  notice_version: string;
+  basis: string;
+  status: string;
+  recorded_at: string;
+  guardian_evidence_status: string;
+  response_id: string | null;
+}
+
 export const publicRouter = Router();
 
-function questionRows(versionId: string) {
+async function questionRows(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
 }
 
-function optionRows(questionId: string) {
+async function optionRows(questionId: string): Promise<OptionRow[]> {
   return all<OptionRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
 }
 
-function publicQuestions(versionId: string): { questions: PublicQuestion[]; options: PublicOption[] } {
-  const questions: PublicQuestion[] = questionRows(versionId).map((question) => ({
-    id: question.id,
-    version_id: question.version_id,
-    code: question.code,
-    ord: question.ord,
-    type: question.type,
-    required: question.required === 1,
-    section: question.section,
-    label: question.label,
-    hint: question.hint,
-    group_code: question.group_code,
-    dimension_code: question.dimension_code,
-    order: question.ord,
-    option_ids: optionRows(question.id).map((option) => option.id),
-  }));
-  const options: PublicOption[] = questions.flatMap((question) =>
-    optionRows(question.id).map((option) => ({ ...option, order: option.ord })),
-  );
+async function publicQuestions(versionId: string): Promise<{ questions: PublicQuestion[]; options: PublicOption[] }> {
+  const questions: PublicQuestion[] = [];
+  const options: PublicOption[] = [];
+  for (const question of await questionRows(versionId)) {
+    const questionOptions = await optionRows(question.id);
+    questions.push({
+      id: question.id,
+      version_id: question.version_id,
+      code: question.code,
+      ord: question.ord,
+      type: question.type,
+      required: question.required === 1,
+      section: question.section,
+      label: question.label,
+      hint: question.hint,
+      group_code: question.group_code,
+      dimension_code: question.dimension_code,
+      order: question.ord,
+      option_ids: questionOptions.map((option) => option.id),
+    });
+    for (const option of questionOptions) options.push({ ...option, order: option.ord });
+  }
   return { questions, options };
 }
 
-function profileFor(id: string): ProfileRow | undefined {
+async function profileFor(id: string): Promise<ProfileRow | undefined> {
   return get<ProfileRow>('SELECT * FROM profiles WHERE id = ?', id);
 }
 
-function noticeFor(profileId: string, version: string): NoticeRow | undefined {
+async function noticeFor(profileId: string, version: string): Promise<NoticeRow | undefined> {
   return get<NoticeRow>(
     'SELECT * FROM notices WHERE profile_id = ? ORDER BY CASE WHEN version = ? THEN 0 ELSE 1 END, effective_date DESC LIMIT 1',
     profileId,
@@ -193,11 +208,11 @@ function noticeFor(profileId: string, version: string): NoticeRow | undefined {
   );
 }
 
-function invitationForToken(token: string): InvitationRow | undefined {
+async function invitationForToken(token: string): Promise<InvitationRow | undefined> {
   return get<InvitationRow>('SELECT * FROM invitations WHERE token_hash = ?', sha256Hex(token));
 }
 
-function linkForToken(token: string): LinkRow | undefined {
+async function linkForToken(token: string): Promise<LinkRow | undefined> {
   return get<LinkRow>('SELECT * FROM public_links WHERE token_hash = ?', sha256Hex(token));
 }
 
@@ -208,22 +223,22 @@ function baseState(version: VersionRow, survey: SurveyRow): 'active' | 'closed' 
   return 'active';
 }
 
-export function resolvePublicContext(token: string): PublicContext {
-  const invitation = invitationForToken(token);
+export async function resolvePublicContext(token: string): Promise<PublicContext> {
+  const invitation = await invitationForToken(token);
   if (invitation) {
-    const assignment = get<AssignmentRow>('SELECT * FROM assignments WHERE id = ?', invitation.assignment_id);
-    const version = get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
-    const survey = get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', invitation.survey_id);
+    const assignment = await get<AssignmentRow>('SELECT * FROM assignments WHERE id = ?', invitation.assignment_id);
+    const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
+    const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', invitation.survey_id);
     if (!assignment || !version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-    const profile = profileFor(survey.profile_id);
-    const notice = noticeFor(survey.profile_id, version.notice_version);
+    const profile = await profileFor(survey.profile_id);
+    const notice = await noticeFor(survey.profile_id, version.notice_version);
     if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
-    const existing = get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', assignment.id);
+    const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', assignment.id);
     let state = baseState(version, survey);
     if (invitation.status === 'used' || existing) state = 'used';
     else if (invitation.status === 'revoked') state = 'revoked';
     else if (invitation.status === 'expired' || (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now())) state = 'expired';
-    const { questions, options } = publicQuestions(version.id);
+    const { questions, options } = await publicQuestions(version.id);
     return {
       kind: 'invitation',
       invitation,
@@ -239,19 +254,19 @@ export function resolvePublicContext(token: string): PublicContext {
       guardianRequired: profile.consent_mode === 'guardian',
     };
   }
-  const link = linkForToken(token);
+  const link = await linkForToken(token);
   if (!link) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const version = get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', link.version_id);
-  const survey = get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
+  const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', link.version_id);
+  const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
   if (!version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const profile = profileFor(survey.profile_id);
-  const notice = noticeFor(survey.profile_id, version.notice_version);
+  const profile = await profileFor(survey.profile_id);
+  const notice = await noticeFor(survey.profile_id, version.notice_version);
   if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
   let state = baseState(version, survey);
   if (link.status === 'closed') state = 'closed';
   else if (link.status === 'expired' || (link.expires_at && new Date(link.expires_at).getTime() < Date.now())) state = 'expired';
   else if (link.status !== 'active') state = 'revoked';
-  const { questions, options } = publicQuestions(version.id);
+  const { questions, options } = await publicQuestions(version.id);
   return {
     kind: 'public',
     link,
@@ -306,7 +321,7 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
   };
 }
 
-function parseAnswers(context: PublicContext, raw: unknown): ValidAnswer[] {
+async function parseAnswers(context: PublicContext, raw: unknown): Promise<ValidAnswer[]> {
   if (!Array.isArray(raw)) fail(422, 'validation_error', 'answers wajib berupa array.');
   const byCode = new Map<string, AnswerInput>();
   for (const item of raw) {
@@ -344,7 +359,7 @@ function parseAnswers(context: PublicContext, raw: unknown): ValidAnswer[] {
       result.push({ question, option: null, text, skipped: false });
       continue;
     }
-    const options = optionRows(question.id);
+    const options = await optionRows(question.id);
     let option = options.find((item) => item.id === input?.option_id) ?? null;
     if (!option && input?.option_id) {
       fail(422, 'invalid_option', `Opsi untuk ${question.code} bukan bagian dari pertanyaan ini.`, { code: question.code });
@@ -366,23 +381,11 @@ function parseAnswers(context: PublicContext, raw: unknown): ValidAnswer[] {
   return result;
 }
 
-interface ConsentRow {
-  id: string;
-  survey_id: string;
-  version_id: string;
-  notice_version: string;
-  basis: string;
-  status: string;
-  recorded_at: string;
-  guardian_evidence_status: string;
-  response_id: string | null;
-}
-
 /** Persetujuan harus tercatat lebih dulu; formulir dan kiriman menolak tanpa consent_id yang sah. */
-function requireConsent(context: PublicContext, consentId: unknown): ConsentRow {
+async function requireConsent(context: PublicContext, consentId: unknown): Promise<ConsentRow> {
   const id = typeof consentId === 'string' ? consentId.trim() : '';
   if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
-  const consent = get<ConsentRow>('SELECT * FROM consent_records WHERE id = ?', id);
+  const consent = await get<ConsentRow>('SELECT * FROM consent_records WHERE id = ?', id);
   if (
     !consent ||
     consent.status !== 'granted' ||
@@ -394,8 +397,8 @@ function requireConsent(context: PublicContext, consentId: unknown): ConsentRow 
   return consent;
 }
 
-function receiptFor(responseId: string) {
-  const row = get<{
+async function receiptFor(responseId: string) {
+  const row = await get<{
     id: string;
     survey_id: string;
     version_id: string;
@@ -420,9 +423,9 @@ function receiptFor(responseId: string) {
   };
 }
 
-publicRouter.get('/public/surveys/:token', (req: AuthedRequest, res: Response) => {
+publicRouter.get('/public/surveys/:token', async (req: AuthedRequest, res: Response) => {
   try {
-    const context = resolvePublicContext(pathParam(req, 'token'));
+    const context = await resolvePublicContext(pathParam(req, 'token'));
     res.setHeader('Cache-Control', 'no-store');
     res.json({ data: publicPayload(context, false) });
   } catch (error) {
@@ -430,12 +433,12 @@ publicRouter.get('/public/surveys/:token', (req: AuthedRequest, res: Response) =
   }
 });
 
-publicRouter.post('/public/surveys/:token/consent', (req: AuthedRequest, res: Response) => {
+publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, res: Response) => {
   try {
     if (!rateLimit({ key: `consent:${req.ip}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi sebentar.');
     }
-    const context = resolvePublicContext(pathParam(req, 'token'));
+    const context = await resolvePublicContext(pathParam(req, 'token'));
     if (!context.canSubmit) {
       fail(409, `submission_${context.state}`, `Formulir tidak dapat menerima persetujuan: ${context.state}.`);
     }
@@ -452,7 +455,7 @@ publicRouter.post('/public/surveys/:token/consent', (req: AuthedRequest, res: Re
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
     const guardianStatus = context.guardianRequired ? 'verified' : 'not_required';
     const recordedAt = nowIso();
-    run(
+    await run(
       `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
         respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, response_id)
        VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, NULL)`,
@@ -466,7 +469,7 @@ publicRouter.post('/public/surveys/:token/consent', (req: AuthedRequest, res: Re
       context.guardianRequired ? evidenceRef : null,
       context.invitation?.id ?? null,
     );
-    auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
+    await auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
     res.status(201).json({
       data: {
         consent_id: consentId,
@@ -481,10 +484,10 @@ publicRouter.post('/public/surveys/:token/consent', (req: AuthedRequest, res: Re
   }
 });
 
-publicRouter.get('/public/surveys/:token/form', (req: AuthedRequest, res: Response) => {
+publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: Response) => {
   try {
-    const context = resolvePublicContext(pathParam(req, 'token'));
-    const consent = requireConsent(context, req.query.consent_id);
+    const context = await resolvePublicContext(pathParam(req, 'token'));
+    const consent = await requireConsent(context, req.query.consent_id);
     if (!context.canSubmit) {
       fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
     }
@@ -505,14 +508,14 @@ publicRouter.get('/public/surveys/:token/form', (req: AuthedRequest, res: Respon
   }
 });
 
-publicRouter.post('/public/invitations/resolve', (req: AuthedRequest, res: Response) => {
+publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res: Response) => {
   try {
     if (!rateLimit({ key: `invite-code:${req.ip}`, limit: 20, windowMs: 10 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak percobaan. Coba lagi nanti.');
     }
     const code = asString(req.body?.code ?? '', 'code', 80).toUpperCase();
     if (!code) fail(422, 'validation_error', 'Kode undangan wajib diisi.');
-    const invitation = get<{ token: string; status: string; expires_at: string | null; survey_id: string; version_id: string }>(
+    const invitation = await get<{ token: string; status: string; expires_at: string | null; survey_id: string; version_id: string }>(
       'SELECT token, status, expires_at, survey_id, version_id FROM invitations WHERE code = ?',
       code,
     );
@@ -527,7 +530,7 @@ publicRouter.post('/public/invitations/resolve', (req: AuthedRequest, res: Respo
   }
 });
 
-publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: Response) => {
+publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest, res: Response) => {
   let auditObject = 'respons';
   try {
     if (!rateLimit({ key: `submit:${req.ip}`, limit: 40, windowMs: 10 * 60 * 1000 })) {
@@ -537,10 +540,10 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
     if (key.length < 8 || key.length > 128) {
       fail(422, 'idempotency_key_required', 'Header Idempotency-Key wajib diisi (8–128 karakter).');
     }
-    const context = resolvePublicContext(pathParam(req, 'token'));
+    const context = await resolvePublicContext(pathParam(req, 'token'));
     auditObject = `${context.survey.id} · v${context.version.number}`;
-    const consent = requireConsent(context, req.body?.consent_id);
-    const answers = parseAnswers(context, req.body?.answers);
+    const consent = await requireConsent(context, req.body?.consent_id);
+    const answers = await parseAnswers(context, req.body?.answers);
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
     const hash = payloadHash({
       consent_id: consent.id,
@@ -551,44 +554,46 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
         skipped: answer.skipped,
       })),
     });
-    const existingAttempt = get<{ response_id: string; payload_hash: string }>(
-      'SELECT response_id, payload_hash FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
-      scope,
-      key,
-    );
-    if (existingAttempt) {
-      if (existingAttempt.payload_hash !== hash) {
-        fail(409, 'idempotency_conflict', 'Kunci pengiriman yang sama dipakai dengan isi berbeda.', { retryable: false });
+    const outcome = await withTx(async () => {
+      // Serialkan retry dengan kunci yang sama sebelum memeriksa idempotensi.
+      await get('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', `${scope}:${key}`);
+      const existingAttempt = await get<{ response_id: string; payload_hash: string }>(
+        'SELECT response_id, payload_hash FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
+        scope,
+        key,
+      );
+      if (existingAttempt) {
+        if (existingAttempt.payload_hash !== hash) {
+          fail(409, 'idempotency_conflict', 'Kunci pengiriman yang sama dipakai dengan isi berbeda.', { retryable: false });
+        }
+        return { receipt: await receiptFor(existingAttempt.response_id), created: false };
       }
-      res.json({ data: receiptFor(existingAttempt.response_id) });
-      return;
-    }
-    if (!context.canSubmit) {
-      fail(409, `submission_${context.state}`, `Formulir tidak dapat menerima kiriman: ${context.state}.`, { state: context.state });
-    }
-    if (context.kind === 'invitation') {
-      const existing = get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', context.assignment!.id);
-      if (existing) fail(409, 'already_submitted', 'Undangan ini sudah digunakan untuk respons final.');
-    }
-    const responseId = newId('r');
-    const respondentId = newId('p');
-    const now = nowIso();
-    withTx(() => {
-      const freshVersion = get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ?', context.version.id);
-      if (freshVersion?.status !== 'published') fail(409, 'submission_closed', 'Versi ini sudah ditutup.');
+      if (!context.canSubmit) {
+        fail(409, `submission_${context.state}`, `Formulir tidak dapat menerima kiriman: ${context.state}.`, { state: context.state });
+      }
       if (context.kind === 'invitation') {
-        const freshInvitation = get<{ status: string; used_at: string | null }>('SELECT status, used_at FROM invitations WHERE id = ?', context.invitation!.id);
-        if (!freshInvitation || freshInvitation.status !== 'active' || freshInvitation.used_at) {
+        const lockedInvitation = await get<{ status: string; used_at: string | null }>(
+          'SELECT status, used_at FROM invitations WHERE id = ? FOR UPDATE',
+          context.invitation!.id,
+        );
+        if (!lockedInvitation || lockedInvitation.status !== 'active' || lockedInvitation.used_at) {
           fail(409, 'invitation_inactive', 'Undangan ini sudah tidak aktif.');
         }
+        const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', context.assignment!.id);
+        if (existing) fail(409, 'already_submitted', 'Undangan ini sudah digunakan untuk respons final.');
       }
-      run(
+      const responseId = newId('r');
+      const respondentId = newId('p');
+      const now = nowIso();
+      const freshVersion = await get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ?', context.version.id);
+      if (freshVersion?.status !== 'published') fail(409, 'submission_closed', 'Versi ini sudah ditutup.');
+      await run(
         'INSERT INTO respondents (id, source, external_ref, created_at) VALUES (?, ?, NULL, ?)',
         respondentId,
         context.kind === 'invitation' ? 'invitation' : 'public_link',
         now,
       );
-      run(
+      await run(
         `INSERT INTO responses (id, survey_id, version_id, assignment_id, respondent_id, collection_mode, identity_source, submitted_at, idempotency_key)
          VALUES (?, ?, ?, ?, ?, 'standalone', 'local', ?, ?)`,
         responseId,
@@ -600,7 +605,7 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
         key,
       );
       for (const answer of answers) {
-        run(
+        await run(
           `INSERT INTO answers (id, response_id, question_id, question_code, option_id, value, text, skipped)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           newId('ans'),
@@ -613,8 +618,8 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
           answer.skipped ? 1 : 0,
         );
       }
-      run('UPDATE consent_records SET response_id = ? WHERE id = ?', responseId, consent.id);
-      run(
+      await run('UPDATE consent_records SET response_id = ? WHERE id = ?', responseId, consent.id);
+      await run(
         'INSERT INTO submission_attempts (id, scope, idempotency_key, payload_hash, response_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         newId('sa'),
         scope,
@@ -624,9 +629,9 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
         now,
       );
       if (context.kind === 'invitation') {
-        run("UPDATE invitations SET status = 'used', used_at = ? WHERE id = ?", now, context.invitation!.id);
+        await run("UPDATE invitations SET status = 'used', used_at = ? WHERE id = ?", now, context.invitation!.id);
       }
-      run(
+      await run(
         `INSERT INTO integration_events (id, event_id, type, target, status, attempts, at, simulated, response_id, last_error, payload)
          VALUES (?, ?, 'survey.submitted', 'module_13', 'delivered', 1, ?, 1, ?, NULL, NULL)`,
         newId('ie'),
@@ -634,28 +639,31 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
         now,
         responseId,
       );
+      return { receipt: await receiptFor(responseId), created: true };
     });
-    auditPublic('Kirim respons', auditObject, 'berhasil', {
-      response_id: responseId,
+    await auditPublic('Kirim respons', auditObject, 'berhasil', {
+      response_id: outcome.receipt.response_id,
       version_id: context.version.id,
       kind: context.kind,
     });
-    res.status(201).json({ data: receiptFor(responseId) });
+    res.status(outcome.created ? 201 : 200).json({ data: outcome.receipt });
   } catch (error) {
     if (error instanceof ApiError && error.status >= 400) {
-      auditPublic('Kirim respons', auditObject, 'ditolak', { code: error.code });
+      await auditPublic('Kirim respons', auditObject, 'ditolak', { code: error.code }).catch((auditError) => {
+        console.error('[api] audit penolakan gagal', auditError);
+      });
     }
     sendError(res, error);
   }
 });
 
-publicRouter.get('/public/surveys/:token/receipt/:responseId', (req: AuthedRequest, res: Response) => {
+publicRouter.get('/public/surveys/:token/receipt/:responseId', async (req: AuthedRequest, res: Response) => {
   try {
     const key = req.get('idempotency-key')?.trim() ?? '';
     if (!key) fail(422, 'idempotency_key_required', 'Header Idempotency-Key diperlukan untuk memulihkan bukti.');
-    const context = resolvePublicContext(pathParam(req, 'token'));
+    const context = await resolvePublicContext(pathParam(req, 'token'));
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
-    const attempt = get<{ response_id: string }>(
+    const attempt = await get<{ response_id: string }>(
       'SELECT response_id FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
       scope,
       key,
@@ -664,16 +672,16 @@ publicRouter.get('/public/surveys/:token/receipt/:responseId', (req: AuthedReque
       fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     }
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: receiptFor(attempt.response_id) });
+    res.json({ data: await receiptFor(attempt.response_id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-publicRouter.get('/public/policy', (_req: AuthedRequest, res: Response) => {
+publicRouter.get('/public/policy', async (_req: AuthedRequest, res: Response) => {
   try {
-    const profiles = all<Record<string, unknown>>('SELECT * FROM profiles ORDER BY id');
-    const notices = all<Record<string, unknown>>('SELECT * FROM notices ORDER BY profile_id, effective_date DESC');
+    const profiles = await all<Record<string, unknown>>('SELECT * FROM profiles ORDER BY id');
+    const notices = await all<Record<string, unknown>>('SELECT * FROM notices ORDER BY profile_id, effective_date DESC');
     const contact = profiles
       .map((profile) => profile.data_request_contact)
       .find((value): value is string => typeof value === 'string' && value.length > 0);
@@ -692,7 +700,7 @@ publicRouter.get('/public/policy', (_req: AuthedRequest, res: Response) => {
   }
 });
 
-publicRouter.post('/data-requests', (req: AuthedRequest, res: Response) => {
+publicRouter.post('/data-requests', async (req: AuthedRequest, res: Response) => {
   try {
     if (!rateLimit({ key: `data-request:${req.ip}`, limit: 10, windowMs: 60 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi nanti.');
@@ -704,7 +712,7 @@ publicRouter.post('/data-requests', (req: AuthedRequest, res: Response) => {
     if (!contact) fail(422, 'validation_error', 'Kontak wajib diisi agar pengelola dapat menindaklanjuti.');
     const id = newId('dr');
     const at = nowIso();
-    run(
+    await run(
       `INSERT INTO data_requests (id, type, contact, note, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
       id,
@@ -714,7 +722,7 @@ publicRouter.post('/data-requests', (req: AuthedRequest, res: Response) => {
       at,
       at,
     );
-    auditPublic('Permintaan data', id, 'berhasil', { type });
+    await auditPublic('Permintaan data', id, 'berhasil', { type });
     res.status(201).json({
       data: {
         id,
@@ -728,4 +736,3 @@ publicRouter.post('/data-requests', (req: AuthedRequest, res: Response) => {
     sendError(res, error);
   }
 });
-

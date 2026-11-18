@@ -15,7 +15,24 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: svara
+          POSTGRES_PASSWORD: svara_ci_password
+          POSTGRES_DB: svara_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U svara -d svara_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://svara:svara_ci_password@127.0.0.1:5432/svara_test
+      TEST_DATABASE_URL: postgres://svara:svara_ci_password@127.0.0.1:5432/svara_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,14 +43,24 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Run migrations against Postgres
+        run: pnpm db:migrate
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
       - name: Build container
         run: docker build -t svara-ci .
-      - name: Smoke container
+      - name: Create smoke database
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE svara_smoke'
+      - name: Smoke container against Postgres
         run: |
-          docker run -d --name svara-ci -p 3000:3000 -e APP_ORIGIN=http://127.0.0.1:3000 svara-ci
+          docker run -d --name svara-ci --network host \
+            -e NODE_ENV=production \
+            -e SERVE_STATIC=1 \
+            -e PORT=3000 \
+            -e DATABASE_URL=postgres://svara:svara_ci_password@127.0.0.1:5432/svara_smoke \
+            -e APP_ORIGIN=http://127.0.0.1:3000 \
+            svara-ci
           ok=0
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3000/api/v1/health; then
@@ -43,5 +70,22 @@ jobs:
             sleep 1
           done
           docker logs svara-ci
-          docker rm -f svara-ci
           test "$ok" = "1"
+          docker exec \
+            -e BOOTSTRAP_ADMIN_EMAIL=admin@ci.local \
+            -e BOOTSTRAP_ADMIN_NAME="CI Admin" \
+            -e BOOTSTRAP_ADMIN_PASSWORD='CiStrongPass123!' \
+            svara-ci tsx server/scripts/bootstrap-admin.ts
+          curl -fsS -c cookies.txt \
+            -H 'x-svara-client: web' \
+            -H 'content-type: application/json' \
+            -d '{"email":"admin@ci.local","password":"CiStrongPass123!"}' \
+            http://127.0.0.1:3000/api/v1/auth/login > login.json
+          grep -q 'super_admin' login.json
+          curl -fsS -b cookies.txt http://127.0.0.1:3000/api/v1/bootstrap > bootstrap.json
+          grep -q '"account"' bootstrap.json
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs svara-ci 2>&1 || true
+          docker rm -f svara-ci 2>&1 || true

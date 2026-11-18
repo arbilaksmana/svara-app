@@ -1,10 +1,11 @@
 {
   "label": "DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.",
-  "generated_at": "2026-11-18T14:26:12.321Z",
+  "generated_at": "2026-11-18T18:02:01.272Z",
   "environment": {
     "node": "v24.15.0",
     "platform": "win32 x64",
-    "storage": "SQLite"
+    "storage": "PostgreSQL via pg Pool",
+    "postgres_server_version": "17.12"
   },
   "scenario": {
     "respondents": 3,
@@ -32,9 +33,9 @@
     "summary_total": 8,
     "csv_rows": 8,
     "created_response_ids": [
-      "r_29b02324f13edef7",
-      "r_89453594dc760835",
-      "r_b04f43f8cf8d8fe7"
+      "r_f7a45262447c6ea5",
+      "r_92f2f9355a890187",
+      "r_47cea0cd7926774e"
     ],
     "all_created_ids_present": true,
     "survey_version_values": [

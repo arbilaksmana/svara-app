@@ -12,15 +12,13 @@ FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    SERVE_STATIC=1 \
-    DB_PATH=/app/data/svara.sqlite
+    SERVE_STATIC=1
 WORKDIR /app
 RUN npm install -g --allow-scripts=esbuild tsx@4.23.15
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/server ./server
-RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 STOPSIGNAL SIGTERM

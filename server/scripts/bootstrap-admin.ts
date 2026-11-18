@@ -1,5 +1,6 @@
-import { db, ensureSchema, get, nowIso, run, withTx } from '../db.ts';
+import { closePool, get, nowIso, run, withTx } from '../db.ts';
 import { newId } from '../http.ts';
+import { migrate } from '../migrate.ts';
 import { hashPassword } from '../security.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -20,7 +21,7 @@ function assertStrongPassword(password: string): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const email = required('BOOTSTRAP_ADMIN_EMAIL').toLowerCase();
   const password = required('BOOTSTRAP_ADMIN_PASSWORD');
   const displayName = (process.env.BOOTSTRAP_ADMIN_NAME?.trim() || 'Administrator').slice(0, 120);
@@ -30,8 +31,8 @@ function main(): void {
   }
   assertStrongPassword(password);
 
-  ensureSchema();
-  const existing = get<{ role: string; status: string }>('SELECT role, status FROM accounts WHERE email = ?', email);
+  await migrate();
+  const existing = await get<{ role: string; status: string }>('SELECT role, status FROM accounts WHERE email = ?', email);
   if (existing) {
     if (existing.role === 'super_admin') {
       console.log(`[admin] ${email} sudah ada sebagai super_admin (${existing.status}); tidak ada perubahan.`);
@@ -40,8 +41,8 @@ function main(): void {
     throw new Error(`Akun ${email} sudah ada dengan peran ${existing.role}; bootstrap dibatalkan.`);
   }
 
-  withTx(() => {
-    run(
+  await withTx(async () => {
+    await run(
       'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       newId('u'),
       email,
@@ -51,7 +52,7 @@ function main(): void {
       hashPassword(password),
       nowIso(),
     );
-    run(
+    await run(
       'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
       newId('log'),
       'system',
@@ -67,10 +68,10 @@ function main(): void {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`[admin] ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 } finally {
-  db.close();
+  await closePool();
 }

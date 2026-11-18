@@ -1,33 +1,51 @@
 {
-  "label": "DEMO ONLY — uji cadangan/pulihkan lokal, bukan bukti audit atau kesiapan produksi",
-  "generated_at": "2026-11-18T04:48:25.422Z",
+  "label": "DEMO ONLY — uji pg_dump/pg_restore lokal, bukan bukti audit atau kesiapan produksi",
+  "generated_at": "2026-11-18T18:01:58.630Z",
   "environment": {
     "node": "v24.15.0",
     "platform": "win32 x64",
-    "storage": "SQLite node:sqlite"
+    "storage": "PostgreSQL via pg",
+    "postgres_server_version": "17.12",
+    "database": "svara_ac15_099d5288",
+    "tools": {
+      "pg_dump": "postgres:17-alpine: pg_dump",
+      "pg_restore": "postgres:17-alpine: pg_restore",
+      "mode": "docker"
+    }
+  },
+  "commands": {
+    "dump": "pg_dump --dbname=\"$DATABASE_URL\" --format=custom --file=backup.dump",
+    "restore": "pg_restore --dbname=\"$DATABASE_URL\" --clean --if-exists --no-owner --no-privileges backup.dump",
+    "note": "Di lingkungan tanpa klien PostgreSQL, skrip memakai image postgres resmi lewat Docker."
   },
   "steps": [
-    "Seed basis data sintetis.",
-    "VACUUM INTO untuk membuat cadangan.",
+    "Buat basis data sementara baru dan seed data sintetis.",
+    "pg_dump format custom ke file cadangan.",
     "Hapus satu respons sintetis dan catat audit.",
-    "Pulihkan cadangan, buka ulang, dan verifikasi respons kembali.",
+    "Hapus lalu buat ulang basis data (kosong).",
+    "pg_restore memulihkan dump dan verifikasi respons kembali.",
     "Catat audit pemulihan setelah restore."
   ],
   "before": {
     "responses": 6,
     "answers": 18,
     "audit_logs": 8,
-    "backup_created": true
+    "server_version": "17.12",
+    "backup_created": true,
+    "backup_bytes": 47532
   },
   "after_delete": {
     "responses": 5,
     "answers": 15,
+    "audit_logs": 9,
+    "server_version": "17.12",
     "target_present": false
   },
   "after_restore": {
     "responses": 6,
     "answers": 18,
     "audit_logs": 9,
+    "server_version": "17.12",
     "target_present": true
   },
   "interpretation": {
@@ -36,6 +54,7 @@
   },
   "limitations": [
     "Tidak menguji cadangan terenkripsi, penyimpanan off-site, atau RPO/RTO.",
+    "Basis data, klien, dan alat cadangan berjalan di mesin yang sama.",
     "Tidak menggantikan prosedur operasional dan persetujuan pengendali data.",
     "File bukti hanya ringkasan lokal, bukan audit pihak ketiga."
   ]

@@ -1,12 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
 const PORT = 3191;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
-const DB_PATH = resolve('server/test/.tmp-acceptance.sqlite');
 const INTEGRATION_TOKEN = 'token-uji-integrasi';
 
 let server: ChildProcess | undefined;
@@ -85,16 +83,12 @@ async function waitForServer(child: ChildProcess): Promise<void> {
 }
 
 before(async () => {
-  for (const suffix of ['', '-wal', '-shm']) {
-    const file = `${DB_PATH}${suffix}`;
-    if (existsSync(file)) rmSync(file);
-  }
-  mkdirSync(resolve('server/test'), { recursive: true });
+  await resetTestDatabase();
   server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     env: {
       ...process.env,
       PORT: String(PORT),
-      DB_PATH,
+      DATABASE_URL: databaseUrl,
       INTEGRATION_TOKEN,
       COOKIE_SECURE: '0',
       ENABLE_HSTS: '0',
@@ -107,9 +101,10 @@ before(async () => {
   await waitForServer(server);
 });
 
-after(() => {
+after(async () => {
   stopping = true;
   server?.kill();
+  await closeTestDatabase();
 });
 
 test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
@@ -631,6 +626,17 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
   ));
 });
 
+test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
+  const admin = await login('admin@svara.local');
+  const stats = data<{
+    perCreator: Array<{ id: string; surveys: number; responses: number }>;
+    perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
+  }>(await call('/admin/stats', { cookie: admin }));
+  assert.ok(stats.perCreator.length >= 1);
+  assert.ok(stats.perSurvey.length >= 1);
+  assert.ok(stats.perSurvey.every((row) => typeof row.owner === 'string'));
+});
+
 test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas', async () => {
   const admin = await login('admin@svara.local');
   const events = data<Array<{ event_id: string; status: string; response_id: string | null }>>(
@@ -668,6 +674,14 @@ test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas'
   assert.ok(scopedData.data.length <= 2);
   assert.ok(!scopedData.columns.includes('text'));
   assert.ok(!JSON.stringify(scopedData.data).includes('Perlu panduan singkat.'));
+
+  const byVersionId = await call('/integration/survey-data?survey_id=s_demo1&version=v_demo1_1&limit=1', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(byVersionId.status, 200, byVersionId.text);
+  const byVersionJson = byVersionId.json;
+  assert.ok(byVersionJson && typeof byVersionJson.survey_version === 'number');
+  assert.equal(byVersionJson.survey_version, 1);
 
   const audit = data<Array<{ action: string; actor: string }>>(await call('/admin/audit', { cookie: admin }));
   assert.ok(audit.some((log) => log.actor === 'layanan-15'));
