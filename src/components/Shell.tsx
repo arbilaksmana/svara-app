@@ -50,7 +50,7 @@ function Wordmark({ to }: { to: string }) {
       className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       <BrandMark />
-      <span>Svara</span>
+      <span className="hidden sm:inline">Svara</span>
     </Link>
   );
 }
@@ -91,9 +91,17 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
     return () => document.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
+  function handleSignOut() {
+    setMenuOpen(false);
+    void signOut().finally(() => {
+      notify('Anda telah keluar.');
+      router.push(ROUTES.home);
+    });
+  }
+
   return (
     <header className="sticky top-0 z-nav">
-      <div className="relative mx-auto w-fit max-w-[calc(100%-2rem)]">
+      <div className="relative mx-auto w-[calc(100%-3.5rem)] sm:w-fit">
         <div className={`relative flex items-center gap-3 bg-dark p-2 sm:gap-5 ${OUTER}`}>
           {/* Fillet cekung, path diambil dari SVG nav referensi (20x20 per sudut). */}
           {([-1, 1] as const).map((side) => (
@@ -107,7 +115,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               </svg>
             </span>
           ))}
-          <div className="flex min-w-0 items-center gap-5">
+          <div className="flex w-full min-w-0 items-center justify-between gap-5 sm:w-auto sm:justify-start">
             <Wordmark to={homeTo} />
 
           {/* Desktop: deretan tautan seperti referensi. */}
@@ -126,23 +134,40 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               type="button"
               aria-expanded={menuOpen}
               aria-controls="pill-menu"
+              aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
               onClick={() => setMenuOpen((v) => !v)}
-              className={`inline-flex min-h-[44px] items-center rounded-full px-2.5 text-body-sm font-normal text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
+              className={`inline-flex size-11 items-center justify-center rounded-full text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
             >
-              Menu
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                className="size-5"
+              >
+                {menuOpen ? (
+                  <>
+                    <path d="M5 5l10 10" />
+                    <path d="M15 5 5 15" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M3 6h14" />
+                    <path d="M3 10h14" />
+                    <path d="M3 14h14" />
+                  </>
+                )}
+              </svg>
             </button>
           </div>
 
           {current ? (
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="hidden shrink-0 items-center gap-1 sm:flex">
               <button
                 type="button"
-                onClick={() => {
-                  void signOut().finally(() => {
-                    notify('Anda telah keluar.');
-                    router.push(ROUTES.home);
-                  });
-                }}
+                onClick={handleSignOut}
                 className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
               >
                 Keluar
@@ -151,7 +176,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
           ) : (
             <Link
               href={ROUTES.login}
-              className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
+              className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 sm:inline-flex ${PRESS_LINK}`}
             >
               Masuk
             </Link>
@@ -162,7 +187,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
           <nav
             id="pill-menu"
             aria-label="Navigasi seluler"
-            className={`absolute inset-x-0 top-full mt-2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
+            className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
           >
             <ul className="flex flex-col gap-1">
               {nav.map((item) => (
@@ -180,6 +205,25 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 </li>
               ))}
             </ul>
+            <div className="mt-1 border-t border-n200 pt-1">
+              {current ? (
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0"
+                >
+                  Keluar
+                </button>
+              ) : (
+                <Link
+                  href={ROUTES.login}
+                  onClick={() => setMenuOpen(false)}
+                  className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
+                >
+                  Masuk
+                </Link>
+              )}
+            </div>
           </nav>
         )}
       </div>
