@@ -27,6 +27,23 @@ pnpm start          # API + dist pada 127.0.0.1:3000
 
 Jika `DB_PATH` masih kosong, jalankan `pnpm admin:bootstrap` lebih dulu agar ada akun admin.
 
+## Docker
+
+```bash
+docker compose build
+docker compose run --rm \
+  -e BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
+  -e BOOTSTRAP_ADMIN_NAME=Administrator \
+  -e BOOTSTRAP_ADMIN_PASSWORD='sandi-kuat-dari-secret-manager' \
+  app tsx server/scripts/bootstrap-admin.ts
+docker compose up -d
+```
+
+- Data SQLite tersimpan di volume `svara_data`.
+- Port hanya bind ke `127.0.0.1:3000`; letakkan reverse proxy/TLS di depannya.
+- Set `APP_ORIGIN` ke origin publik, lalu `COOKIE_SECURE=1` dan `ENABLE_HSTS=1` setelah HTTPS aktif.
+- Jangan set `SEED_DEMO=1` di production; container memakai `NODE_ENV=production` dan akan menolak startup.
+
 Perintah verifikasi:
 
 ```bash
