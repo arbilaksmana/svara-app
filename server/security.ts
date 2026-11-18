@@ -51,10 +51,10 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
-export function createSession(accountId: string): { token: string; expiresAt: string } {
+export async function createSession(accountId: string): Promise<{ token: string; expiresAt: string }> {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + SESSION_MS).toISOString();
-  run(
+  await run(
     'INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
     sha256(token),
     accountId,
@@ -64,8 +64,8 @@ export function createSession(accountId: string): { token: string; expiresAt: st
   return { token, expiresAt };
 }
 
-export function destroySession(token: string): void {
-  run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
+export async function destroySession(token: string): Promise<void> {
+  await run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
 }
 
 export function sessionCookie(token: string, secure: boolean): string {
@@ -85,10 +85,10 @@ export function clearSessionCookie(): string {
 }
 
 /** Pasang akun aktif dari cookie sesi; token mentah tidak pernah disimpan di basis data. */
-export function attachSession(req: AuthedRequest, _res: Response, next: NextFunction): void {
+export async function attachSession(req: AuthedRequest, _res: Response, next: NextFunction): Promise<void> {
   const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
   if (!token) return next();
-  const row = get<AccountRow & { expires_at: string }>(
+  const row = await get<AccountRow & { expires_at: string }>(
     `SELECT a.id, a.email, a.display_name, a.role, a.status, s.expires_at
        FROM sessions s JOIN accounts a ON a.id = s.account_id
       WHERE s.token_hash = ?`,
@@ -96,7 +96,7 @@ export function attachSession(req: AuthedRequest, _res: Response, next: NextFunc
   );
   if (!row) return next();
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    destroySession(token);
+    await destroySession(token);
     return next();
   }
   if (row.status !== 'active') return next();
@@ -183,6 +183,6 @@ export function rateLimit(options: { key: string; limit: number; windowMs: numbe
   return true;
 }
 
-export function knownAccountEmails(): string[] {
-  return all<{ email: string }>('SELECT email FROM accounts ORDER BY email').map((row) => row.email);
+export async function knownAccountEmails(): Promise<string[]> {
+  return (await all<{ email: string }>('SELECT email FROM accounts ORDER BY email')).map((row) => row.email);
 }

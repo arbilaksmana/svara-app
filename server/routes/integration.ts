@@ -40,25 +40,32 @@ function serviceAuthorized(req: Request): boolean {
   return Boolean(expected) && header === `Bearer ${expected}`;
 }
 
-integrationRouter.get('/integration/survey-data', (req: Request, res: Response) => {
+integrationRouter.get('/integration/survey-data', async (req: Request, res: Response) => {
   try {
     if (!serviceAuthorized(req)) {
       fail(401, 'unauthenticated_service', 'Kredensial layanan tidak valid.');
     }
     const surveyId = typeof req.query.survey_id === 'string' ? req.query.survey_id : '';
-    const survey = get<SurveyRow>('SELECT id, title, status, current_version_id FROM surveys WHERE id = ?', surveyId);
+    const survey = await get<SurveyRow>('SELECT id, title, status, current_version_id FROM surveys WHERE id = ?', surveyId);
     if (!survey) fail(404, 'not_found', 'Survei tidak ditemukan untuk cakupan layanan.');
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
     let version: VersionRow | undefined;
     if (requested) {
-      version = get<VersionRow>(
-        'SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND (id = ? OR number = ?)',
-        survey.id,
-        requested,
-        Number(requested),
-      );
+      const requestedNumber = Number(requested);
+      version = Number.isInteger(requestedNumber)
+        ? await get<VersionRow>(
+            'SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND (id = ? OR number = ?)',
+            survey.id,
+            requested,
+            requestedNumber,
+          )
+        : await get<VersionRow>(
+            'SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND id = ?',
+            survey.id,
+            requested,
+          );
     } else {
-      version = get<VersionRow>(
+      version = await get<VersionRow>(
         "SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND status = 'published' ORDER BY number DESC LIMIT 1",
         survey.id,
       );
@@ -68,9 +75,9 @@ integrationRouter.get('/integration/survey-data', (req: Request, res: Response) 
     const offset = Number(req.query.offset ?? 0);
     const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
     const total = Number(
-      get<{ count: number }>('SELECT COUNT(*) AS count FROM responses WHERE version_id = ?', version.id)?.count ?? 0,
+      (await get<{ count: number }>('SELECT COUNT(*) AS count FROM responses WHERE version_id = ?', version.id))?.count ?? 0,
     );
-    const responses = all<ResponseRow>(
+    const responses = await all<ResponseRow>(
       'SELECT id, respondent_id, submitted_at, assignment_id FROM responses WHERE version_id = ? ORDER BY submitted_at, id LIMIT ? OFFSET ?',
       version.id,
       limit,
@@ -78,7 +85,7 @@ integrationRouter.get('/integration/survey-data', (req: Request, res: Response) 
     );
     const ids = responses.map((row) => row.id);
     const answers = ids.length
-      ? all<AnswerRow>(
+      ? await all<AnswerRow>(
           `SELECT response_id, question_code, option_id, value, text, skipped
              FROM answers WHERE response_id IN (${ids.map(() => '?').join(',')})
             ORDER BY question_code`,
@@ -91,16 +98,15 @@ integrationRouter.get('/integration/survey-data', (req: Request, res: Response) 
       list.push(answer);
       byResponse.set(answer.response_id, list);
     }
-    const eventId = newId('evt');
-    run(
+    await run(
       `INSERT INTO integration_events (id, event_id, type, target, status, attempts, at, simulated, response_id, last_error, payload)
        VALUES (?, ?, 'survey-data.read', 'module_15', 'delivered', 1, ?, 1, NULL, NULL, ?)`,
-      eventId,
+      newId('evt'),
       newId('event'),
       nowIso(),
       JSON.stringify({ survey_id: survey.id, version_id: version.id, rows: responses.length, offset: safeOffset, limit }),
     );
-    run(
+    await run(
       'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
       newId('log'),
       'layanan-15',

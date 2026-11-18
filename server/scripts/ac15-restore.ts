@@ -1,102 +1,214 @@
 /**
- * DEMO ONLY — uji cadangan/pulihkan lokal pada basis data sintetis.
+ * DEMO ONLY — uji pg_dump/pg_restore lokal pada basis data sintetis.
  * Bukan bukti kelayakan operasional, RPO/RTO, atau audit produksi.
+ *
+ * Skrip membuat basis data sementara sendiri, mengambil dump custom, menghapus
+ * satu respons, menghapus lalu membuat ulang basis data, dan memulihkan dump.
+ * Tidak pernah menyentuh basis data yang sudah ada selain membuat basis data baru.
  */
-import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { Client } from 'pg';
+
+const adminRaw = process.env.AC15_ADMIN_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
+if (!adminRaw) {
+  throw new Error('AC15_ADMIN_DATABASE_URL atau DATABASE_URL wajib diisi (butuh izin CREATE DATABASE).');
+}
+
+const adminUrl = new URL(adminRaw);
+const dbName = `svara_ac15_${randomBytes(4).toString('hex')}`;
+const sourceUrl = new URL(adminRaw);
+sourceUrl.pathname = `/${dbName}`;
+const sourceUrlText = sourceUrl.toString();
 
 const workDir = mkdtempSync(resolve(tmpdir(), 'svara-ac15-'));
-const dbPath = resolve(workDir, 'source.sqlite');
-const backupPath = resolve(workDir, 'backup.sqlite');
+const backupPath = resolve(workDir, 'backup.dump');
 const evidencePath = resolve('docs/test-evidence/ac15-restore.json');
+const dockerImage = process.env.AC15_PG_IMAGE ?? 'postgres:17-alpine';
 
-function open(path: string): DatabaseSync {
-  return new DatabaseSync(path);
+interface PgTool {
+  command: string;
+  args: string[];
+  mode: 'native' | 'docker';
+  version: string;
 }
 
-function count(db: DatabaseSync, table: string): number {
-  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
-  return Number(row.count);
+const shellPath = resolve(workDir).replaceAll('\\', '/');
+
+function dockerPrefix(): string[] {
+  const args = ['run', '--rm', '-v', `${shellPath}:/backup`, '-e', `PGPASSWORD=${decodeURIComponent(sourceUrl.password)}`];
+  if (process.platform === 'linux') {
+    args.push('--network', 'host');
+  } else {
+    args.push('--add-host', 'host.docker.internal:host-gateway');
+  }
+  return [...args, dockerImage];
 }
 
-function audit(db: DatabaseSync, actor: string, action: string, object: string): void {
-  db.prepare(
-    'INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(`audit_ac15_${randomUUID()}`, actor, action, object, 'berhasil', new Date().toISOString());
+function dockerUrl(): string {
+  if (process.platform === 'linux') return sourceUrlText;
+  const url = new URL(sourceUrlText);
+  url.hostname = 'host.docker.internal';
+  return url.toString();
+}
+
+function resolveTool(tool: 'pg_dump' | 'pg_restore', nativeArgs: string[], dockerArgs: string[]): PgTool {
+  const native = spawnSync(tool, ['--version'], { encoding: 'utf8' });
+  if (native.status === 0) {
+    return { command: tool, args: nativeArgs, mode: 'native', version: native.stdout.trim() };
+  }
+  const docker = spawnSync('docker', ['--version'], { encoding: 'utf8' });
+  if (docker.status !== 0) {
+    throw new Error(`${tool} tidak ada di PATH dan Docker tidak tersedia. Pasang klien PostgreSQL atau jalankan dengan Docker.`);
+  }
+  return { command: 'docker', args: [...dockerPrefix(), tool, ...dockerArgs], mode: 'docker', version: `${dockerImage}: ${tool}` };
+}
+
+function runTool(tool: PgTool, label: string): void {
+  const result = spawnSync(tool.command, tool.args, { encoding: 'utf8', timeout: 180_000 });
+  if (result.status !== 0) {
+    throw new Error(`${label} gagal (kode ${result.status}): ${result.stderr || result.stdout}`);
+  }
+}
+
+async function withClient<T>(url: string, fn: (client: Client) => Promise<T>): Promise<T> {
+  const client = new Client({ connectionString: url });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}
+
+async function counts(url: string): Promise<{ responses: number; answers: number; audit_logs: number; server_version: string }> {
+  return withClient(url, async (client) => {
+    const result = await client.query<{ responses: number; answers: number; audit_logs: number; server_version: string }>(
+      `SELECT
+         (SELECT COUNT(*)::int FROM responses) AS responses,
+         (SELECT COUNT(*)::int FROM answers) AS answers,
+         (SELECT COUNT(*)::int FROM audit_logs) AS audit_logs,
+         current_setting('server_version') AS server_version`,
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error('gagal membaca jumlah baris.');
+    return row;
+  });
+}
+
+async function recreateDatabase(): Promise<void> {
+  await withClient(adminUrl.toString(), async (client) => {
+    await client.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [dbName]);
+    await client.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+    await client.query(`CREATE DATABASE "${dbName}"`);
+  });
 }
 
 try {
+  await withClient(adminUrl.toString(), async (client) => {
+    await client.query(`CREATE DATABASE "${dbName}"`);
+  });
+
   const seeded = spawnSync(
     process.execPath,
     ['--import', 'tsx', 'server/seed.ts', '--reset'],
-    { env: { ...process.env, DB_PATH: dbPath }, encoding: 'utf8' },
+    { env: { ...process.env, DATABASE_URL: sourceUrlText, SEED_DEMO: '1' }, encoding: 'utf8', timeout: 120_000 },
   );
-  if (seeded.status !== 0) {
-    throw new Error(`seed gagal: ${seeded.stderr || seeded.stdout}`);
-  }
+  if (seeded.status !== 0) throw new Error(`seed gagal: ${seeded.stderr || seeded.stdout}`);
 
-  let db = open(dbPath);
-  const beforeResponses = count(db, 'responses');
-  const beforeAnswers = count(db, 'answers');
-  const beforeAudit = count(db, 'audit_logs');
-  const target = db.prepare('SELECT id FROM responses ORDER BY submitted_at LIMIT 1').get() as
-    | { id: string }
-    | undefined;
-  if (!target) throw new Error('tidak ada respons sintetis untuk diuji');
-  const targetId = target.id;
+  const before = await counts(sourceUrlText);
+  const targetId = await withClient(sourceUrlText, async (client) => {
+    const row = await client.query<{ id: string }>('SELECT id FROM responses ORDER BY submitted_at LIMIT 1');
+    return row.rows[0]?.id;
+  });
+  if (!targetId) throw new Error('tidak ada respons sintetis untuk diuji');
 
-  db.exec(`VACUUM INTO '${backupPath.replaceAll('\\', '/').replaceAll("'", "''")}'`);
-  const backupSize = existsSync(backupPath);
+  const dump = resolveTool(
+    'pg_dump',
+    ['--dbname', sourceUrlText, '--format=custom', '--file', backupPath],
+    ['--dbname', dockerUrl(), '--format=custom', '--file', '/backup/backup.dump'],
+  );
+  runTool(dump, 'pg_dump');
+  const backupSize = statSync(backupPath).size;
 
-  db.exec('BEGIN');
-  db.prepare('DELETE FROM responses WHERE id = ?').run(targetId);
-  audit(db, 'demo-ac15', 'Penghapusan sintetis', targetId);
-  db.exec('COMMIT');
-  const afterDeleteResponse = db.prepare('SELECT COUNT(*) AS count FROM responses WHERE id = ?').get(targetId) as { count: number };
-  const afterDeleteResponses = count(db, 'responses');
-  const afterDeleteAnswers = count(db, 'answers');
-  db.close();
+  await withClient(sourceUrlText, async (client) => {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM responses WHERE id = $1', [targetId]);
+    await client.query(
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [`audit_ac15_${randomUUID()}`, 'demo-ac15', 'Penghapusan sintetis', targetId, 'berhasil', new Date().toISOString()],
+    );
+    await client.query('COMMIT');
+  });
 
-  copyFileSync(backupPath, dbPath);
-  rmSync(`${dbPath}-wal`, { force: true });
-  rmSync(`${dbPath}-shm`, { force: true });
+  const afterDelete = await counts(sourceUrlText);
+  const deletedPresent = await withClient(sourceUrlText, async (client) => {
+    const row = await client.query('SELECT 1 FROM responses WHERE id = $1', [targetId]);
+    return row.rowCount !== 0;
+  });
 
-  db = open(dbPath);
-  const restored = db.prepare('SELECT id FROM responses WHERE id = ?').get(targetId) as { id: string } | undefined;
-  audit(db, 'demo-ac15', 'Pemulihan sintetis', targetId);
-  const afterRestoreResponses = count(db, 'responses');
-  const afterRestoreAnswers = count(db, 'answers');
-  const afterRestoreAudit = count(db, 'audit_logs');
-  const deleteUndone = afterRestoreResponses === beforeResponses && restored?.id === targetId;
-  db.close();
+  await recreateDatabase();
 
-  if (afterDeleteResponse.count !== 0) throw new Error('penghapusan sintetis tidak berlaku');
+  const restore = resolveTool(
+    'pg_restore',
+    ['--dbname', sourceUrlText, '--clean', '--if-exists', '--no-owner', '--no-privileges', backupPath],
+    ['--dbname', dockerUrl(), '--clean', '--if-exists', '--no-owner', '--no-privileges', '/backup/backup.dump'],
+  );
+  runTool(restore, 'pg_restore');
+
+  const restored = await withClient(sourceUrlText, async (client) => {
+    const row = await client.query<{ id: string }>('SELECT id FROM responses WHERE id = $1', [targetId]);
+    return row.rows[0]?.id;
+  });
+  await withClient(sourceUrlText, async (client) => {
+    await client.query(
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [`audit_ac15_${randomUUID()}`, 'demo-ac15', 'Pemulihan sintetis', targetId, 'berhasil', new Date().toISOString()],
+    );
+  });
+  const afterRestore = await counts(sourceUrlText);
+
+  const deleteUndone = afterRestore.responses === before.responses && restored === targetId;
+  if (deletedPresent) throw new Error('penghapusan sintetis tidak berlaku');
   if (!deleteUndone) throw new Error('pemulihan tidak mengembalikan respons yang dihapus');
 
   const report = {
-    label: 'DEMO ONLY — uji cadangan/pulihkan lokal, bukan bukti audit atau kesiapan produksi',
+    label: 'DEMO ONLY — uji pg_dump/pg_restore lokal, bukan bukti audit atau kesiapan produksi',
     generated_at: new Date().toISOString(),
-    environment: { node: process.version, platform: `${process.platform} ${process.arch}`, storage: 'SQLite node:sqlite' },
+    environment: {
+      node: process.version,
+      platform: `${process.platform} ${process.arch}`,
+      storage: 'PostgreSQL via pg',
+      postgres_server_version: before.server_version,
+      database: dbName,
+      tools: { pg_dump: dump.version, pg_restore: restore.version, mode: dump.mode },
+    },
+    commands: {
+      dump: 'pg_dump --dbname="$DATABASE_URL" --format=custom --file=backup.dump',
+      restore: 'pg_restore --dbname="$DATABASE_URL" --clean --if-exists --no-owner --no-privileges backup.dump',
+      note: 'Di lingkungan tanpa klien PostgreSQL, skrip memakai image postgres resmi lewat Docker.',
+    },
     steps: [
-      'Seed basis data sintetis.',
-      'VACUUM INTO untuk membuat cadangan.',
+      'Buat basis data sementara baru dan seed data sintetis.',
+      'pg_dump format custom ke file cadangan.',
       'Hapus satu respons sintetis dan catat audit.',
-      'Pulihkan cadangan, buka ulang, dan verifikasi respons kembali.',
+      'Hapus lalu buat ulang basis data (kosong).',
+      'pg_restore memulihkan dump dan verifikasi respons kembali.',
       'Catat audit pemulihan setelah restore.',
     ],
-    before: { responses: beforeResponses, answers: beforeAnswers, audit_logs: beforeAudit, backup_created: backupSize },
-    after_delete: { responses: afterDeleteResponses, answers: afterDeleteAnswers, target_present: afterDeleteResponse.count !== 0 },
-    after_restore: { responses: afterRestoreResponses, answers: afterRestoreAnswers, audit_logs: afterRestoreAudit, target_present: restored?.id === targetId },
+    before: { ...before, backup_created: backupSize > 0, backup_bytes: backupSize },
+    after_delete: { ...afterDelete, target_present: deletedPresent },
+    after_restore: { ...afterRestore, target_present: restored === targetId },
     interpretation: {
       deletion_is_undone_by_restore: deleteUndone,
       note: 'Pemulihan mengembalikan keadaan cadangan. Penghapusan permintaan data setelah restore harus diulang dan dicatat; jangan mengklaim bahwa restore menghapus data secara permanen.',
     },
     limitations: [
       'Tidak menguji cadangan terenkripsi, penyimpanan off-site, atau RPO/RTO.',
+      'Basis data, klien, dan alat cadangan berjalan di mesin yang sama.',
       'Tidak menggantikan prosedur operasional dan persetujuan pengendali data.',
       'File bukti hanya ringkasan lokal, bukan audit pihak ketiga.',
     ],
@@ -107,5 +219,13 @@ try {
   console.log(JSON.stringify(report, null, 2));
   console.log(`\nBukti ditulis ke ${evidencePath}`);
 } finally {
+  try {
+    await withClient(adminUrl.toString(), async (client) => {
+      await client.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [dbName]);
+      await client.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+    });
+  } catch (error) {
+    console.error('[ac15] gagal membersihkan basis data sementara', error);
+  }
   rmSync(workDir, { recursive: true, force: true });
 }

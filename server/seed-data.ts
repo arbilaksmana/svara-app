@@ -18,12 +18,12 @@ function addYears(date: string, years: number): string {
  * Seed demo idempoten: hanya berjalan dengan SEED_DEMO=1 dan tidak pernah di production.
  * Tidak ada nama, email, atau jawaban dari orang nyata.
  */
-export function seedDemoIfEmpty(): boolean {
+export async function seedDemoIfEmpty(): Promise<boolean> {
   if (!demoSeedEnabled()) return false;
-  const existing = get<{ count: number }>('SELECT COUNT(*) AS count FROM accounts');
+  const existing = await get<{ count: number }>('SELECT COUNT(*) AS count FROM accounts');
   if (existing && existing.count > 0) return false;
 
-  withTx(() => {
+  await withTx(async () => {
     const createdAt = '2026-11-01T00:00:00Z';
     const accounts: Array<[string, string, string, string, string, string]> = [
       ['u_admin', 'admin@svara.local', 'Rani Wijaya', 'super_admin', 'active', SEED_PASSWORD],
@@ -33,7 +33,7 @@ export function seedDemoIfEmpty(): boolean {
       ['u_nonaktif', 'suspended@svara.local', 'Bayu Setiawan', 'creator', 'suspended', SEED_PASSWORD],
     ];
     for (const [id, email, name, role, status, password] of accounts) {
-      run(
+      await run(
         'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         id,
         email,
@@ -45,7 +45,7 @@ export function seedDemoIfEmpty(): boolean {
       );
     }
 
-    run(
+    await run(
       `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -62,7 +62,7 @@ export function seedDemoIfEmpty(): boolean {
       '1.0',
       1,
     );
-    run(
+    await run(
       `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -104,7 +104,7 @@ export function seedDemoIfEmpty(): boolean {
     ];
     for (const [id, profile, version, effective, purpose, categories, module15, retention] of notices) {
       const contact = profile === 'p_smk' ? 'Lihat pemberitahuan survei' : 'privasi@organisasi.contoh';
-      run(
+      await run(
         `INSERT INTO notices (id, profile_id, version, effective_date, purpose, data_categories, module15_usage,
           retention_text, recipients, contact, rights, child_data_text, cross_border_text, synthetic_placeholder)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
@@ -179,7 +179,7 @@ export function seedDemoIfEmpty(): boolean {
       ],
     ];
     for (const [id, owner, profile, title, purpose, objectLabel, instructions, status, created, updated] of surveys) {
-      run(
+      await run(
         `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
@@ -194,7 +194,7 @@ export function seedDemoIfEmpty(): boolean {
         updated,
         null,
       );
-      run(
+      await run(
         'INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 1)',
         id,
       );
@@ -207,15 +207,15 @@ export function seedDemoIfEmpty(): boolean {
       ['v_demo4_1', 's_demo4', 1, 'closed', '1.0', '2026-10-02T02:00:00Z', '2026-11-01T01:00:00Z'],
     ];
     for (const row of versions) {
-      run(
+      await run(
         `INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at, closed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         ...row,
       );
     }
-    run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo1_2', 's_demo1');
-    run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo2_1', 's_demo2');
-    run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo4_1', 's_demo4');
+    await run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo1_2', 's_demo1');
+    await run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo2_1', 's_demo2');
+    await run('UPDATE surveys SET current_version_id = ? WHERE id = ?', 'v_demo4_1', 's_demo4');
 
     const questions: Array<[string, string, string, number, string, boolean, string, string, string | null, string | null, string | null]> = [
       ['q_ad01', 'v_demo1_1', 'AD01', 1, 'likert', true, 'Bagian 1 · Penerimaan', 'Alat bantu ini membantu saya menyelesaikan tugas yang diberikan.', null, null, 'adopsi'],
@@ -229,7 +229,7 @@ export function seedDemoIfEmpty(): boolean {
       ['q_old01', 'v_demo4_1', 'L01', 1, 'likert', true, 'Bagian 1', 'Pernyataan pada versi lama yang sudah ditutup.', null, null, null],
     ];
     for (const [id, version, code, ord, type, required, section, label, hint, group, dimension] of questions) {
-      run(
+      await run(
         `INSERT INTO questions (id, version_id, code, ord, type, required, section, label, hint, group_code, dimension_code, direction)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         id,
@@ -248,9 +248,9 @@ export function seedDemoIfEmpty(): boolean {
 
     const fiveLabels = ['Sangat tidak setuju', 'Tidak setuju', 'Netral', 'Setuju', 'Sangat setuju'];
     const fourLabels = ['Tidak sesuai', 'Kurang sesuai', 'Sesuai', 'Sangat sesuai'];
-    const likert = (questionId: string, count: number, labels: string[]) => {
+    const likert = async (questionId: string, count: number, labels: string[]) => {
       for (let i = 1; i <= count; i += 1) {
-        run(
+        await run(
           'INSERT INTO question_options (id, question_id, ord, label, value) VALUES (?, ?, ?, ?, ?)',
           `${questionId}_opt${i}`,
           questionId,
@@ -260,10 +260,10 @@ export function seedDemoIfEmpty(): boolean {
         );
       }
     };
-    for (const id of ['q_ad01', 'q_ts01', 'q_ad01_v2', 'q_ts01_v2', 'q_old01']) likert(id, 5, fiveLabels);
-    for (const id of ['q_p01', 'q_p02']) likert(id, 4, fourLabels);
+    for (const id of ['q_ad01', 'q_ts01', 'q_ad01_v2', 'q_ts01_v2', 'q_old01']) await likert(id, 5, fiveLabels);
+    for (const id of ['q_p01', 'q_p02']) await likert(id, 4, fourLabels);
 
-    run(
+    await run(
       `INSERT INTO assignments (id, survey_id, version_id, label, participant_ref) VALUES
        ('a_demo01', 's_demo1', 'v_demo1_1', 'Kelas A · 01', 'lokal-01'),
        ('a_demo02', 's_demo1', 'v_demo1_1', 'Kelas A · 02', 'lokal-02'),
@@ -282,7 +282,7 @@ export function seedDemoIfEmpty(): boolean {
       ['inv_p01', 'a_perpus01', 's_demo2', 'v_demo2_1', 'undangan-perpus', 'UND-P01-AKTIF', 'active', '2026-12-31T00:00:00Z', null, null],
     ];
     for (const [id, assignment, survey, version, token, code, status, expires, used, revoked] of invitations) {
-      run(
+      await run(
         `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token, token_hash, status, expires_at, used_at, revoked_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
@@ -305,7 +305,7 @@ export function seedDemoIfEmpty(): boolean {
       ['pl_demo2', 's_demo2', 'v_demo2_1', 'link-umum-perpus', 'Tautan umum · perpustakaan', 'active'],
     ];
     for (const [id, survey, version, token, label, status] of links) {
-      run(
+      await run(
         `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         id,
@@ -328,7 +328,7 @@ export function seedDemoIfEmpty(): boolean {
       ['r_perpus01', 's_demo2', 'v_demo2_1', 'a_perpus01', 'p_perpus01', 'standalone', 'local', '2026-11-10T03:10:00Z'],
     ];
     for (const [id, survey, version, assignment, respondent, mode, source, submitted] of responses) {
-      run(
+      await run(
         `INSERT INTO responses (id, survey_id, version_id, assignment_id, respondent_id, collection_mode, identity_source, submitted_at, idempotency_key)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
@@ -341,7 +341,7 @@ export function seedDemoIfEmpty(): boolean {
         submitted,
         `key-${id}`,
       );
-      run(
+      await run(
         'INSERT INTO submission_attempts (id, scope, idempotency_key, payload_hash, response_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         `sa_${id}`,
         `${version}:${assignment}`,
@@ -352,10 +352,10 @@ export function seedDemoIfEmpty(): boolean {
       );
     }
 
-    const answer = (responseId: string, code: string, questionId: string, optionValue: number | null, text: string | null = null) => {
+    const answer = async (responseId: string, code: string, questionId: string, optionValue: number | null, text: string | null = null) => {
       const optionId = optionValue === null ? null : `${questionId}_opt${optionValue}`;
       const skipped = optionValue === null && (text === null || text === '');
-      run(
+      await run(
         `INSERT INTO answers (id, response_id, question_id, question_code, option_id, value, text, skipped)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         `ans_${responseId}_${code}`,
@@ -368,24 +368,24 @@ export function seedDemoIfEmpty(): boolean {
         bool(skipped),
       );
     };
-    answer('r_demo01', 'AD01', 'q_ad01', 4);
-    answer('r_demo01', 'TS01', 'q_ts01', 2);
-    answer('r_demo01', 'K02', 'q_k02', null, 'Perlu panduan singkat.');
-    answer('r_demo02', 'AD01', 'q_ad01', 2);
-    answer('r_demo02', 'TS01', 'q_ts01', 3);
-    answer('r_demo02', 'K02', 'q_k02', null);
-    answer('r_demo03', 'AD01', 'q_ad01', 4);
-    answer('r_demo03', 'TS01', 'q_ts01', 5);
-    answer('r_demo03', 'K02', 'q_k02', null, 'Koneksi lambat.');
-    answer('r_demo04', 'AD01', 'q_ad01', 5);
-    answer('r_demo04', 'TS01', 'q_ts01', 1);
-    answer('r_demo04', 'K02', 'q_k02', null);
-    answer('r_demo05', 'AD01', 'q_ad01', 3);
-    answer('r_demo05', 'TS01', 'q_ts01', 4);
-    answer('r_demo05', 'K02', 'q_k02', null);
-    answer('r_perpus01', 'P01', 'q_p01', 3);
-    answer('r_perpus01', 'P02', 'q_p02', 2);
-    answer('r_perpus01', 'K01', 'q_k01', null, 'Tambahkan jam buka.');
+    await answer('r_demo01', 'AD01', 'q_ad01', 4);
+    await answer('r_demo01', 'TS01', 'q_ts01', 2);
+    await answer('r_demo01', 'K02', 'q_k02', null, 'Perlu panduan singkat.');
+    await answer('r_demo02', 'AD01', 'q_ad01', 2);
+    await answer('r_demo02', 'TS01', 'q_ts01', 3);
+    await answer('r_demo02', 'K02', 'q_k02', null);
+    await answer('r_demo03', 'AD01', 'q_ad01', 4);
+    await answer('r_demo03', 'TS01', 'q_ts01', 5);
+    await answer('r_demo03', 'K02', 'q_k02', null, 'Koneksi lambat.');
+    await answer('r_demo04', 'AD01', 'q_ad01', 5);
+    await answer('r_demo04', 'TS01', 'q_ts01', 1);
+    await answer('r_demo04', 'K02', 'q_k02', null);
+    await answer('r_demo05', 'AD01', 'q_ad01', 3);
+    await answer('r_demo05', 'TS01', 'q_ts01', 4);
+    await answer('r_demo05', 'K02', 'q_k02', null);
+    await answer('r_perpus01', 'P01', 'q_p01', 3);
+    await answer('r_perpus01', 'P02', 'q_p02', 2);
+    await answer('r_perpus01', 'K01', 'q_k01', null, 'Tambahkan jam buka.');
 
     const consents: Array<[string, string, string, string, string, string, string, boolean, string, string | null]> = [
       ['c_demo01', 's_demo1', 'v_demo1_1', '1.0', 'Persetujuan wali', 'granted', '2026-11-09T04:58:00Z', true, 'verified', 'ref-wali-sintetis-01'],
@@ -393,7 +393,7 @@ export function seedDemoIfEmpty(): boolean {
       ['c_perpus01', 's_demo2', 'v_demo2_1', '1.0', 'Persetujuan diri', 'granted', '2026-11-10T03:08:00Z', true, 'not_required', null],
     ];
     for (const [id, survey, version, notice, basis, status, recorded, click, guardian, ref] of consents) {
-      run(
+      await run(
         `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at, respondent_click, guardian_evidence_status, guardian_evidence_ref)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
@@ -416,7 +416,7 @@ export function seedDemoIfEmpty(): boolean {
       ['g_04', 'u_creator_a', 's_demo2', false, true, false],
     ];
     for (const [id, account, surveyId, read, exportData, text] of grants) {
-      run(
+      await run(
         'INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text) VALUES (?, ?, ?, ?, ?, ?)',
         id,
         account,
@@ -438,7 +438,7 @@ export function seedDemoIfEmpty(): boolean {
       ['log_08', 'u_creator_a', 'Ekspor CSV', 's_demo1 · v1', 'berhasil', '2026-11-12T07:30:00Z'],
     ];
     for (const row of audit) {
-      run('INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES (?, ?, ?, ?, ?, ?)', ...row);
+      await run('INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES (?, ?, ?, ?, ?, ?)', ...row);
     }
 
     const events: Array<[string, string, string, string, string, number, string, boolean, string | null, string | null]> = [
@@ -447,7 +447,7 @@ export function seedDemoIfEmpty(): boolean {
       ['ie_03', 'ev_demo03', 'survey-data.read', 'module_15', 'failed', 3, '2026-11-11T01:00:00Z', true, null, 'Kredensial layanan belum disepakati'],
     ];
     for (const [id, eventId, type, target, status, attempts, at, simulated, responseId, lastError] of events) {
-      run(
+      await run(
         `INSERT INTO integration_events (id, event_id, type, target, status, attempts, at, simulated, response_id, last_error, payload)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         id,
@@ -463,7 +463,7 @@ export function seedDemoIfEmpty(): boolean {
       );
     }
 
-    run(
+    await run(
       `INSERT INTO data_requests (id, type, contact, note, status, created_at, updated_at, handled_by, outcome_note)
        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
       'dr_demo01',

@@ -2,16 +2,16 @@
  * DEMO ONLY — walkthrough sintetis AC16: tiga responden, ekspor CSV, rekonsiliasi.
  * Bukan studi lapangan dan bukan bukti persetujuan/legitimasi.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
 
 const PORT = 3198;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
-const DB_PATH = resolve(tmpdir(), 'svara-ac16-walkthrough.sqlite');
 const EVIDENCE_JSON = resolve('docs/test-evidence/ac16-walkthrough.json');
 const EVIDENCE_MD = resolve('docs/test-evidence/ac16-walkthrough.md');
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'SvaraDemo123!';
 
 interface ApiResult {
   status: number;
@@ -21,7 +21,6 @@ interface ApiResult {
 }
 
 let cookie = '';
-let stopping = false;
 
 async function call(
   path: string,
@@ -52,22 +51,6 @@ async function call(
 function data<T>(result: ApiResult): T {
   if (result.status >= 400) throw new Error(`HTTP ${result.status}: ${result.text}`);
   return result.body.data as T;
-}
-
-async function waitForServer(child: ChildProcess): Promise<void> {
-  const signal = new Promise<void>((resolveSignal) => {
-    let output = '';
-    const onData = (chunk: unknown) => {
-      output += String(chunk);
-      if (output.includes('Svara berjalan')) resolveSignal();
-    };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', onData);
-    child.once('exit', (code) => {
-      if (!stopping) throw new Error(`server demo berhenti (kode ${code}): ${output}`);
-    });
-  });
-  await signal;
 }
 
 function parseCsv(text: string): string[][] {
@@ -110,11 +93,13 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
+const database = await resetDemoDatabase();
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
   env: {
     ...process.env,
     PORT: String(PORT),
-    DB_PATH,
+    DATABASE_URL: database.databaseUrl,
+    SEED_DEMO: '1',
     COOKIE_SECURE: '0',
     APP_ORIGIN: `http://127.0.0.1:${PORT}`,
   },
@@ -122,10 +107,7 @@ const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
 });
 
 try {
-  rmSync(DB_PATH, { force: true });
-  rmSync(`${DB_PATH}-wal`, { force: true });
-  rmSync(`${DB_PATH}-shm`, { force: true });
-  await waitForServer(server);
+  await waitForServer(server, 'server demo AC16');
 
   const token = 'link-umum-demo';
   const createdIds: string[] = [];
@@ -176,7 +158,7 @@ try {
 
   data(await call('/auth/login', {
     method: 'POST',
-    body: { email: 'officer@svara.local', password: 'SvaraDemo123!' },
+    body: { email: 'officer@svara.local', password: SEED_PASSWORD },
   }));
   const summary = data<{
     total: number;
@@ -210,7 +192,12 @@ try {
   const report = {
     label: 'DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.',
     generated_at: new Date().toISOString(),
-    environment: { node: process.version, platform: `${process.platform} ${process.arch}`, storage: 'SQLite' },
+    environment: {
+      node: process.version,
+      platform: `${process.platform} ${process.arch}`,
+      storage: 'PostgreSQL via pg Pool',
+      postgres_server_version: database.serverVersion,
+    },
     scenario: { respondents: 3, survey: 's_demo1', version: 'v_demo1_1', patterns },
     reconciliation: {
       summary_total: summary.total,
@@ -265,13 +252,5 @@ try {
   console.log(JSON.stringify(report, null, 2));
   console.log(`\nBukti ditulis ke ${EVIDENCE_JSON} dan ${EVIDENCE_MD}`);
 } finally {
-  stopping = true;
-  server.kill();
-  await new Promise<void>((resolveExit) => {
-    if (server.exitCode !== null) resolveExit();
-    else server.once('exit', () => resolveExit());
-  });
-  rmSync(DB_PATH, { force: true });
-  rmSync(`${DB_PATH}-wal`, { force: true });
-  rmSync(`${DB_PATH}-shm`, { force: true });
+  await stopServer(server);
 }

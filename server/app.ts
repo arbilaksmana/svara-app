@@ -1,11 +1,13 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { attachSession, csrfGuard, requireAuth } from './security.ts';
+import type { AuthedRequest } from './security.ts';
 import { authRouter } from './routes/auth.ts';
 import { publicRouter } from './routes/public.ts';
 import { surveysRouter } from './routes/surveys.ts';
 import { adminRouter } from './routes/admin.ts';
 import { integrationRouter } from './routes/integration.ts';
+import { get } from './db.ts';
 import { sendError } from './http.ts';
 
 const CONTENT_SECURITY_POLICY = [
@@ -35,11 +37,19 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 app.use(express.json({ limit: '512kb' }));
-app.use(attachSession);
+app.use((req, res, next) => {
+  attachSession(req as AuthedRequest, res, next).catch(next);
+});
 app.use('/api', csrfGuard);
 
-app.get('/api/v1/health', (_req: Request, res: Response) => {
-  res.json({ data: { ok: true } });
+app.get('/api/v1/health', async (_req: Request, res: Response) => {
+  try {
+    await get('SELECT 1 AS ok');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { ok: true } });
+  } catch {
+    res.status(503).json({ error: 'Basis data tidak siap.', code: 'unavailable' });
+  }
 });
 
 app.use('/api/v1', authRouter);

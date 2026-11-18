@@ -1,4 +1,5 @@
 import { get, all } from './db.ts';
+import { sha256 } from './security.ts';
 
 export interface SurveyRow {
   id: string;
@@ -85,33 +86,33 @@ export interface PublicAccess {
   detail: string;
 }
 
-export function surveyById(id: string): SurveyRow | undefined {
+export async function surveyById(id: string): Promise<SurveyRow | undefined> {
   return get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', id);
 }
 
-export function versionById(id: string): VersionRow | undefined {
+export async function versionById(id: string): Promise<VersionRow | undefined> {
   return get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', id);
 }
 
-export function versionsFor(surveyId: string): VersionRow[] {
+export async function versionsFor(surveyId: string): Promise<VersionRow[]> {
   return all<VersionRow>('SELECT * FROM survey_versions WHERE survey_id = ? ORDER BY number', surveyId);
 }
 
-export function questionsFor(versionId: string): QuestionRow[] {
+export async function questionsFor(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord', versionId);
 }
 
-export function optionsFor(questionId: string): OptionRow[] {
+export async function optionsFor(questionId: string): Promise<OptionRow[]> {
   return all<OptionRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
 }
 
-export function grantFor(accountId: string, surveyId: string): GrantRow | undefined {
+export async function grantFor(accountId: string, surveyId: string): Promise<GrantRow | undefined> {
   return get<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? AND survey_id = ?', accountId, surveyId);
 }
 
-export function permissionsFor(accountId: string, role: string, survey: SurveyRow): Permissions {
+export async function permissionsFor(accountId: string, role: string, survey: SurveyRow): Promise<Permissions> {
   const owner = survey.owner_id === accountId;
-  const grant = grantFor(accountId, survey.id);
+  const grant = await grantFor(accountId, survey.id);
   if (role === 'super_admin' && !owner) {
     return {
       manage: false,
@@ -121,7 +122,7 @@ export function permissionsFor(accountId: string, role: string, survey: SurveyRo
       read_free_text: Boolean(grant?.can_read_free_text),
     };
   }
-  const settings = get<{ allow_results: number; allow_individual: number }>(
+  const settings = await get<{ allow_results: number; allow_individual: number }>(
     'SELECT allow_results, allow_individual FROM survey_settings WHERE survey_id = ?',
     survey.id,
   );
@@ -134,9 +135,9 @@ export function permissionsFor(accountId: string, role: string, survey: SurveyRo
   };
 }
 
-export function canSeeSurvey(accountId: string, survey: SurveyRow): boolean {
+export async function canSeeSurvey(accountId: string, survey: SurveyRow): Promise<boolean> {
   if (survey.owner_id === accountId) return true;
-  return Boolean(grantFor(accountId, survey.id));
+  return Boolean(await grantFor(accountId, survey.id));
 }
 
 export interface ResolvedToken {
@@ -149,15 +150,21 @@ export interface ResolvedToken {
   assignmentId: string | null;
 }
 
-export function resolvePublicToken(token: string): ResolvedToken | null {
-  const link = get<{ id: string; survey_id: string; version_id: string; status: string; expires_at: string | null }>(
+export async function resolvePublicToken(token: string): Promise<ResolvedToken | null> {
+  const link = await get<{
+    id: string;
+    survey_id: string;
+    version_id: string;
+    status: string;
+    expires_at: string | null;
+  }>(
     'SELECT id, survey_id, version_id, status, expires_at FROM public_links WHERE token_hash = ? OR token = ?',
     hashToken(token),
     token,
   );
   if (link) {
-    const survey = surveyById(link.survey_id);
-    const version = versionById(link.version_id);
+    const survey = await surveyById(link.survey_id);
+    const version = await versionById(link.version_id);
     if (!survey || !version) return null;
     return {
       survey,
@@ -169,7 +176,7 @@ export function resolvePublicToken(token: string): ResolvedToken | null {
       assignmentId: null,
     };
   }
-  const invitation = get<{
+  const invitation = await get<{
     id: string;
     survey_id: string;
     version_id: string;
@@ -177,8 +184,8 @@ export function resolvePublicToken(token: string): ResolvedToken | null {
     code: string;
   }>('SELECT id, survey_id, version_id, assignment_id, code FROM invitations WHERE token_hash = ? OR token = ?', hashToken(token), token);
   if (!invitation) return null;
-  const survey = surveyById(invitation.survey_id);
-  const version = versionById(invitation.version_id);
+  const survey = await surveyById(invitation.survey_id);
+  const version = await versionById(invitation.version_id);
   if (!survey || !version) return null;
   return {
     survey,
@@ -191,14 +198,14 @@ export function resolvePublicToken(token: string): ResolvedToken | null {
   };
 }
 
-import { sha256 } from './security.ts';
-
 export function hashToken(token: string): string {
   return sha256(token);
 }
 
-export function publicAccessState(token: string): { access: PublicAccess; resolved: ReturnType<typeof resolvePublicToken> } {
-  const resolved = resolvePublicToken(token);
+export async function publicAccessState(
+  token: string,
+): Promise<{ access: PublicAccess; resolved: ResolvedToken | null }> {
+  const resolved = await resolvePublicToken(token);
   if (!resolved) {
     return { resolved: null, access: { ok: false, code: 'not_found', detail: 'Tautan tidak dikenal.' } };
   }
@@ -213,7 +220,7 @@ export function publicAccessState(token: string): { access: PublicAccess; resolv
     return { resolved, access: { ok: false, code: 'closed', detail: 'Versi ini belum terbit atau sudah ditutup.' } };
   }
   if (linkId) {
-    const link = get<{ status: string; expires_at: string | null }>(
+    const link = await get<{ status: string; expires_at: string | null }>(
       'SELECT status, expires_at FROM public_links WHERE id = ?',
       linkId,
     );
@@ -225,7 +232,7 @@ export function publicAccessState(token: string): { access: PublicAccess; resolv
     }
   }
   if (invitationId) {
-    const invitation = get<{ status: string; expires_at: string | null; used_at: string | null }>(
+    const invitation = await get<{ status: string; expires_at: string | null; used_at: string | null }>(
       'SELECT status, expires_at, used_at FROM invitations WHERE id = ?',
       invitationId,
     );

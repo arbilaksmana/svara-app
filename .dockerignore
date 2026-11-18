@@ -1,0 +1,11 @@
+node_modules
+.git
+.github
+data
+dist
+docs/test-evidence
+server/test/.tmp-*
+*.log
+.env
+.env.*
+!.env.example

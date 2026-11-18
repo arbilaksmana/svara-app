@@ -1,14 +1,16 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { app, attachStatic } from './app.ts';
-import { DB_PATH, ensureSchema } from './db.ts';
+import { closePool } from './db.ts';
+import { migrate } from './migrate.ts';
 import { seedDemoIfEmpty } from './seed-data.ts';
 import { demoSeedEnabled } from './seed-policy.ts';
 
 const demoSeed = demoSeedEnabled();
-ensureSchema();
+await migrate();
+
 if (demoSeed) {
-  const seeded = seedDemoIfEmpty();
+  const seeded = await seedDemoIfEmpty();
   console.log(seeded ? '[seed] data demo dimuat' : '[seed] data demo sudah ada');
 } else {
   console.log('[seed] demo nonaktif; gunakan SEED_DEMO=1 atau bootstrap admin untuk basis data kosong');
@@ -20,9 +22,22 @@ if (serveStatic && existsSync(dist)) attachStatic(app, dist);
 
 const port = Number(process.env.PORT ?? (serveStatic ? 3000 : 3001));
 const host = process.env.HOST ?? '127.0.0.1';
+const databaseUrl = new URL(process.env.DATABASE_URL ?? '');
+const databaseLabel = `${databaseUrl.host}${databaseUrl.pathname}`;
 
-app.listen(port, host, () => {
+const server = app.listen(port, host, () => {
   console.log(`[api] Svara berjalan di http://${host}:${port}`);
-  console.log(`[db] ${DB_PATH}`);
+  console.log(`[db] postgres ${databaseLabel}`);
   console.log(`[static] ${serveStatic && existsSync(dist) ? dist : 'nonaktif (gunakan Vite di port 5173)'}`);
 });
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    server.close(() => {
+      closePool()
+        .catch((error) => console.error('[db] gagal menutup pool', error))
+        .finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 5_000).unref();
+  });
+}

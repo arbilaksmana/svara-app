@@ -112,20 +112,27 @@ function numberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function versionRows(surveyId: string): VersionDbRow[] {
+async function versionRows(surveyId: string): Promise<VersionDbRow[]> {
   return all<VersionDbRow>('SELECT * FROM survey_versions WHERE survey_id = ? ORDER BY number', surveyId);
 }
 
-function questionRows(versionId: string): QuestionDbRow[] {
+async function questionRows(versionId: string): Promise<QuestionDbRow[]> {
   return all<QuestionDbRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
 }
 
-function optionRows(questionId: string): OptionDbRow[] {
+async function optionRows(questionId: string): Promise<OptionDbRow[]> {
   return all<OptionDbRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
 }
 
-function serializeQuestion(row: QuestionDbRow) {
-  const options = optionRows(row.id);
+interface SerializedQuestion extends Omit<QuestionDbRow, 'required'> {
+  order: number;
+  required: boolean;
+  option_ids: string[];
+  options: Array<OptionDbRow & { order: number }>;
+}
+
+async function serializeQuestion(row: QuestionDbRow): Promise<SerializedQuestion> {
+  const options = await optionRows(row.id);
   return {
     ...row,
     order: row.ord,
@@ -135,17 +142,17 @@ function serializeQuestion(row: QuestionDbRow) {
   };
 }
 
-function detailFor(surveyId: string) {
-  const survey = requireSurvey(surveyId);
-  const versions = versionRows(surveyId);
-  return {
-    survey,
-    versions: versions.map((version) => ({
-      ...version,
-      question_ids: questionRows(version.id).map((question) => question.id),
-    })),
-    questions: versions.flatMap((version) => questionRows(version.id).map(serializeQuestion)),
-  };
+async function detailFor(surveyId: string) {
+  const survey = await requireSurvey(surveyId);
+  const versions = await versionRows(surveyId);
+  const versionDetails: Array<VersionDbRow & { question_ids: string[] }> = [];
+  const questions: SerializedQuestion[] = [];
+  for (const version of versions) {
+    const rows = await questionRows(version.id);
+    versionDetails.push({ ...version, question_ids: rows.map((question) => question.id) });
+    for (const row of rows) questions.push(await serializeQuestion(row));
+  }
+  return { survey, versions: versionDetails, questions };
 }
 
 function parseQuestions(raw: unknown): QuestionInput[] {
@@ -210,11 +217,11 @@ function validateForPublish(title: string, purpose: string, questions: QuestionI
   return errors;
 }
 
-function writeDraftQuestions(versionId: string, questions: QuestionInput[]): void {
-  run('DELETE FROM questions WHERE version_id = ?', versionId);
-  questions.forEach((question, index) => {
+async function writeDraftQuestions(versionId: string, questions: QuestionInput[]): Promise<void> {
+  await run('DELETE FROM questions WHERE version_id = ?', versionId);
+  for (const [index, question] of questions.entries()) {
     const questionId = newId('q');
-    run(
+    await run(
       `INSERT INTO questions (id, version_id, code, ord, type, required, section, label, hint, group_code, dimension_code, direction)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       questionId,
@@ -230,8 +237,8 @@ function writeDraftQuestions(versionId: string, questions: QuestionInput[]): voi
       question.dimension_code,
       question.direction,
     );
-    question.options.forEach((option, optionIndex) => {
-      run(
+    for (const [optionIndex, option] of question.options.entries()) {
+      await run(
         'INSERT INTO question_options (id, question_id, ord, label, value) VALUES (?, ?, ?, ?, ?)',
         newId('opt'),
         questionId,
@@ -239,15 +246,19 @@ function writeDraftQuestions(versionId: string, questions: QuestionInput[]): voi
         option.label,
         option.value,
       );
-    });
-  });
+    }
+  }
 }
 
-function createDraft(surveyId: string, noticeVersion: string): VersionDbRow {
-  const max = get<{ number: number | null }>('SELECT MAX(number) AS number FROM survey_versions WHERE survey_id = ?', surveyId)?.number ?? 0;
+async function createDraft(surveyId: string, noticeVersion: string): Promise<VersionDbRow> {
+  // Kunci baris survei agar dua penyimpanan serentak tidak membuat nomor versi yang sama.
+  await get<{ id: string }>('SELECT id FROM surveys WHERE id = ? FOR UPDATE', surveyId);
+  const max =
+    (await get<{ number: number | null }>('SELECT MAX(number) AS number FROM survey_versions WHERE survey_id = ?', surveyId))
+      ?.number ?? 0;
   const id = newId('v');
   const now = nowIso();
-  run(
+  await run(
     'INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at, closed_at) VALUES (?, ?, ?, ?, ?, NULL, NULL)',
     id,
     surveyId,
@@ -255,27 +266,40 @@ function createDraft(surveyId: string, noticeVersion: string): VersionDbRow {
     'draft',
     noticeVersion,
   );
-  run('UPDATE surveys SET current_version_id = ?, updated_at = ? WHERE id = ?', id, now, surveyId);
-  return { id, survey_id: surveyId, number: max + 1, status: 'draft', notice_version: noticeVersion, published_at: null, closed_at: null };
+  await run('UPDATE surveys SET current_version_id = ?, updated_at = ? WHERE id = ?', id, now, surveyId);
+  return {
+    id,
+    survey_id: surveyId,
+    number: max + 1,
+    status: 'draft',
+    notice_version: noticeVersion,
+    published_at: null,
+    closed_at: null,
+  };
 }
 
-function currentOrDraft(surveyId: string): { draft: VersionDbRow | undefined; published: VersionDbRow | undefined } {
-  const versions = versionRows(surveyId);
+async function currentOrDraft(
+  surveyId: string,
+): Promise<{ draft: VersionDbRow | undefined; published: VersionDbRow | undefined }> {
+  const versions = await versionRows(surveyId);
   return {
     draft: versions.find((version) => version.status === 'draft'),
     published: versions.find((version) => version.status === 'published'),
   };
 }
 
-surveysRouter.get('/surveys', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const rows =
       req.account.role === 'creator'
-        ? all<Record<string, unknown>>('SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC', req.account.id)
+        ? await all<Record<string, unknown>>(
+            'SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC',
+            req.account.id,
+          )
         : req.account.role === 'super_admin'
-          ? all<Record<string, unknown>>('SELECT * FROM surveys ORDER BY updated_at DESC')
-          : all<Record<string, unknown>>(
+          ? await all<Record<string, unknown>>('SELECT * FROM surveys ORDER BY updated_at DESC')
+          : await all<Record<string, unknown>>(
               'SELECT DISTINCT s.* FROM surveys s JOIN access_grants g ON g.survey_id = s.id WHERE g.account_id = ? ORDER BY s.updated_at DESC',
               req.account.id,
             );
@@ -285,18 +309,21 @@ surveysRouter.get('/surveys', (req: AuthedRequest, res: Response) => {
   }
 });
 
-surveysRouter.post('/surveys', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     if (req.account.role !== 'creator') fail(403, 'forbidden_role', 'Hanya pembuat survei yang dapat membuat survei.');
     const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : 'Survei baru';
     const profileId = typeof req.body?.profile_id === 'string' ? req.body.profile_id : 'p_smk';
-    const profile = get<{ id: string; notice_version: string }>('SELECT id, notice_version FROM profiles WHERE id = ?', profileId);
+    const profile = await get<{ id: string; notice_version: string }>(
+      'SELECT id, notice_version FROM profiles WHERE id = ?',
+      profileId,
+    );
     if (!profile) fail(422, 'profile_not_found', 'Profil deployment tidak dikenal.');
     const id = newId('s');
     const now = nowIso();
-    withTx(() => {
-      run(
+    await withTx(async () => {
+      await run(
         `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
          VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL)`,
         id,
@@ -306,43 +333,45 @@ surveysRouter.post('/surveys', (req: AuthedRequest, res: Response) => {
         now,
         now,
       );
-      run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
-      createDraft(id, profile.notice_version);
+      await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
+      await createDraft(id, profile.notice_version);
     });
-    audit(req, 'Buat survei', id, 'berhasil');
-    res.status(201).json({ data: detailFor(id) });
+    await audit(req, 'Buat survei', id, 'berhasil');
+    res.status(201).json({ data: await detailFor(id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.get('/surveys/:id', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys/:id', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireSurvey(req.params.id);
-    if (!canReadSurveyMetadata(req.account, survey)) fail(403, 'forbidden_survey', 'Anda tidak memiliki akses ke survei ini.');
-    res.json({ data: detailFor(survey.id) });
+    const survey = await requireSurvey(req.params.id);
+    if (!(await canReadSurveyMetadata(req.account, survey))) {
+      fail(403, 'forbidden_survey', 'Anda tidak memiliki akses ke survei ini.');
+    }
+    res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.put('/surveys/:id', (req: AuthedRequest, res: Response) => {
+surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
+    const survey = await requireManageSurvey(req.account, req.params.id);
     const title = asString(req.body?.title ?? '', 'title', 200);
     const purpose = asString(req.body?.purpose ?? '', 'purpose', 2000);
     const objectLabel = asString(req.body?.object_label ?? '', 'object_label', 200);
     const instructions = asString(req.body?.instructions ?? '', 'instructions', 2000);
     const questions = parseQuestions(req.body?.questions ?? []);
-    const profile = get<{ notice_version: string }>('SELECT notice_version FROM profiles WHERE id = ?', survey.profile_id);
-    withTx(() => {
-      const { draft } = currentOrDraft(survey.id);
-      const target = draft ?? createDraft(survey.id, profile?.notice_version ?? '1.0');
-      writeDraftQuestions(target.id, questions);
+    const profile = await get<{ notice_version: string }>('SELECT notice_version FROM profiles WHERE id = ?', survey.profile_id);
+    await withTx(async () => {
+      const { draft } = await currentOrDraft(survey.id);
+      const target = draft ?? (await createDraft(survey.id, profile?.notice_version ?? '1.0'));
+      await writeDraftQuestions(target.id, questions);
       const status = survey.status === 'archived' ? 'draft' : survey.status === 'published' ? 'published' : 'draft';
-      run(
+      await run(
         'UPDATE surveys SET title = ?, purpose = ?, object_label = ?, instructions = ?, status = ?, updated_at = ?, current_version_id = ? WHERE id = ?',
         title,
         purpose,
@@ -354,23 +383,25 @@ surveysRouter.put('/surveys/:id', (req: AuthedRequest, res: Response) => {
         survey.id,
       );
     });
-    audit(req, 'Simpan draf', survey.id, 'berhasil');
-    res.json({ data: detailFor(survey.id) });
+    await audit(req, 'Simpan draf', survey.id, 'berhasil');
+    res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.post('/surveys/:id/duplicate', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const source = requireManageSurvey(req.account, req.params.id);
-    const sourceVersion = source.current_version_id ? requireVersion(source.current_version_id) : versionRows(source.id)[0];
+    const source = await requireManageSurvey(req.account, req.params.id);
+    const sourceVersion = source.current_version_id
+      ? await requireVersion(source.current_version_id)
+      : (await versionRows(source.id))[0];
     if (!sourceVersion) fail(409, 'no_version', 'Survei sumber belum memiliki versi.');
     const id = newId('s');
     const now = nowIso();
-    withTx(() => {
-      run(
+    await withTx(async () => {
+      await run(
         `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, NULL)`,
         id,
@@ -383,12 +414,12 @@ surveysRouter.post('/surveys/:id/duplicate', (req: AuthedRequest, res: Response)
         now,
         now,
       );
-      run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
-      const draft = createDraft(id, sourceVersion.notice_version);
-      const questions = questionRows(sourceVersion.id);
-      writeDraftQuestions(
-        draft.id,
-        questions.map((question) => ({
+      await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
+      const draft = await createDraft(id, sourceVersion.notice_version);
+      const questions = await questionRows(sourceVersion.id);
+      const copies: QuestionInput[] = [];
+      for (const question of questions) {
+        copies.push({
           code: question.code,
           type: question.type,
           required: question.required === 1,
@@ -398,48 +429,57 @@ surveysRouter.post('/surveys/:id/duplicate', (req: AuthedRequest, res: Response)
           group_code: question.group_code,
           dimension_code: question.dimension_code,
           direction: question.direction,
-          options: optionRows(question.id).map((option) => ({ label: option.label, value: option.value ?? 0 })),
-        })),
-      );
+          options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
+        });
+      }
+      await writeDraftQuestions(draft.id, copies);
     });
-    audit(req, 'Salin survei', id, 'berhasil', { source: source.id });
-    res.status(201).json({ data: detailFor(id) });
+    await audit(req, 'Salin survei', id, 'berhasil', { source: source.id });
+    res.status(201).json({ data: await detailFor(id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.post('/surveys/:id/publish', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
-    const { draft } = currentOrDraft(survey.id);
+    const survey = await requireManageSurvey(req.account, req.params.id);
+    const { draft } = await currentOrDraft(survey.id);
     if (!draft) fail(409, 'no_draft', 'Tidak ada draf untuk diterbitkan.');
-    const questions = questionRows(draft.id).map((question) => ({
-      code: question.code,
-      type: question.type,
-      required: question.required === 1,
-      section: question.section,
-      label: question.label,
-      hint: question.hint,
-      group_code: question.group_code,
-      dimension_code: question.dimension_code,
-      direction: question.direction,
-      options: optionRows(question.id).map((option) => ({ label: option.label, value: option.value ?? 0 })),
-    }));
+    const questionRowsForDraft = await questionRows(draft.id);
+    const questions: QuestionInput[] = [];
+    for (const question of questionRowsForDraft) {
+      questions.push({
+        code: question.code,
+        type: question.type,
+        required: question.required === 1,
+        section: question.section,
+        label: question.label,
+        hint: question.hint,
+        group_code: question.group_code,
+        dimension_code: question.dimension_code,
+        direction: question.direction,
+        options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
+      });
+    }
     const errors = validateForPublish(survey.title, survey.purpose, questions);
     if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
     const now = nowIso();
     let publicToken = '';
-    withTx(() => {
-      run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
-      run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
-      const existing = get<{ token: string }>('SELECT token FROM public_links WHERE survey_id = ? AND version_id = ? LIMIT 1', survey.id, draft.id);
+    await withTx(async () => {
+      await run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
+      await run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
+      const existing = await get<{ token: string }>(
+        'SELECT token FROM public_links WHERE survey_id = ? AND version_id = ? LIMIT 1',
+        survey.id,
+        draft.id,
+      );
       if (existing) {
         publicToken = existing.token;
       } else {
         publicToken = `pl_${randomBytes(12).toString('base64url')}`;
-        run(
+        await run(
           `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?)`,
           newId('pl'),
@@ -452,12 +492,12 @@ surveysRouter.post('/surveys/:id/publish', (req: AuthedRequest, res: Response) =
         );
       }
     });
-    audit(req, 'Publikasi versi', `${survey.id} · v${draft.number}`, 'berhasil');
+    await audit(req, 'Publikasi versi', `${survey.id} · v${draft.number}`, 'berhasil');
     res.json({
       data: {
-        version: versionRows(survey.id).find((version) => version.id === draft.id),
+        version: (await versionRows(survey.id)).find((version) => version.id === draft.id),
         publicLink: { token: publicToken, url: `/s/${publicToken}` },
-        detail: detailFor(survey.id),
+        detail: await detailFor(survey.id),
       },
     });
   } catch (error) {
@@ -465,47 +505,51 @@ surveysRouter.post('/surveys/:id/publish', (req: AuthedRequest, res: Response) =
   }
 });
 
-surveysRouter.post('/surveys/:id/close', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys/:id/close', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
-    const published = versionRows(survey.id).find((version) => version.status === 'published');
+    const survey = await requireManageSurvey(req.account, req.params.id);
+    const published = (await versionRows(survey.id)).find((version) => version.status === 'published');
     if (!published) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
     const now = nowIso();
-    withTx(() => {
-      run('UPDATE survey_versions SET status = ?, closed_at = ? WHERE id = ?', 'closed', now, published.id);
-      run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'closed', now, survey.id);
-      run("UPDATE public_links SET status = 'closed' WHERE version_id = ?", published.id);
+    await withTx(async () => {
+      await run('UPDATE survey_versions SET status = ?, closed_at = ? WHERE id = ?', 'closed', now, published.id);
+      await run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'closed', now, survey.id);
+      await run("UPDATE public_links SET status = 'closed' WHERE version_id = ?", published.id);
     });
-    audit(req, 'Tutup versi', `${survey.id} · v${published.number}`, 'berhasil');
-    res.json({ data: detailFor(survey.id) });
+    await audit(req, 'Tutup versi', `${survey.id} · v${published.number}`, 'berhasil');
+    res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.post('/surveys/:id/archive', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys/:id/archive', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
+    const survey = await requireManageSurvey(req.account, req.params.id);
     const now = nowIso();
-    withTx(() => {
-      run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'archived', now, survey.id);
-      run("UPDATE survey_versions SET status = 'closed', closed_at = COALESCE(closed_at, ?) WHERE survey_id = ? AND status IN ('draft','published')", now, survey.id);
-      run("UPDATE public_links SET status = 'closed' WHERE survey_id = ?", survey.id);
+    await withTx(async () => {
+      await run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'archived', now, survey.id);
+      await run(
+        "UPDATE survey_versions SET status = 'closed', closed_at = COALESCE(closed_at, ?) WHERE survey_id = ? AND status IN ('draft','published')",
+        now,
+        survey.id,
+      );
+      await run("UPDATE public_links SET status = 'closed' WHERE survey_id = ?", survey.id);
     });
-    audit(req, 'Arsipkan survei', survey.id, 'berhasil');
-    res.json({ data: detailFor(survey.id) });
+    await audit(req, 'Arsipkan survei', survey.id, 'berhasil');
+    res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.post('/surveys/:id/invitations', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
-    const published = versionRows(survey.id).find((version) => version.status === 'published');
+    const survey = await requireManageSurvey(req.account, req.params.id);
+    const published = (await versionRows(survey.id)).find((version) => version.status === 'published');
     if (!published) fail(409, 'no_published_version', 'Terbitkan versi sebelum membuat undangan.');
     const label = asString(req.body?.label ?? '', 'label', 200);
     if (!label) fail(422, 'validation_error', 'Label penugasan wajib diisi.');
@@ -517,8 +561,8 @@ surveysRouter.post('/surveys/:id/invitations', (req: AuthedRequest, res: Respons
     const invitationId = newId('inv');
     const code = `UND-${randomBytes(3).toString('hex').toUpperCase()}`;
     const token = randomBytes(18).toString('base64url');
-    withTx(() => {
-      run(
+    await withTx(async () => {
+      await run(
         'INSERT INTO assignments (id, survey_id, version_id, label, participant_ref) VALUES (?, ?, ?, ?, ?)',
         assignmentId,
         survey.id,
@@ -526,7 +570,7 @@ surveysRouter.post('/surveys/:id/invitations', (req: AuthedRequest, res: Respons
         label,
         `lokal-${randomBytes(3).toString('hex')}`,
       );
-      run(
+      await run(
         `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token, token_hash, status, expires_at, used_at, revoked_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL, ?)`,
         invitationId,
@@ -540,7 +584,7 @@ surveysRouter.post('/surveys/:id/invitations', (req: AuthedRequest, res: Respons
         nowIso(),
       );
     });
-    audit(req, 'Buat undangan', `${survey.id} · ${code}`, 'berhasil');
+    await audit(req, 'Buat undangan', `${survey.id} · ${code}`, 'berhasil');
     res.status(201).json({
       data: {
         invitation: { id: invitationId, code, assignment_id: assignmentId, version_id: published.id, status: 'active', expires_at: expiresAt },
@@ -553,26 +597,31 @@ surveysRouter.post('/surveys/:id/invitations', (req: AuthedRequest, res: Respons
   }
 });
 
-surveysRouter.post('/invitations/:id/revoke', (req: AuthedRequest, res: Response) => {
+surveysRouter.post('/invitations/:id/revoke', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const invitation = get<{ id: string; survey_id: string; code: string }>('SELECT id, survey_id, code FROM invitations WHERE id = ?', req.params.id);
+    const invitation = await get<{ id: string; survey_id: string; code: string }>(
+      'SELECT id, survey_id, code FROM invitations WHERE id = ?',
+      req.params.id,
+    );
     if (!invitation) fail(404, 'invitation_not_found', 'Undangan tidak ditemukan.');
-    requireManageSurvey(req.account, invitation.survey_id);
-    run("UPDATE invitations SET status = 'revoked', revoked_at = ? WHERE id = ?", nowIso(), invitation.id);
-    audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.code}`, 'berhasil');
+    await requireManageSurvey(req.account, invitation.survey_id);
+    await run("UPDATE invitations SET status = 'revoked', revoked_at = ? WHERE id = ?", nowIso(), invitation.id);
+    await audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.code}`, 'berhasil');
     res.json({ data: { ok: true } });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.get('/surveys/:id/settings', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys/:id/settings', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireSurvey(req.params.id);
-    if (!canReadSurveyMetadata(req.account, survey)) fail(403, 'forbidden_survey', 'Anda tidak memiliki akses ke survei ini.');
-    const settings = get<{ allow_results: number; allow_individual: number }>(
+    const survey = await requireSurvey(req.params.id);
+    if (!(await canReadSurveyMetadata(req.account, survey))) {
+      fail(403, 'forbidden_survey', 'Anda tidak memiliki akses ke survei ini.');
+    }
+    const settings = await get<{ allow_results: number; allow_individual: number }>(
       'SELECT allow_results, allow_individual FROM survey_settings WHERE survey_id = ?',
       survey.id,
     );
@@ -582,47 +631,45 @@ surveysRouter.get('/surveys/:id/settings', (req: AuthedRequest, res: Response) =
   }
 });
 
-surveysRouter.put('/surveys/:id/settings', (req: AuthedRequest, res: Response) => {
+surveysRouter.put('/surveys/:id/settings', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireManageSurvey(req.account, req.params.id);
+    const survey = await requireManageSurvey(req.account, req.params.id);
     const allowResults = asBoolean(req.body?.allowResults, true);
     const allowIndividual = asBoolean(req.body?.allowIndividual, false);
-    run(
+    await run(
       `INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, ?, ?)
        ON CONFLICT(survey_id) DO UPDATE SET allow_results = excluded.allow_results, allow_individual = excluded.allow_individual`,
       survey.id,
       allowResults ? 1 : 0,
       allowIndividual ? 1 : 0,
     );
-    audit(req, 'Ubah pengaturan hasil', survey.id, 'berhasil', { allowResults, allowIndividual });
+    await audit(req, 'Ubah pengaturan hasil', survey.id, 'berhasil', { allowResults, allowIndividual });
     res.json({ data: { allowResults, allowIndividual } });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-surveysRouter.get('/surveys/:id/summary', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireSurvey(req.params.id);
-    if (!canReadAggregate(req.account, survey)) fail(403, 'forbidden_summary', 'Ringkasan tidak tersedia untuk akun ini.');
+    const survey = await requireSurvey(req.params.id);
+    if (!(await canReadAggregate(req.account, survey))) {
+      fail(403, 'forbidden_summary', 'Ringkasan tidak tersedia untuk akun ini.');
+    }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? requireVersion(requested) : requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
-    res.json({ data: summaryFor(version.id) });
+    res.json({ data: await summaryFor(version.id) });
   } catch (error) {
     sendError(res, error);
   }
 });
 
-function questionsForExport(versionId: string): QuestionDbRow[] {
-  return questionRows(versionId);
-}
-
-function answerRows(versionIds: string[]): Map<string, AnswerDbRow[]> {
+async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow[]>> {
   if (versionIds.length === 0) return new Map();
-  const rows = all<AnswerDbRow>(
+  const rows = await all<AnswerDbRow>(
     `SELECT a.response_id, a.question_code, a.option_id, a.value, a.text, a.skipped
        FROM answers a JOIN responses r ON r.id = a.response_id
       WHERE r.version_id IN (${versionIds.map(() => '?').join(',')})`,
@@ -637,20 +684,20 @@ function answerRows(versionIds: string[]): Map<string, AnswerDbRow[]> {
   return map;
 }
 
-surveysRouter.get('/surveys/:id/export', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireSurvey(req.params.id);
-    if (!canExport(req.account, survey)) {
-      audit(req, 'Ekspor hasil', survey.id, 'ditolak', { format: req.query.format ?? 'csv' });
+    const survey = await requireSurvey(req.params.id);
+    if (!(await canExport(req.account, survey))) {
+      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', { format: req.query.format ?? 'csv' });
       fail(403, 'forbidden_export', 'Akun ini tidak memiliki izin ekspor pada survei ini.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? requireVersion(requested) : requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     const format = req.query.format === 'codebook' ? 'codebook' : 'csv';
-    const questions = questionsForExport(version.id);
-    const includeText = canReadFreeText(req.account, survey);
+    const questions = await questionRows(version.id);
+    const includeText = await canReadFreeText(req.account, survey);
     if (format === 'codebook') {
       const codebookQuestions = includeText
         ? questions
@@ -659,7 +706,7 @@ surveysRouter.get('/surveys/:id/export', (req: AuthedRequest, res: Response) => 
         ['survey_version', 'code', 'label', 'type', 'required', 'section', 'group_code', 'dimension_code', 'direction', 'value', 'value_label', 'empty_meaning'],
       ];
       for (const question of codebookQuestions) {
-        const options = optionRows(question.id);
+        const options = await optionRows(question.id);
         if (options.length === 0) {
           rows.push([version.number, question.code, question.label, question.type, question.required, question.section, question.group_code, question.dimension_code, question.direction, '', '', includeText ? 'Tidak dijawab / kosong' : 'Tidak dijawab / kosong (teks dibatasi izin)']);
         } else {
@@ -668,18 +715,18 @@ surveysRouter.get('/surveys/:id/export', (req: AuthedRequest, res: Response) => 
           }
         }
       }
-      audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil');
+      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="kodebook-${survey.id}-v${version.number}.csv"`);
       res.send(csvDocument(rows));
       return;
     }
-    const responses = all<ResponseDbRow>(
+    const responses = await all<ResponseDbRow>(
       'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id',
       survey.id,
       version.id,
     );
-    const answersByResponse = answerRows([version.id]);
+    const answersByResponse = await answerRows([version.id]);
     const textQuestions = new Set(questions.filter((question) => question.type === 'short_text').map((question) => question.code));
     const exportQuestions = includeText ? questions : questions.filter((question) => !textQuestions.has(question.code));
     const header = [
@@ -713,7 +760,7 @@ surveysRouter.get('/surveys/:id/export', (req: AuthedRequest, res: Response) => 
         }),
       ];
     });
-    audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { rows: rows.length, includeText });
+    await audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { rows: rows.length, includeText });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
     res.send(csvDocument([header, ...rows]));
@@ -722,27 +769,27 @@ surveysRouter.get('/surveys/:id/export', (req: AuthedRequest, res: Response) => 
   }
 });
 
-surveysRouter.get('/surveys/:id/responses', (req: AuthedRequest, res: Response) => {
+surveysRouter.get('/surveys/:id/responses', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const survey = requireSurvey(req.params.id);
-    if (!canReadIndividual(req.account, survey)) {
-      audit(req, 'Baca jawaban individual', survey.id, 'ditolak');
+    const survey = await requireSurvey(req.params.id);
+    if (!(await canReadIndividual(req.account, survey))) {
+      await audit(req, 'Baca jawaban individual', survey.id, 'ditolak');
       fail(403, 'forbidden_individual', 'Akun ini tidak memiliki izin membaca jawaban individual.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? requireVersion(requested) : requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
-    const includeText = canReadFreeText(req.account, survey);
-    const rows = all<ResponseDbRow>(
+    const includeText = await canReadFreeText(req.account, survey);
+    const rows = await all<ResponseDbRow>(
       `SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at DESC LIMIT ? OFFSET ?`,
       survey.id,
       version.id,
       parseLimit(req.query.limit),
       Number.parseInt(typeof req.query.offset === 'string' ? req.query.offset : '0', 10) || 0,
     );
-    const answersByResponse = answerRows([version.id]);
-    audit(req, 'Baca jawaban individual', `${survey.id} · v${version.number}`, 'berhasil', { count: rows.length, includeText });
+    const answersByResponse = await answerRows([version.id]);
+    await audit(req, 'Baca jawaban individual', `${survey.id} · v${version.number}`, 'berhasil', { count: rows.length, includeText });
     res.json({
       data: rows.map((response) => ({
         ...response,
@@ -759,4 +806,3 @@ surveysRouter.get('/surveys/:id/responses', (req: AuthedRequest, res: Response) 
     sendError(res, error);
   }
 });
-
