@@ -12,9 +12,11 @@ Prasyarat: Node.js 24 atau lebih baru (memakai `node:sqlite`), pnpm 11.
 
 ```bash
 pnpm install
-pnpm db:reset       # buat data sintetis di data/svara.sqlite
-pnpm dev            # API 127.0.0.1:3001 + Vite 127.0.0.1:5173
+SEED_DEMO=1 pnpm db:reset   # buat data sintetis di data/svara.sqlite
+pnpm dev                    # API 127.0.0.1:3001 + Vite 127.0.0.1:5173
 ```
+
+PowerShell: `$env:SEED_DEMO='1'; pnpm db:reset`.
 
 Produksi lokal:
 
@@ -23,12 +25,14 @@ pnpm build
 pnpm start          # API + dist pada 127.0.0.1:3000
 ```
 
+Jika `DB_PATH` masih kosong, jalankan `pnpm admin:bootstrap` lebih dulu agar ada akun admin.
+
 Perintah verifikasi:
 
 ```bash
 pnpm typecheck      # TypeScript web + server
 pnpm lint           # ESLint
-pnpm test           # typecheck + suite HTTP end-to-end
+pnpm test           # typecheck + suite HTTP end-to-end + seed gate
 pnpm build          # typecheck + Vite
 ```
 
@@ -38,15 +42,32 @@ pnpm build          # typecheck + Vite
 | --- | --- | --- |
 | `PORT` | `3000` saat `--serve`, `3001` saat API dev | Port HTTP |
 | `HOST` | `127.0.0.1` | Alamat bind |
-| `DB_PATH` | `data/svara.sqlite` | Lokasi SQLite; dibuat dan di-seed bila kosong |
+| `DB_PATH` | `data/svara.sqlite` | Lokasi SQLite; dibuat bila belum ada |
 | `APP_ORIGIN` | `http://127.0.0.1:3000` | Origin yang diizinkan untuk mutasi |
 | `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
-| `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis saat basis data dibuat |
+| `SEED_DEMO` | `0` | Harus `1` untuk memuat data demo; ditolak saat `NODE_ENV=production` |
+| `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis; hanya dipakai bila `SEED_DEMO=1` |
 
 Contoh ada di `.env.example`. Jangan commit nilai rahasia produksi.
+
+## Bootstrap admin produksi
+
+Server tidak lagi mengisi basis data kosong dengan akun demo secara otomatis. Untuk deployment baru, buat admin pertama secara eksplisit:
+
+```bash
+BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
+BOOTSTRAP_ADMIN_NAME=Administrator \
+BOOTSTRAP_ADMIN_PASSWORD='sandi-kuat-dari-secret-manager' \
+pnpm admin:bootstrap
+```
+
+- `BOOTSTRAP_ADMIN_PASSWORD` minimal 12 karakter dan memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol.
+- Script idempoten: email yang sudah menjadi `super_admin` tidak ditimpa.
+- Jangan menaruh sandi nyata di shell history, `.env` yang ter-commit, atau argumen command line; gunakan secret manager/environment.
+- `NODE_ENV=production SEED_DEMO=1` akan menghentikan startup. Data demo hanya untuk lokal/CI.
 
 ## Arsitektur
 
@@ -59,7 +80,7 @@ Contoh ada di `.env.example`. Jangan commit nilai rahasia produksi.
 
 ### Akun sintetis
 
-Dibuat oleh `pnpm db:reset`. Sandi berasal dari `SEED_PASSWORD`; bila tidak diset, nilai demo lokal adalah `SvaraDemo123!` (hanya untuk data sintetis; ganti atau hapus sebelum deployment).
+Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` (atau `SEED_DEMO=1 pnpm db:seed`). Sandi berasal dari `SEED_PASSWORD`; bila tidak diset, nilai demo lokal adalah `SvaraDemo123!` (hanya untuk data sintetis; jangan dipakai di production).
 
 | Email | Peran | Cakupan awal |
 | --- | --- | --- |

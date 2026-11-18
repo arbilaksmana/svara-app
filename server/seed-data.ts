@@ -1,5 +1,6 @@
 import { get, nowIso, run, withTx } from './db.ts';
 import { hashPassword, sha256 } from './security.ts';
+import { demoSeedEnabled } from './seed-policy.ts';
 
 const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'SvaraDemo123!';
 
@@ -14,10 +15,11 @@ function addYears(date: string, years: number): string {
 }
 
 /**
- * Seed idempoten dengan data sintetis. Dijalankan saat server start dan `pnpm db:reset`.
+ * Seed demo idempoten: hanya berjalan dengan SEED_DEMO=1 dan tidak pernah di production.
  * Tidak ada nama, email, atau jawaban dari orang nyata.
  */
-export function seedIfEmpty(): boolean {
+export function seedDemoIfEmpty(): boolean {
+  if (!demoSeedEnabled()) return false;
   const existing = get<{ count: number }>('SELECT COUNT(*) AS count FROM accounts');
   if (existing && existing.count > 0) return false;
 

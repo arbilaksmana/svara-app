@@ -2,10 +2,17 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { app, attachStatic } from './app.ts';
 import { DB_PATH, ensureSchema } from './db.ts';
-import { seedIfEmpty } from './seed-data.ts';
+import { seedDemoIfEmpty } from './seed-data.ts';
+import { demoSeedEnabled } from './seed-policy.ts';
 
+const demoSeed = demoSeedEnabled();
 ensureSchema();
-seedIfEmpty();
+if (demoSeed) {
+  const seeded = seedDemoIfEmpty();
+  console.log(seeded ? '[seed] data demo dimuat' : '[seed] data demo sudah ada');
+} else {
+  console.log('[seed] demo nonaktif; gunakan SEED_DEMO=1 atau bootstrap admin untuk basis data kosong');
+}
 
 const serveStatic = process.argv.includes('--serve') || process.env.SERVE_STATIC === '1';
 const dist = resolve('dist');

@@ -98,6 +98,9 @@ before(async () => {
       INTEGRATION_TOKEN,
       COOKIE_SECURE: '0',
       ENABLE_HSTS: '0',
+      NODE_ENV: 'test',
+      SEED_DEMO: '1',
+      SEED_PASSWORD: 'SvaraDemo123!',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
