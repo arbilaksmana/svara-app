@@ -37,6 +37,7 @@ export const ROUTE_STATES: Record<RouteId, readonly StateCode[]> = {
   'creator-results': ['default', 'empty', 'loading', 'error', 'permission-denied', 'closed', 'no-answers', 'success'],
   'creator-settings': ['default', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   'creator-history': ['default', 'empty', 'loading', 'error', 'permission-denied', 'closed', 'success'],
+  'respondent-code': ['default', 'loading', 'error', 'validation'],
   'respondent-intro': ['default', 'loading', 'error', 'validation', 'permission-denied', 'closed', 'expired', 'revoked', 'success'],
   'respondent-form': ['default', 'loading', 'error', 'validation', 'permission-denied', 'closed', 'expired', 'revoked', 'success'],
   'respondent-review': ['default', 'loading', 'error', 'validation', 'permission-denied', 'closed', 'expired', 'revoked', 'conflict', 'success'],

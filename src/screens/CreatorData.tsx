@@ -25,12 +25,22 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { assignments, findSurvey, invitations, publicLinks, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
+import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { accessGrants } from '../lib/fixtures/records';
 import { formatWIB } from '../lib/summary';
 import { getSummary, getResponses, downloadExport, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
 import { useToast } from '../components/Toast';
-import { archiveSurvey, closeVersion, createInvitation, revokeInvitation, saveSettings, useStore } from '../lib/store';
+import {
+  allAssignments,
+  allInvitations,
+  allPublicLinks,
+  archiveSurvey,
+  closeVersion,
+  createInvitation,
+  revokeInvitation,
+  saveSettings,
+  useStore,
+} from '../lib/store';
 import { SurveyNav } from './CreatorCore';
 import { profileForSurvey, noticeForSurvey } from '../lib/fixtures/profiles';
 import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, ORGANIZATION_TYPE_LABEL, STATUS_LABEL } from '../lib/labels';
@@ -62,9 +72,21 @@ export function SharePage({ id }: { id: string }) {
   const [shareError, setShareError] = useState<string | null>(null);
   const [newInvite, setNewInvite] = useState<{ code: string; token: string } | null>(null);
 
-  const links = publicLinks.filter((l) => l.survey_id === id);
-  const invites = invitations.filter((i) => i.survey_id === id);
+  const links = allPublicLinks().filter((linkItem) => linkItem.survey_id === id);
+  const invites = allInvitations().filter((invite) => invite.survey_id === id);
+  const assignments = allAssignments();
   const [copied, setCopied] = useState<string | null>(null);
+
+  async function copyLink(url: string, key: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(key);
+      notify('Tautan disalin ke papan klip.');
+    } catch {
+      setCopied(key);
+      notify(`Salin tautan: ${url}`, 'info');
+    }
+  }
 
   return (
     <Shell kind="creator" title="Bagikan survei" subtitle="Bagikan tautan umum atau kirim undangan individual kepada peserta.">
@@ -85,7 +107,16 @@ export function SharePage({ id }: { id: string }) {
           {shareError && <Banner tone="danger" title="Tindakan gagal">{shareError}</Banner>}
           {newInvite && (
             <Banner tone="success" title={`Undangan ${newInvite.code} dibuat`}>
-              <PlainLink to={ROUTES.respondentIntro(newInvite.token)} className="min-h-[44px] break-all">/s/{newInvite.token}</PlainLink>
+              <div className="flex flex-wrap items-center gap-3">
+                <PlainLink to={ROUTES.respondentIntro(newInvite.token)} className="min-h-[44px] break-all">/s/{newInvite.token}</PlainLink>
+                <button
+                  type="button"
+                  onClick={() => void copyLink(`${window.location.origin}/s/${newInvite.token}`, newInvite.token)}
+                  className="min-h-[44px] text-caption font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover"
+                >
+                  {copied === newInvite.token ? 'Tersalin' : 'Salin tautan'}
+                </button>
+              </div>
             </Banner>
           )}
 
@@ -108,17 +139,7 @@ export function SharePage({ id }: { id: string }) {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         variant="secondary"
-                        onClick={async () => {
-                          const url = `${window.location.origin}/s/${l.token}`;
-                          try {
-                            await navigator.clipboard.writeText(url);
-                            setCopied(l.token);
-                            notify('Tautan disalin ke papan klip.');
-                          } catch {
-                            setCopied(l.token);
-                            notify('Salin tautan: ' + url, 'info');
-                          }
-                        }}
+                        onClick={() => void copyLink(`${window.location.origin}/s/${l.token}`, l.token)}
                         disabled={state === 'loading' || state === 'closed'}
                       >
                         {copied === l.token ? 'Tersalin' : 'Salin tautan'}
@@ -143,7 +164,17 @@ export function SharePage({ id }: { id: string }) {
                   <Th>
                     <Code>{i.code}</Code>
                     {i.token ? (
-                      <div className="mt-1"><PlainLink to={ROUTES.respondentIntro(i.token)} className="min-h-[44px]">Buka tautan</PlainLink></div>
+                      <div className="mt-1 flex items-center gap-3">
+                        <PlainLink to={ROUTES.respondentIntro(i.token)} className="min-h-[44px]">Buka</PlainLink>
+                        <button
+                          type="button"
+                          onClick={() => void copyLink(`${window.location.origin}/s/${i.token}`, i.token ?? '')}
+                          aria-label={`Salin tautan undangan ${i.code}`}
+                          className="min-h-[44px] text-caption font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover"
+                        >
+                          {copied === i.token ? 'Tersalin' : 'Salin'}
+                        </button>
+                      </div>
                     ) : null}
                   </Th>
                   <Td>

@@ -9,6 +9,7 @@ import {
   Code,
   Divider,
   Panel,
+  PlainLink,
   PolicyLinks,
   Table,
   Td,
@@ -121,6 +122,7 @@ export function HomePage() {
                 <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">
                   Lihat contoh formulir
                 </ActionLink>
+                <PlainLink to={ROUTES.respondentCode} className="min-h-[44px]">Punya kode undangan?</PlainLink>
               </div>
               <PolicyLinks />
             </div>

@@ -158,7 +158,7 @@ Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban
 
 UI mempertahankan URL lama:
 
-`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s/[token]/*` tetap publik tanpa guard.
+`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s` dan `/s/[token]/*` tetap publik tanpa guard.
 
 `super_admin` yang membuka `/creator` mendapat tampilan “Akses ditolak”, dan peran creator yang membuka `/admin` juga ditolak; ini sama dengan guard klien sebelumnya.
 

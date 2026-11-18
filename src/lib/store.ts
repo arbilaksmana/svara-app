@@ -22,6 +22,7 @@ import type { AdminStats } from './api';
 import type {
   Account,
   AccessGrant,
+  Assignment,
   AuditLog,
   DeploymentProfile,
   EventStatus,
@@ -441,8 +442,16 @@ export function allVersions(): SurveyVersion[] {
   return versions;
 }
 
+export function allAssignments(): Assignment[] {
+  return assignments;
+}
+
 export function allInvitations(): Invitation[] {
   return invitations;
 }
 
-export type { Survey, SurveyVersion, Question, QuestionOption, Invitation, PublicLink };
+export function allPublicLinks(): PublicLink[] {
+  return publicLinks;
+}
+
+export type { Survey, SurveyVersion, Question, QuestionOption, Assignment, Invitation, PublicLink };

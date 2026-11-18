@@ -5,13 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Shell } from '../components/Shell';
 import {
-  ActionLink,
   Banner,
   Button,
   Checkbox,
   Field,
   PlainLink,
-  PolicyLinks,
   TextInput,
 } from '../components/ui';
 import { useScreenState } from '../lib/state';
@@ -66,32 +64,12 @@ export function RegisterPage() {
     <Shell kind="public" title="Buat akun" chromeless>
       <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
         <div className="relative z-10 flex flex-col bg-n0 lg:rounded-tr-lg lg:rounded-br-lg">
-          <div className="relative flex min-h-[56px] items-center justify-center px-5 pt-6 sm:px-8 lg:px-14">
-            <ActionLink to={ROUTES.login} variant="ghost" className="absolute start-5 top-6 text-ink! sm:start-8 lg:start-14">
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-4"
-              >
-                <path d="M12.5 4.5 7 10l5.5 5.5" />
-              </svg>
-              Masuk
-            </ActionLink>
-            <Link href={ROUTES.home} className="inline-flex min-h-[44px] items-center text-h3 font-bold text-ink">
-              Svara
-            </Link>
-          </div>
-
           <div className="flex flex-1 flex-col justify-center px-5 pb-12 pt-6 sm:px-8 lg:px-14">
-            <div className="mx-auto flex w-full max-w-[380px] flex-col gap-6">
-              <div className="flex flex-col gap-2">
-                <h1 className="self-center text-h2 font-bold text-ink">Buat akun</h1>
-                <p className="text-center text-body-sm text-muted">Mulai susun instrumen dan terbitkan survei.</p>
+            <div className="mx-auto flex w-full max-w-[380px] flex-col gap-7">
+              <div className="flex justify-center">
+                <Link href={ROUTES.home} className="inline-flex min-h-[44px] items-center text-h3 font-bold text-ink">
+                  Svara
+                </Link>
               </div>
 
               {state === 'validation' && (
@@ -198,7 +176,18 @@ export function RegisterPage() {
                     onChange={setAcceptedTerms}
                     invalid={Boolean(termsError)}
                     describedBy={termsError ? 'register-terms-error' : undefined}
-                    label="Saya menyetujui kebijakan privasi dan ketentuan layanan."
+                    label={(
+                      <>
+                        Saya menyetujui{' '}
+                        <Link href={ROUTES.privacy} className="font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover">
+                          kebijakan privasi
+                        </Link>{' '}
+                        dan{' '}
+                        <Link href={ROUTES.terms} className="font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover">
+                          ketentuan layanan
+                        </Link>.
+                      </>
+                    )}
                   />
                   {termsError && (
                     <p id="register-terms-error" role="alert" className="text-caption font-bold text-danger">{termsError}</p>
@@ -213,19 +202,17 @@ export function RegisterPage() {
               <p className="text-center text-body-sm text-muted">
                 Sudah punya akun? <PlainLink to={ROUTES.login} className="min-h-[44px]">Masuk</PlainLink>
               </p>
-
-              <PolicyLinks className="justify-center" />
             </div>
           </div>
         </div>
 
         <div aria-hidden="true" className="relative hidden lg:-ml-4 lg:block">
-          {/* Foto: Fiqih Alfarish / Unsplash (lisensi Unsplash). */}
+          {/* Foto: Declan Sun / Unsplash (lisensi Unsplash). */}
           <img
-            src="/login-visual.webp"
+            src="/login-sky.jpg"
             alt=""
-            width={1200}
-            height={1600}
+            width={1600}
+            height={1200}
             decoding="async"
             className="absolute inset-0 h-full w-full object-cover"
           />
