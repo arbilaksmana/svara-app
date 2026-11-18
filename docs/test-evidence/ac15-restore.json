@@ -1,0 +1,42 @@
+{
+  "label": "DEMO ONLY — uji cadangan/pulihkan lokal, bukan bukti audit atau kesiapan produksi",
+  "generated_at": "2026-11-18T04:48:25.422Z",
+  "environment": {
+    "node": "v24.15.0",
+    "platform": "win32 x64",
+    "storage": "SQLite node:sqlite"
+  },
+  "steps": [
+    "Seed basis data sintetis.",
+    "VACUUM INTO untuk membuat cadangan.",
+    "Hapus satu respons sintetis dan catat audit.",
+    "Pulihkan cadangan, buka ulang, dan verifikasi respons kembali.",
+    "Catat audit pemulihan setelah restore."
+  ],
+  "before": {
+    "responses": 6,
+    "answers": 18,
+    "audit_logs": 8,
+    "backup_created": true
+  },
+  "after_delete": {
+    "responses": 5,
+    "answers": 15,
+    "target_present": false
+  },
+  "after_restore": {
+    "responses": 6,
+    "answers": 18,
+    "audit_logs": 9,
+    "target_present": true
+  },
+  "interpretation": {
+    "deletion_is_undone_by_restore": true,
+    "note": "Pemulihan mengembalikan keadaan cadangan. Penghapusan permintaan data setelah restore harus diulang dan dicatat; jangan mengklaim bahwa restore menghapus data secara permanen."
+  },
+  "limitations": [
+    "Tidak menguji cadangan terenkripsi, penyimpanan off-site, atau RPO/RTO.",
+    "Tidak menggantikan prosedur operasional dan persetujuan pengendali data.",
+    "File bukti hanya ringkasan lokal, bukan audit pihak ketiga."
+  ]
+}

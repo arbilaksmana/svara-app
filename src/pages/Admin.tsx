@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -19,19 +19,24 @@ import {
   TextInput,
   Th,
 } from '../components/ui';
-import { StateView, StateDebugHint, SuccessBanner, ValidationSummary } from '../components/StateView';
-import { DevStateSwitcher, useScreenState } from '../lib/state';
+import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
+import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { accounts, accessGrants, auditLogs, integrationEvents, responses } from '../lib/fixtures/records';
+import { accounts, accessGrants, auditLogs, integrationEvents } from '../lib/fixtures/records';
 import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
-import { replayEvent, saveGrants, setIntegrationNote, useStore } from '../lib/store';
+import { replayEvent, refreshBootstrap, saveGrants, setAdminStats, setIntegrationNote, useStore } from '../lib/store';
+import { adminSaveAccount, adminSaveGrants, adminStats, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
 
 /* ---------------- Ringkasan ---------------- */
 
 export function AdminSummaryPage() {
   const { state } = useScreenState('admin-summary');
+  const { stats } = useStore();
+  useEffect(() => {
+    void adminStats().then(setAdminStats).catch(() => setAdminStats(null));
+  }, []);
   return (
     <Shell kind="admin" title="Ringkasan operasional" subtitle="Pantau jumlah survei, respons, dan akun tanpa membuka jawaban individual.">
       <StateView
@@ -42,22 +47,27 @@ export function AdminSummaryPage() {
         permissionDetail="Akses ringkasan memerlukan peran super admin."
       >
         <div className="flex flex-col gap-5">
-          <StateDebugHint routeId="admin-summary" state={state} />
-          <div className="grid gap-4 sm:grid-cols-3">
+          
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
               <Label>Jumlah survei</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{surveys.length}</p>
+              <p className="mt-2 text-h1 font-bold text-ink">{stats?.surveys ?? surveys.length}</p>
               <Muted>Termasuk draf, terbit, dan arsip.</Muted>
             </Card>
             <Card>
               <Label>Total respons final</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{responses.length}</p>
+              <p className="mt-2 text-h1 font-bold text-ink">{stats?.responses ?? 0}</p>
               <Muted>Agregat lintas versi.</Muted>
             </Card>
             <Card>
               <Label>Akun pengelola</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{accounts.length}</p>
+              <p className="mt-2 text-h1 font-bold text-ink">{stats?.accounts ?? accounts.length}</p>
               <Muted>Termasuk akun dinonaktifkan.</Muted>
+            </Card>
+            <Card>
+              <Label>Permintaan data menunggu</Label>
+              <p className="mt-2 text-h1 font-bold text-ink">{stats?.pendingRequests ?? 0}</p>
+              <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
             </Card>
           </div>
 
@@ -68,19 +78,29 @@ export function AdminSummaryPage() {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Metrik per creator</SectionTitle>
-            <Table head={['Creator', 'Survei', 'Respons', 'Cakupan']}>
-              <tr>
-                <Th>Pengelola A</Th>
-                <Td>{surveys.filter((s) => s.owner_id === 'u_creator_a').length}</Td>
-                <Td>{responses.filter((r) => r.survey_id !== 's_demo3').length}</Td>
-                <Td>Agregat milik sendiri</Td>
-              </tr>
-              <tr>
-                <Th>Pengelola B</Th>
-                <Td>{surveys.filter((s) => s.owner_id === 'u_creator_b').length}</Td>
-                <Td>0</Td>
-                <Td>Agregat milik sendiri</Td>
-              </tr>
+            <Table head={['Creator', 'Survei', 'Respons']}>
+              {(stats?.perCreator ?? []).map((creator) => (
+                <tr key={creator.id}>
+                  <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
+                  <Td>{creator.surveys}</Td>
+                  <Td>{creator.responses}</Td>
+                </tr>
+              ))}
+            </Table>
+            {!stats && <Muted>Metrik belum tersedia.</Muted>}
+          </Card>
+
+          <Card className="flex flex-col gap-3">
+            <SectionTitle>Metrik per survei</SectionTitle>
+            <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
+              {(stats?.perSurvey ?? []).map((survey) => (
+                <tr key={survey.id}>
+                  <Th>{survey.title}</Th>
+                  <Td>{survey.owner}</Td>
+                  <Td>{survey.versions}</Td>
+                  <Td>{survey.responses}</Td>
+                </tr>
+              ))}
             </Table>
           </Card>
 
@@ -91,7 +111,7 @@ export function AdminSummaryPage() {
           </div>
         </div>
       </StateView>
-      <DevStateSwitcher routeId="admin-summary" />
+      
     </Shell>
   );
 }
@@ -101,8 +121,9 @@ export function AdminSummaryPage() {
 export function AdminAccountsPage() {
   const { state } = useScreenState('admin-accounts');
   const notify = useToast();
-  const { grants: storedGrants, revision } = useStore();
+  const { grants: storedGrants, revision, session } = useStore();
   void revision;
+  const [accountBusy, setAccountBusy] = useState<string | null>(null);
   const [grants, setGrants] = useState(() =>
     Object.fromEntries(accessGrants.map((g) => [g.id, {
       read: storedGrants[g.id]?.read ?? g.can_read_individual,
@@ -111,6 +132,46 @@ export function AdminAccountsPage() {
     }])),
   );
   const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [scopeAccount, setScopeAccount] = useState('');
+  const [scopeSurvey, setScopeSurvey] = useState(surveys[0]?.id ?? '');
+  const [scopeRead, setScopeRead] = useState(false);
+  const [scopeExport, setScopeExport] = useState(false);
+  const [scopeText, setScopeText] = useState(false);
+  const [scopeBusy, setScopeBusy] = useState(false);
+  const mutationsBlocked = ['loading', 'validation', 'closed', 'permission-denied'].includes(state);
+
+  useEffect(() => {
+    setGrants(Object.fromEntries(accessGrants.map((grant) => [grant.id, {
+      read: storedGrants[grant.id]?.read ?? grant.can_read_individual,
+      export: storedGrants[grant.id]?.export ?? grant.can_export,
+      text: storedGrants[grant.id]?.text ?? grant.can_read_free_text,
+    }])));
+  }, [revision, storedGrants]);
+
+  const changeRole = (accountId: string, displayName: string, chosen: string) => {
+    const role = chosen === 'admin' ? 'super_admin' : chosen === 'officer' ? 'authorized_officer' : chosen;
+    setAccountBusy(accountId);
+    void adminSaveAccount(accountId, { role })
+      .then(() => {
+        notify(`Peran ${displayName} diperbarui.`);
+        return refreshBootstrap();
+      })
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Peran gagal diubah.', 'danger'))
+      .finally(() => setAccountBusy(null));
+  };
+
+  const toggleStatus = (accountId: string, displayName: string, current: string) => {
+    const status = current === 'active' ? 'suspended' : 'active';
+    setAccountBusy(accountId);
+    void adminSaveAccount(accountId, { status })
+      .then(() => {
+        notify(`Status ${displayName} diperbarui.`);
+        return refreshBootstrap();
+      })
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Status gagal diubah.', 'danger'))
+      .finally(() => setAccountBusy(null));
+  };
 
   return (
     <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
@@ -122,22 +183,84 @@ export function AdminAccountsPage() {
         permissionDetail="Hanya super admin yang dapat mengubah peran dan izin."
       >
         <div className="flex flex-col gap-5">
-          <StateDebugHint routeId="admin-accounts" state={state} />
+          
           {state === 'success' && <SuccessBanner title="Izin diperbarui">Perubahan dicatat pada log audit tanpa memuat jawaban atau token.</SuccessBanner>}
           {state === 'validation' && <ValidationSummary items={['Setiap izin harus ditetapkan secara eksplisit.', 'Cakupan survei harus dipilih untuk petugas berizin.']} />}
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Daftar akun</SectionTitle>
-            <Table head={['Akun', 'Peran', 'Status', 'Cakupan']}>
+            <div className="hidden lg:block">
+            <Table head={['Akun', 'Peran', 'Status', 'Cakupan', 'Aksi']}>
               {accounts.map((a) => (
                 <tr key={a.id}>
                   <Th>{a.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{a.id}</Code></span></Th>
-                  <Td><Code>{a.role}</Code></Td>
+                  <Td>
+                    <select
+                      aria-label={`Peran ${a.display_name}`}
+                      value={a.role === 'super_admin' ? 'admin' : a.role === 'authorized_officer' ? 'officer' : a.role}
+                      disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
+                      onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
+                      className="min-h-[44px] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                    >
+                      <option value="creator">creator</option>
+                      <option value="officer">officer</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </Td>
                   <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge></Td>
                   <Td>{accessGrants.filter((g) => g.account_id === a.id).length} grant</Td>
+                  <Td>
+                    <Button
+                      variant="ghost"
+                      loading={accountBusy === a.id}
+                      disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
+                      onClick={() => toggleStatus(a.id, a.display_name, a.status)}
+                    >
+                      {a.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'}
+                    </Button>
+                  </Td>
                 </tr>
               ))}
             </Table>
+            </div>
+
+            <ul className="flex flex-col gap-3 lg:hidden">
+              {accounts.map((a) => (
+                <li key={a.id} className="flex flex-col gap-3 rounded-md border border-n200 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-body font-bold text-ink">{a.display_name}</p>
+                      <p className="font-mono text-annotation tracking-mono text-muted"><Code>{a.id}</Code></p>
+                    </div>
+                    <Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge>
+                  </div>
+                  <label className="flex flex-col gap-1 text-caption font-bold text-muted">
+                    Peran
+                    <select
+                      aria-label={`Peran ${a.display_name}`}
+                      value={a.role === 'super_admin' ? 'admin' : a.role === 'authorized_officer' ? 'officer' : a.role}
+                      disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
+                      onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
+                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    >
+                      <option value="creator">creator</option>
+                      <option value="officer">officer</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </label>
+                  <p className="text-body-sm text-muted">{accessGrants.filter((g) => g.account_id === a.id).length} grant</p>
+                  <Button
+                    variant="secondary"
+                    block
+                    loading={accountBusy === a.id}
+                    disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
+                    onClick={() => toggleStatus(a.id, a.display_name, a.status)}
+                  >
+                    {a.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'}
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </Card>
 
           <Card className="flex flex-col gap-4">
@@ -175,12 +298,103 @@ export function AdminAccountsPage() {
                 </div>
               );
             })}
+
+            <div className="rounded-md border border-dashed border-n200 p-4">
+              <SectionTitle>Tambah atau perbarui cakupan</SectionTitle>
+              <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-muted">
+                  Akun
+                  <select
+                    aria-label="Akun untuk cakupan baru"
+                    value={scopeAccount}
+                    onChange={(event) => setScopeAccount(event.target.value)}
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                  >
+                    <option value="">Pilih akun</option>
+                    {accounts.filter((a) => a.role !== 'super_admin').map((a) => (
+                      <option key={a.id} value={a.id}>{a.display_name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-muted">
+                  Survei
+                  <select
+                    aria-label="Survei untuk cakupan baru"
+                    value={scopeSurvey}
+                    onChange={(event) => setScopeSurvey(event.target.value)}
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                  >
+                    {surveys.map((survey) => (
+                      <option key={survey.id} value={survey.id}>{survey.title}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <Checkbox id="scope-read" label="Baca jawaban individual" checked={scopeRead} onChange={setScopeRead} />
+                <Checkbox id="scope-export" label="Ekspor data" checked={scopeExport} onChange={setScopeExport} />
+                <Checkbox id="scope-text" label="Baca teks bebas" checked={scopeText} onChange={setScopeText} />
+              </div>
+              <Button
+                className="mt-3"
+                variant="secondary"
+                loading={scopeBusy}
+                disabled={scopeBusy || mutationsBlocked || !scopeAccount || !scopeSurvey}
+                onClick={() => {
+                  const accountId = scopeAccount;
+                  const surveyId = scopeSurvey;
+                  const rows = accessGrants
+                    .filter((grant) => grant.account_id === accountId && grant.survey_id !== surveyId)
+                    .map((grant) => {
+                      const current = grants[grant.id] ?? {
+                        read: grant.can_read_individual,
+                        export: grant.can_export,
+                        text: grant.can_read_free_text,
+                      };
+                      return {
+                        survey_id: grant.survey_id,
+                        can_read_individual: current.read,
+                        can_export: current.export,
+                        can_read_free_text: current.text,
+                      };
+                    });
+                  rows.push({
+                    survey_id: surveyId,
+                    can_read_individual: scopeRead,
+                    can_export: scopeExport,
+                    can_read_free_text: scopeText,
+                  });
+                  setScopeBusy(true);
+                  void adminSaveGrants(accountId, rows)
+                    .then(async () => {
+                      await refreshBootstrap();
+                      const created = accessGrants.find((grant) => grant.account_id === accountId && grant.survey_id === surveyId);
+                      if (created) {
+                        setGrants((prev) => ({
+                          ...prev,
+                          [created.id]: { read: scopeRead, export: scopeExport, text: scopeText },
+                        }));
+                      }
+                      notify('Cakupan izin berhasil disimpan.');
+                    })
+                    .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Cakupan gagal disimpan.', 'danger'))
+                    .finally(() => setScopeBusy(false));
+                }}
+              >
+                Simpan cakupan
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button onClick={() => {
-                saveGrants(grants);
-                setSaved(true);
-                notify('Izin akun berhasil disimpan.');
-              }} disabled={state === 'loading'} loading={state === 'loading'}>Simpan izin</Button>
+                setBusy(true);
+                void saveGrants(grants)
+                  .then(() => {
+                    setSaved(true);
+                    notify('Izin akun berhasil disimpan.');
+                  })
+                  .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Izin gagal disimpan.', 'danger'))
+                  .finally(() => setBusy(false));
+              }} disabled={state === 'loading' || state === 'validation' || state === 'closed' || busy} loading={busy}>Simpan izin</Button>
               <ActionLink to={ROUTES.adminAudit} variant="secondary">Lihat log perubahan izin</ActionLink>
             </div>
             {saved && <Banner tone="success" title="Izin tersimpan">Perubahan berlaku pada workspace ini.</Banner>}
@@ -194,7 +408,7 @@ export function AdminAccountsPage() {
           </Panel>
         </div>
       </StateView>
-      <DevStateSwitcher routeId="admin-accounts" />
+      
     </Shell>
   );
 }
@@ -203,6 +417,9 @@ export function AdminAccountsPage() {
 
 export function AdminAuditPage() {
   const { state } = useScreenState('admin-audit');
+  useEffect(() => {
+    void refreshBootstrap();
+  }, []);
   return (
     <Shell kind="admin" title="Log audit" subtitle="Catatan aktivitas memuat aktor, aksi, objek, hasil, dan waktu tanpa isi jawaban.">
       <StateView
@@ -213,7 +430,7 @@ export function AdminAuditPage() {
         permissionDetail="Log operasional hanya dapat dibaca sesuai tugas."
       >
         <div className="flex flex-col gap-5">
-          <StateDebugHint routeId="admin-audit" state={state} />
+          
           <Banner tone="info" title="Catatan aktivitas">
             Kolom dibatasi pada informasi operasional. Log tidak memuat token, kredensial, atau jawaban.
           </Banner>
@@ -250,7 +467,7 @@ export function AdminAuditPage() {
           </div>
         </div>
       </StateView>
-      <DevStateSwitcher routeId="admin-audit" />
+      
     </Shell>
   );
 }
@@ -263,6 +480,8 @@ export function AdminIntegrationPage() {
   const { revision, integrationNote } = useStore();
   void revision;
   const [replayed, setReplayed] = useState<string | null>(null);
+  const [busyEvent, setBusyEvent] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const down = state === 'error';
 
   return (
@@ -276,19 +495,23 @@ export function AdminIntegrationPage() {
         errorDetail="Alur mandiri tetap berjalan meski layanan integrasi sedang terganggu."
       >
         <div className="flex flex-col gap-5">
-          <StateDebugHint routeId="admin-integration" state={state} />
+          
           {state === 'success' && <SuccessBanner title="Event berhasil diulang">ID kejadian tetap dipakai dan tidak membuat respons kedua.</SuccessBanner>}
           {down && (
             <Banner tone="danger" title="Layanan terputus">
               Alur mandiri tetap berjalan tanpa Modul 13/15. Status pengiriman dapat diulang setelah layanan kembali.
             </Banner>
           )}
+          {retryError && <Banner tone="danger" title="Pengulangan tidak membuktikan pengiriman">{retryError}</Banner>}
+          <Banner tone="info" title="Simulasi integrasi lokal">
+            Tidak ada pengiriman jaringan nyata pada MVP lokal ini. Event dan status di bawah adalah simulasi yang dibuat saat respons tersimpan.
+          </Banner>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <SectionTitle>Modul 13 · identitas</SectionTitle>
-                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Terhubung'}</Badge>
+                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Simulasi aktif'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
                 Memberi identitas dan penugasan terverifikasi serta menerima status pengiriman. Endpoint dan autentikasi nyata masih perlu disepakati.
@@ -302,7 +525,7 @@ export function AdminIntegrationPage() {
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <SectionTitle>Modul 15 · konsumen data</SectionTitle>
-                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Terhubung'}</Badge>
+                <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Simulasi aktif'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
                 CSV adalah jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung rancangan; format final masih terbuka.
@@ -316,11 +539,11 @@ export function AdminIntegrationPage() {
           </div>
 
           <Card className="flex flex-col gap-3">
-            <SectionTitle>Event terkirim</SectionTitle>
+            <SectionTitle>Event integrasi (simulasi)</SectionTitle>
             <Table head={['ID kejadian', 'Tipe', 'Tujuan', 'Status', 'Percobaan', 'Aksi']}>
               {integrationEvents.map((e) => (
                 <tr key={e.id}>
-                  <Th><Code>{e.event_id}</Code></Th>
+                  <Th><Code>{e.event_id}</Code><span className="mt-1 block"><Badge tone="neutral">{e.simulated ? 'Simulasi' : 'Nyata'}</Badge></span></Th>
                   <Td>{e.type}</Td>
                   <Td><Code>{e.target}</Code></Td>
                   <Td>
@@ -333,14 +556,24 @@ export function AdminIntegrationPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        replayEvent(e.id);
-                        setReplayed(e.id);
-                        notify(`Event ${e.event_id} diulang dengan ID yang sama.`);
+                        setBusyEvent(e.id);
+                        setRetryError(null);
+                        void replayEvent(e.id)
+                          .then(() => {
+                            setReplayed(e.id);
+                            notify(`Event ${e.event_id} diulang dengan ID yang sama.`);
+                          })
+                          .catch((error: unknown) => {
+                            const message = error instanceof Error ? error.message : 'Event gagal diulang.';
+                            setRetryError(message);
+                            notify(message, 'danger');
+                          })
+                          .finally(() => setBusyEvent(null));
                       }}
-                      disabled={state === 'loading'}
+                      disabled={state === 'loading' || busyEvent === e.id}
                       className="min-h-[32px] rounded-sm border border-n200 bg-n0 px-2 text-caption font-bold text-action hover:bg-action-soft disabled:text-n400"
                     >
-                      {replayed === e.id ? 'Diulang' : 'Ulangi event'}
+                      {busyEvent === e.id ? 'Mengulang…' : replayed === e.id ? 'Diulang' : 'Ulangi event'}
                     </button>
                   </Td>
                 </tr>
@@ -372,7 +605,140 @@ export function AdminIntegrationPage() {
           </Panel>
         </div>
       </StateView>
-      <DevStateSwitcher routeId="admin-integration" />
+      
+    </Shell>
+  );
+}
+
+
+/* ---------------- Permintaan data ---------------- */
+
+const REQUEST_LABELS: Record<DataRequestStatus, string> = {
+  pending: 'Menunggu',
+  in_progress: 'Diproses',
+  handled: 'Selesai',
+  rejected: 'Ditolak',
+};
+
+function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () => void }) {
+  const [status, setStatus] = useState<DataRequestStatus>(request.status);
+  const [note, setNote] = useState(request.outcome_note ?? '');
+  const [busy, setBusy] = useState(false);
+  const notify = useToast();
+
+  return (
+    <li className="flex flex-col gap-3 rounded-md border border-n200 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <Code>{request.id}</Code>
+          <p className="mt-1 text-caption text-muted">{formatWIB(request.created_at)}</p>
+        </div>
+        <Badge tone="neutral">{REQUEST_LABELS[status]}</Badge>
+      </div>
+      <dl className="flex flex-col gap-2 text-body-sm">
+        <div className="flex flex-wrap gap-x-3">
+          <dt className="font-bold text-muted">Jenis</dt>
+          <dd className="text-ink">{request.type}</dd>
+        </div>
+        <div className="flex flex-wrap gap-x-3">
+          <dt className="font-bold text-muted">Kontak</dt>
+          <dd className="min-w-0 break-words text-ink">{request.contact}</dd>
+        </div>
+        <div className="flex flex-wrap gap-x-3">
+          <dt className="font-bold text-muted">Keterangan</dt>
+          <dd className="min-w-0 break-words text-ink">{request.note ?? '—'}</dd>
+        </div>
+      </dl>
+      <div className="grid gap-3 sm:grid-cols-[12rem_1fr] sm:items-end">
+        <label className="flex flex-col gap-1 text-caption font-bold text-muted">
+          Status
+          <select
+            aria-label={`Status permintaan ${request.id}`}
+            value={status}
+            onChange={(event) => setStatus(event.target.value as DataRequestStatus)}
+            className="min-h-[44px] rounded-md border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+          >
+            {Object.entries(REQUEST_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <div>
+          <TextInput
+            aria-label={`Catatan hasil permintaan ${request.id}`}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Catatan hasil"
+          />
+          <Button
+            variant="secondary"
+            className="mt-2"
+            loading={busy}
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void updateDataRequest(request.id, status, note.trim())
+                .then(() => {
+                  notify('Permintaan data diperbarui. Log audit mencatat tindakan ini.');
+                  onSaved();
+                })
+                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Permintaan gagal diperbarui.', 'danger'))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Simpan
+          </Button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+export function AdminRequestsPage() {
+  const { state } = useScreenState('admin-requests');
+  const [rows, setRows] = useState<DataRequest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    void getDataRequests()
+      .then((data) => { if (!cancelled) setRows(data); })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRows([]);
+          setError(err instanceof Error ? err.message : 'Permintaan data gagal dimuat.');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+
+  return (
+    <Shell kind="admin" title="Permintaan data" subtitle="Verifikasi pemohon dan tindak lanjuti akses, koreksi, penarikan, atau penghapusan tanpa membuka jawaban.">
+      <StateView routeId="admin-requests" state={state}>
+        <div className="flex flex-col gap-5">
+          <Banner tone="info" title="Verifikasi sebelum tindakan">
+            Kontak pada permintaan belum otomatis terverifikasi. Jangan memuat jawaban individual di halaman ini; catat hanya status dan ringkasan tindakan.
+          </Banner>
+          {error && <Banner tone="danger" title="Daftar permintaan gagal dimuat">{error}</Banner>}
+          <Card className="flex flex-col gap-3">
+            <SectionTitle>Daftar permintaan</SectionTitle>
+            {rows === null ? (
+              <p role="status" className="text-body-sm text-muted">Memuat permintaan…</p>
+            ) : rows.length === 0 ? (
+              <p className="text-body-sm text-muted">Belum ada permintaan data.</p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {rows.map((request) => (
+                  <RequestRow key={request.id} request={request} onSaved={() => setReloadKey((value) => value + 1)} />
+                ))}
+              </ul>
+            )}
+          </Card>
+          <ActionLink to={ROUTES.admin} variant="secondary">Kembali ke ringkasan</ActionLink>
+        </div>
+      </StateView>
     </Shell>
   );
 }

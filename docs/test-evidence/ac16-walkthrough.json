@@ -1,0 +1,80 @@
+{
+  "label": "DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.",
+  "generated_at": "2026-11-18T04:48:26.912Z",
+  "environment": {
+    "node": "v24.15.0",
+    "platform": "win32 x64",
+    "storage": "SQLite"
+  },
+  "scenario": {
+    "respondents": 3,
+    "survey": "s_demo1",
+    "version": "v_demo1_1",
+    "patterns": [
+      {
+        "AD01": 4,
+        "TS01": 5,
+        "K02": "Contoh sintetis satu"
+      },
+      {
+        "AD01": 3,
+        "TS01": 4,
+        "K02": "Contoh sintetis dua"
+      },
+      {
+        "AD01": 2,
+        "TS01": 2,
+        "K02": "Contoh sintetis tiga"
+      }
+    ]
+  },
+  "reconciliation": {
+    "summary_total": 8,
+    "csv_rows": 8,
+    "created_response_ids": [
+      "r_5ff15ef5409d74c4",
+      "r_62338a6d32c2332c",
+      "r_e2d8b8f17a38ee57"
+    ],
+    "all_created_ids_present": true,
+    "survey_version_values": [
+      "1"
+    ],
+    "ad01_matches_summary": true,
+    "ad01_csv_counts": {
+      "0": 1,
+      "2": 2,
+      "3": 1,
+      "4": 3,
+      "5": 1
+    },
+    "ad01_summary_counts": [
+      {
+        "value": 1,
+        "count": 0
+      },
+      {
+        "value": 2,
+        "count": 2
+      },
+      {
+        "value": 3,
+        "count": 1
+      },
+      {
+        "value": 4,
+        "count": 3
+      },
+      {
+        "value": 5,
+        "count": 1
+      }
+    ],
+    "csv_bom": true
+  },
+  "limitations": [
+    "Tidak ada peserta nyata, sekolah nyata, atau persetujuan legal.",
+    "Tidak menguji jaringan, perangkat lapangan, atau kerahasiaan statistik.",
+    "Hasil hanya untuk demonstrasi alur dan rekonsiliasi CSV."
+  ]
+}

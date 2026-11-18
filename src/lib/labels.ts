@@ -1,0 +1,24 @@
+import type { AgeCategory, ConsentMode, OrganizationType, SurveyStatus, VersionStatus } from './types';
+
+export const STATUS_LABEL: Record<SurveyStatus | VersionStatus, string> = {
+  draft: 'Draf',
+  published: 'Terbit',
+  closed: 'Ditutup',
+  archived: 'Arsip',
+};
+
+export const ORGANIZATION_TYPE_LABEL: Record<OrganizationType, string> = {
+  school: 'Sekolah',
+  organization: 'Organisasi',
+};
+
+export const AGE_CATEGORY_LABEL: Record<AgeCategory, string> = {
+  adult: 'Dewasa',
+  minor: 'Di bawah umur',
+  mixed: 'Campuran',
+};
+
+export const CONSENT_MODE_LABEL: Record<ConsentMode, string> = {
+  self: 'Persetujuan sendiri',
+  guardian: 'Persetujuan orang tua/wali',
+};

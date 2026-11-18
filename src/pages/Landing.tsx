@@ -15,8 +15,9 @@ import {
   Th,
 } from '../components/ui';
 import { StateView } from '../components/StateView';
-import { DevStateSwitcher, useScreenState } from '../lib/state';
+import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
+import { useStore } from '../lib/store';
 import { versionsFor, questionsFor, optionsFor } from '../lib/fixtures/surveys';
 
 const CAPABILITIES = [
@@ -74,6 +75,7 @@ const FAQ = [
 
 export function HomePage() {
   const { state } = useScreenState('home');
+  const { session } = useStore();
   const location = useLocation();
   const demoVersions = versionsFor('s_demo1');
   const scale5 = optionsFor('q_ad01');
@@ -86,7 +88,7 @@ export function HomePage() {
   }, [location.hash, location.key]);
 
   return (
-    <Shell kind="public" title="Svara" hideHeading guestOnly>
+    <Shell kind="public" title="Svara" hideHeading>
       <StateView
         routeId="home"
         state={state}
@@ -108,7 +110,9 @@ export function HomePage() {
                 lalu baca ringkasan per versi. Tanpa mengubah kode untuk tiap topik.
               </p>
               <div className="flex flex-wrap items-center gap-3">
-                <ActionLink to={ROUTES.login}>Masuk sebagai pengelola</ActionLink>
+                <ActionLink to={session ? (session.role === 'admin' ? ROUTES.admin : ROUTES.creator) : ROUTES.login}>
+                  {session ? 'Buka workspace' : 'Masuk sebagai pengelola'}
+                </ActionLink>
                 <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">
                   Lihat contoh formulir
                 </ActionLink>
@@ -126,7 +130,7 @@ export function HomePage() {
                 <Badge tone="success">Terbit</Badge>
               </div>
               <Divider />
-              <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+              <div className="min-w-0">
                 <Table head={['Versi', 'Status', 'Item']}>
                   {demoVersions.map((v) => (
                     <tr key={v.id}>
@@ -292,7 +296,9 @@ export function HomePage() {
               Masuk sebagai pengelola untuk membuat draf, atau isi contoh formulir lebih dulu untuk melihat alur responden.
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <ActionLink to={ROUTES.login}>Masuk sebagai pengelola</ActionLink>
+              <ActionLink to={session ? (session.role === 'admin' ? ROUTES.admin : ROUTES.creator) : ROUTES.login}>
+                  {session ? 'Buka workspace' : 'Masuk sebagai pengelola'}
+                </ActionLink>
               <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">
                 Isi contoh formulir
               </ActionLink>
@@ -300,7 +306,7 @@ export function HomePage() {
           </section>
         </div>
       </StateView>
-      <DevStateSwitcher routeId="home" />
+      
     </Shell>
   );
 }

@@ -43,6 +43,7 @@ export const ROUTE_STATES: Record<RouteId, readonly StateCode[]> = {
   'admin-accounts': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   'admin-audit': ['default', 'empty', 'loading', 'error', 'permission-denied'],
   'admin-integration': ['default', 'loading', 'error', 'permission-denied', 'conflict', 'success'],
+  'admin-requests': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   privacy: ['default', 'loading', 'error'],
   terms: ['default', 'loading', 'error'],
   notfound: ['default'],
@@ -62,7 +63,7 @@ export function ScreenStateProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const param = params.get('state');
-  const raw = STATE_CODES.includes(param as StateCode) ? (param as StateCode) : null;
+  const raw = import.meta.env.DEV && STATE_CODES.includes(param as StateCode) ? (param as StateCode) : null;
 
   const value: StateContextValue = {
     raw,
@@ -106,45 +107,21 @@ export function StateLink({
   children,
   className,
   ariaLabel,
+  ariaCurrent,
+  onClick,
 }: {
   to: string;
   children: ReactNode;
   className?: string;
   ariaLabel?: string;
+  ariaCurrent?: 'page';
+  onClick?: () => void;
 }) {
   const ctx = useProvider();
   return (
-    <Link to={ctx.link(to)} className={className} aria-label={ariaLabel}>
+    <Link to={ctx.link(to)} className={className} aria-label={ariaLabel} aria-current={ariaCurrent} onClick={onClick}>
       {children}
     </Link>
-  );
-}
-
-/** Panel pemilih state. HANYA dirender saat import.meta.env.DEV. */
-export function DevStateSwitcher({ routeId }: { routeId: RouteId }) {
-  const { state, setState, allowed } = useScreenState(routeId);
-  if (!import.meta.env.DEV) return null;
-  return (
-    <details className="border-t border-n200 bg-n50">
-      <summary className="min-h-[40px] cursor-pointer px-4 py-2 font-mono text-caption text-n600 lg:px-6">
-        Mode pengembangan · state: {state}
-      </summary>
-      <div className="flex flex-wrap items-center gap-2 px-4 pb-3 lg:px-6">
-        {allowed.map((code) => (
-          <button
-            key={code}
-            type="button"
-            onClick={() => setState(code)}
-            aria-pressed={state === code}
-            className={`min-h-[32px] rounded-sm px-2 font-mono text-annotation font-bold transition-colors duration-fast ${
-              state === code ? 'bg-action text-n0' : 'border border-n200 bg-n0 text-n600 hover:bg-action-soft'
-            }`}
-          >
-            {code}
-          </button>
-        ))}
-      </div>
-    </details>
   );
 }
 

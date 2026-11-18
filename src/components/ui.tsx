@@ -17,8 +17,11 @@ export function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="text-h3 font-bold text-ink">{children}</h2>;
 }
 
-export function Label({ children }: { children: ReactNode }) {
-  return <p className="font-mono text-caption font-bold tracking-mono text-n600">{children}</p>;
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  const className = 'font-mono text-caption font-bold tracking-mono text-n600';
+  return htmlFor
+    ? <label htmlFor={htmlFor} className={className}>{children}</label>
+    : <p className={className}>{children}</p>;
 }
 
 export function Muted({ children }: { children: ReactNode }) {
@@ -99,7 +102,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   danger: 'bg-n0 text-danger border border-danger-fill hover:bg-danger-soft',
 };
 
-const DISABLED = 'disabled:cursor-not-allowed disabled:bg-n200 disabled:text-n400 disabled:border-n200 disabled:opacity-100';
+const DISABLED = 'disabled:cursor-not-allowed disabled:bg-n100 disabled:text-n600 disabled:border-n200 disabled:opacity-100';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -148,6 +151,8 @@ export function ActionLink({
   disabled = false,
   block = false,
   className = '',
+  onClick,
+  ariaCurrent,
 }: {
   to: string;
   children: ReactNode;
@@ -155,17 +160,19 @@ export function ActionLink({
   disabled?: boolean;
   block?: boolean;
   className?: string;
+  onClick?: () => void;
+  ariaCurrent?: 'page';
 }) {
   const cls = `inline-flex min-h-[44px] cursor-pointer items-center justify-center gap-2 rounded-md px-5 text-body font-bold transition-colors duration-fast ${BUTTON_VARIANTS[variant]} ${block ? 'w-full' : ''} ${className}`;
   if (disabled) {
     return (
-      <span aria-disabled="true" className={`${cls} cursor-not-allowed border-n200 bg-n200 text-n400`}>
+      <span aria-disabled="true" className={`${cls} cursor-not-allowed border-n200 bg-n100 text-n600`}>
         {children}
       </span>
     );
   }
   return (
-    <StateLink to={to} className={cls}>
+    <StateLink to={to} className={cls} onClick={onClick} ariaCurrent={ariaCurrent}>
       {children}
     </StateLink>
   );
@@ -249,7 +256,10 @@ export function Checkbox({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex min-h-[44px] items-center gap-3">
+    <label
+      htmlFor={id}
+      className={`flex min-h-[44px] items-center gap-3 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+    >
       <input
         id={id}
         type="checkbox"
@@ -258,10 +268,8 @@ export function Checkbox({
         onChange={(e) => onChange(e.target.checked)}
         className="size-5 shrink-0 rounded-sm accent-action disabled:accent-n400"
       />
-      <label htmlFor={id} className={`text-body-sm ${disabled ? 'text-n400' : 'text-ink'}`}>
-        {label}
-      </label>
-    </div>
+      <span className={`text-body-sm ${disabled ? 'text-n600' : 'text-ink'}`}>{label}</span>
+    </label>
   );
 }
 
@@ -336,15 +344,32 @@ export function BlockedNotice({ state }: { state: 'closed' | 'expired' | 'revoke
 /* ---------- Tabel ---------- */
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
+  const minWidth = head.length >= 6
+    ? 'min-w-[44rem]'
+    : head.length >= 5
+      ? 'min-w-[40rem]'
+      : head.length >= 4
+        ? 'min-w-[34rem]'
+        : '';
   return (
-    <div>
-      <p className="mb-2 text-caption text-muted sm:hidden">Geser tabel ke samping untuk melihat semua kolom.</p>
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <table className="w-full min-w-[480px] border-collapse text-left text-body-sm">
+    <div className="min-w-0">
+      {minWidth && <p className="mb-2 text-caption text-muted sm:hidden">Geser tabel ke samping untuk melihat semua kolom.</p>}
+      <div
+        className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0"
+        tabIndex={minWidth ? 0 : undefined}
+        role={minWidth ? 'region' : undefined}
+        aria-label={minWidth ? 'Tabel data yang dapat digeser' : undefined}
+        onKeyDown={minWidth ? (event) => {
+          if (event.target !== event.currentTarget || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+          event.preventDefault();
+          event.currentTarget.scrollLeft += event.key === 'ArrowRight' ? 80 : -80;
+        } : undefined}
+      >
+        <table className={`w-full table-fixed border-collapse text-left text-body-sm ${minWidth}`}>
           <thead>
             <tr className="border-b border-n200">
               {head.map((h) => (
-                <th key={h} scope="col" className="py-2 pr-4 font-bold text-muted">{h}</th>
+                <th key={h} scope="col" className="break-words py-2 pe-2 font-bold text-muted last:pe-0">{h}</th>
               ))}
             </tr>
           </thead>
@@ -367,9 +392,9 @@ export function Th({ children, className = '' }: { children: ReactNode; classNam
 
 export function PolicyLinks({ className = '' }: { className?: string }) {
   return (
-    <p className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-body-sm text-muted ${className}`}>
-      <PlainLink to="/privacy">Kebijakan privasi</PlainLink>
-      <PlainLink to="/terms">Ketentuan layanan</PlainLink>
+    <p className={`flex flex-wrap items-center gap-x-4 text-body-sm text-muted ${className}`}>
+      <PlainLink to="/privacy" className="min-h-[44px]">Kebijakan privasi</PlainLink>
+      <PlainLink to="/terms" className="min-h-[44px]">Ketentuan layanan</PlainLink>
     </p>
   );
 }

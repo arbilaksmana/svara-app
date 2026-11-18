@@ -9,7 +9,7 @@
   --color-n100: #f4f7fe;
   --color-n200: #d8dce8;
   --color-n400: #aeb2be;
-  --color-n600: #71747d;
+  --color-n600: #686b74;
   --color-n700: #4d4f56;
   --color-n800: #303135;
   --color-dark: #171918;
@@ -20,7 +20,7 @@
   --color-action-soft: #e7f2ff;
   --color-action-subtle: #a3cfff;
   --color-action-light: #5baaff;
-  --color-danger-text: #c4382f;
+  --color-danger-text: #b52d24;
   --color-danger-fill: #f15c59;
   --color-danger-soft: #ffdfdf;
   --color-success-text: #0a7a3b;
@@ -34,9 +34,9 @@
   /* Alias pendek dari DESIGN.md §Tailwind v4 */
   --color-canvas: #ffffff;
   --color-ink: #303135;
-  --color-muted: #71747d;
+  --color-muted: #64676f;
   --color-border: #d8dce8;
-  --color-danger: #c4382f;
+  --color-danger: #b52d24;
   --color-success: #0a7a3b;
 
   /* Tipografi */
@@ -163,6 +163,10 @@ h1, h2, h3 {
 :focus-visible {
   outline: 3px solid var(--color-action);
   outline-offset: 2px;
+}
+
+main:focus-visible {
+  outline: none;
 }
 
 ::selection {

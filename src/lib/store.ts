@@ -4,32 +4,44 @@ import {
   versions,
   questions,
   options,
+  assignments,
   invitations,
   publicLinks,
 } from './fixtures/surveys';
-import { accessGrants, integrationEvents } from './fixtures/records';
+import { profiles, notices } from './fixtures/profiles';
+import {
+  accounts,
+  accessGrants,
+  auditLogs,
+  integrationEvents,
+} from './fixtures/records';
+import * as api from './api';
+import type { AdminStats } from './api';
 import type {
-  Survey,
-  SurveyVersion,
+  Account,
+  AccessGrant,
+  AuditLog,
+  DeploymentProfile,
+  EventStatus,
+  IntegrationEvent,
+  Invitation,
+  Notice,
+  PublicLink,
   Question,
   QuestionOption,
-  Invitation,
-  PublicLink,
-  EventStatus,
+  Role,
+  Survey,
+  SurveyVersion,
 } from './types';
 
-/**
- * Penyimpanan kerja sisi klien. Tidak ada server: semua perubahan bertahan di
- * localStorage peramban dan koleksi fixture disinkronkan di tempat supaya
- * helper domain (findSurvey, questionsFor, computeSummary) tetap berlaku.
- */
-
-const KEY = 'svara.workspace.v1';
+const NOTE_KEY = 'svara.integration.note.v1';
 
 export interface Session {
+  id: string;
   name: string;
   email: string;
   role: 'creator' | 'admin';
+  serverRole: Role;
 }
 
 export interface SettingsState {
@@ -50,92 +62,31 @@ export interface DraftState {
   savedAt: string;
 }
 
-interface Stored {
-  session: Session | null;
-  surveys: Survey[];
-  versions: SurveyVersion[];
-  questions: Question[];
-  options: QuestionOption[];
-  invitations: Invitation[];
-  publicLinks: PublicLink[];
-  settings: Record<string, SettingsState>;
-  grants: Record<string, GrantState>;
-  drafts: Record<string, DraftState>;
-  events: Record<string, { attempts: number; status: EventStatus }>;
-  integrationNote: string;
-}
-
 export interface Snapshot {
   revision: number;
+  ready: boolean;
+  error: string | null;
   session: Session | null;
   settings: Record<string, SettingsState>;
   grants: Record<string, GrantState>;
   drafts: Record<string, DraftState>;
   integrationNote: string;
+  stats: AdminStats | null;
 }
 
-function initial(): Stored {
-  return {
-    session: null,
-    surveys: surveys.map((s) => ({ ...s })),
-    versions: versions.map((v) => ({ ...v })),
-    questions: questions.map((q) => ({ ...q, option_ids: [...q.option_ids] })),
-    options: options.map((o) => ({ ...o })),
-    invitations: invitations.map((i) => ({ ...i })),
-    publicLinks: publicLinks.map((l) => ({ ...l })),
-    settings: {},
-    grants: Object.fromEntries(
-      accessGrants.map((g) => [
-        g.id,
-        { read: g.can_read_individual, export: g.can_export, text: g.can_read_free_text },
-      ]),
-    ),
-    drafts: {},
-    events: Object.fromEntries(
-      integrationEvents.map((e) => [e.id, { attempts: e.attempts, status: e.status }]),
-    ),
-    integrationNote: '',
-  };
-}
-
-let data: Stored = initial();
+let session: Session | null = null;
+let ready = false;
+let error: string | null = null;
+let stats: Snapshot['stats'] = null;
+let settings: Record<string, SettingsState> = {};
+let grants: Record<string, GrantState> = {};
+let drafts: Record<string, DraftState> = {};
+let integrationNote = '';
 try {
-  const raw = localStorage.getItem(KEY);
-  if (raw) {
-    const parsed = JSON.parse(raw) as Partial<Stored>;
-    data = { ...data, ...parsed };
-  }
+  integrationNote = localStorage.getItem(NOTE_KEY) ?? '';
 } catch {
-  // Penyimpanan rusak atau tidak tersedia: mulai dari data awal.
+  integrationNote = '';
 }
-
-function syncCollections(): void {
-  surveys.splice(0, surveys.length, ...data.surveys);
-  versions.splice(0, versions.length, ...data.versions);
-  questions.splice(0, questions.length, ...data.questions);
-  options.splice(0, options.length, ...data.options);
-  invitations.splice(0, invitations.length, ...data.invitations);
-  publicLinks.splice(0, publicLinks.length, ...data.publicLinks);
-  for (const g of accessGrants) {
-    const next = data.grants[g.id];
-    if (next) {
-      g.can_read_individual = next.read;
-      g.can_export = next.export;
-      g.can_read_free_text = next.text;
-    }
-  }
-  for (const e of integrationEvents) {
-    const next = data.events[e.id];
-    if (next) {
-      e.attempts = next.attempts;
-      e.status = next.status;
-    }
-  }
-}
-
-syncCollections();
-
-
 
 let revision = 0;
 let snapshot: Snapshot = buildSnapshot();
@@ -145,220 +96,339 @@ function buildSnapshot(): Snapshot {
   revision += 1;
   return {
     revision,
-    session: data.session,
-    settings: data.settings,
-    grants: data.grants,
-    drafts: data.drafts,
-    integrationNote: data.integrationNote,
+    ready,
+    error,
+    session,
+    settings,
+    grants,
+    drafts,
+    integrationNote,
+    stats,
   };
 }
 
 function emit(): void {
-  syncCollections();
-  try {
-    localStorage.setItem(KEY, JSON.stringify(data));
-  } catch {
-    // Mode privat atau kuota penuh: state tetap hidup selama sesi ini.
-  }
   snapshot = buildSnapshot();
-  for (const l of listeners) l();
+  for (const listener of listeners) listener();
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
-/** Berlangganan perubahan agar komponen ikut merender setelah aksi. */
 export function useStore(): Snapshot {
   return useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 }
 
-/* ---------------- Aksi ---------------- */
-
-export function signIn(email: string, role: 'creator' | 'admin' = 'creator'): void {
-  const local = email.split('@')[0] ?? 'pengelola';
-  const name = local.replace(/[._-]+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase()) || 'Pengelola';
-  data.session = { name, email, role };
-  emit();
+function replace<T>(target: T[], next: T[]): void {
+  target.splice(0, target.length, ...next);
 }
 
-export function signOut(): void {
-  data.session = null;
-  emit();
+function mapSession(account: (Account & { email?: string }) | null): Session | null {
+  if (!account) return null;
+  return {
+    id: account.id,
+    name: account.display_name,
+    email: account.email ?? '',
+    role: account.role === 'super_admin' ? 'admin' : 'creator',
+    serverRole: account.role,
+  };
 }
 
-export function saveDraft(surveyId: string, title: string, codes: Record<string, string>): string {
-  const survey = data.surveys.find((s) => s.id === surveyId);
-  const savedAt = new Date().toISOString();
-  if (survey) {
-    survey.title = title;
-    survey.updated_at = savedAt;
+function hydrate(data: api.BootstrapData): void {
+  replace(surveys, data.surveys);
+  replace(
+    versions,
+    data.versions.map((version) => ({
+      ...version,
+      question_ids: version.question_ids ?? [],
+    })),
+  );
+  replace(
+    questions,
+    data.questions.map((question) => ({
+      ...question,
+      order: question.order ?? question.ord ?? 0,
+      required: Boolean(question.required),
+      option_ids: question.option_ids ?? [],
+    })),
+  );
+  replace(options, data.options);
+  replace(assignments, data.assignments);
+  replace(
+    invitations,
+    data.invitations.map((invitation) => ({
+      ...invitation,
+      token: invitation.token ?? '',
+      status: invitation.status as Invitation['status'],
+    })),
+  );
+  replace(
+    publicLinks,
+    data.publicLinks.map((link) => ({
+      ...link,
+      url: link.url ?? `/s/${link.token}`,
+      status: link.status as PublicLink['status'],
+    })),
+  );
+
+  for (const key of Object.keys(profiles)) delete profiles[key];
+  for (const profile of data.profiles) profiles[profile.id] = profile;
+  for (const key of Object.keys(notices)) delete notices[key];
+  for (const notice of data.notices) {
+    if (!notices[notice.profile_id]) notices[notice.profile_id] = notice;
   }
-  data.drafts = { ...data.drafts, [surveyId]: { title, codes, savedAt } };
+
+  replace(accounts, data.accounts);
+  replace(accessGrants, data.grants);
+  replace(auditLogs, data.auditLogs);
+  replace(
+    integrationEvents,
+    data.integrationEvents.map((event) => ({
+      ...event,
+      status: event.status as EventStatus,
+    })),
+  );
+
+  settings = Object.fromEntries(
+    Object.entries(data.settings).map(([surveyId, value]) => [
+      surveyId,
+      { allowResults: value.allowResults, allowIndividual: value.allowIndividual, savedAt: data.serverTime },
+    ]),
+  );
+  grants = Object.fromEntries(
+    data.grants.map((grant) => [
+      grant.id,
+      {
+        read: grant.can_read_individual,
+        export: grant.can_export,
+        text: grant.can_read_free_text,
+      },
+    ]),
+  );
+  session = mapSession(data.account);
+}
+
+export async function loadBootstrap(): Promise<void> {
+  try {
+    error = null;
+    const data = await api.bootstrap();
+    hydrate(data);
+    ready = true;
+  } catch (cause) {
+    ready = true;
+    error = cause instanceof Error ? cause.message : 'Data workspace tidak dapat dimuat.';
+  }
   emit();
+}
+
+export async function refreshBootstrap(): Promise<void> {
+  const data = await api.bootstrap();
+  hydrate(data);
+  emit();
+}
+
+export async function signIn(email: string, password: string): Promise<Session> {
+  const result = await api.login(email, password);
+  session = mapSession(result.account);
+  if (!session) throw new Error('Akun tidak dikenali.');
+  const data = await api.bootstrap();
+  hydrate(data);
+  ready = true;
+  error = null;
+  emit();
+  return session;
+}
+
+export async function signOut(): Promise<void> {
+  try {
+    await api.logout();
+  } finally {
+    session = null;
+    settings = {};
+    grants = {};
+    drafts = {};
+    stats = null;
+    emit();
+  }
+}
+
+export async function createSurvey(title = 'Survei baru'): Promise<string> {
+  const detail = await api.createSurvey(title);
+  await refreshBootstrap();
+  return detail.survey.id;
+}
+
+export async function saveDraft(surveyId: string, payload: api.SurveyPayload): Promise<string> {
+  const detail = await api.saveSurvey(surveyId, payload);
+  const savedAt = new Date().toISOString();
+  const codes: Record<string, string> = {};
+  for (const question of detail.questions) codes[question.id] = question.code;
+  drafts = { ...drafts, [surveyId]: { title: payload.title, codes, savedAt } };
+  await refreshBootstrap();
   return savedAt;
 }
 
-/** Membuat draf baru beserta versi draf dan dua item salinan. */
-export function createSurvey(title = 'Survei baru'): string {
-  const stamp = Date.now().toString(36);
-  const id = `s_${stamp}`;
-  const versionId = `v_${stamp}`;
-  const now = new Date().toISOString();
-  const profileId = data.surveys[0]?.profile_id ?? 'p_perpus';
-
-  const source = data.questions
-    .filter((q) => q.version_id === 'v_demo1_1' && q.type === 'likert')
-    .slice(0, 2);
-
-  const newQuestions: Question[] = [];
-  const newOptions: QuestionOption[] = [];
-  source.forEach((q, index) => {
-    const qid = `q_${stamp}_${index}`;
-    const srcOpts = data.options.filter((o) => o.question_id === q.id);
-    const optIds = srcOpts.map((_, i) => `${qid}_opt${i + 1}`);
-    srcOpts.forEach((o, i) => {
-      newOptions.push({ ...o, id: optIds[i] ?? `${qid}_opt${i + 1}`, question_id: qid });
-    });
-    newQuestions.push({
-      ...q,
-      id: qid,
-      version_id: versionId,
-      code: `Q${String(index + 1).padStart(2, '0')}`,
-      order: index + 1,
-      label: q.label,
-      hint: 'Ubah teks pertanyaan sesuai kebutuhan survei.',
-      option_ids: optIds,
-    });
-  });
-
-  data.surveys.push({
-    id,
-    owner_id: 'u_creator_a',
-    profile_id: profileId,
-    title,
-    purpose: 'Jelaskan tujuan pengumpulan jawaban pada survei ini.',
-    object_label: '',
-    instructions: 'Pilih satu jawaban pada setiap pernyataan.',
-    status: 'draft',
-    created_at: now,
-    updated_at: now,
-    current_version_id: versionId,
-  });
-  data.versions.push({
-    id: versionId,
-    survey_id: id,
-    number: 1,
-    status: 'draft',
-    notice_version: '1.0',
-    published_at: null,
-    closed_at: null,
-    question_ids: newQuestions.map((q) => q.id),
-  });
-  data.questions.push(...newQuestions);
-  data.options.push(...newOptions);
-  emit();
-  return id;
+export async function publishVersion(surveyId: string): Promise<string | null> {
+  const result = await api.publishSurvey(surveyId);
+  await refreshBootstrap();
+  return result.publicLink.token || null;
 }
 
-export function publishVersion(surveyId: string): string | null {
-  const survey = data.surveys.find((s) => s.id === surveyId);
-  const draft = [...data.versions]
-    .reverse()
-    .find((v) => v.survey_id === surveyId && v.status === 'draft');
-  if (!survey || !draft) return null;
-
-  const now = new Date().toISOString();
-  draft.status = 'published';
-  draft.published_at = now;
-  survey.status = 'published';
-  survey.current_version_id = draft.id;
-  survey.updated_at = now;
-
-  const token = `tautan-${Date.now().toString(36)}`;
-  data.publicLinks.push({
-    id: `pl_${Date.now().toString(36)}`,
-    survey_id: surveyId,
-    version_id: draft.id,
-    token,
-    url: `/s/${token}`,
-    label: `Tautan umum · ${survey.title}`,
-    status: 'active',
-    expires_at: null,
-  });
-  emit();
-  return token;
+export async function duplicateVersion(surveyId: string): Promise<string> {
+  const detail = await api.duplicateSurvey(surveyId);
+  await refreshBootstrap();
+  return detail.survey.id;
 }
 
-export function createInvitation(surveyId: string, _label: string, expiresAt: string): string {
-  const version = data.versions.find((v) => v.id === data.surveys.find((s) => s.id === surveyId)?.current_version_id);
-  const seq = String(data.invitations.length + 1).padStart(3, '0');
-  const code = `UND-${seq}`;
-  data.invitations.push({
-    id: `inv_${Date.now().toString(36)}`,
-    assignment_id: `a_${Date.now().toString(36)}`,
-    survey_id: surveyId,
-    version_id: version?.id ?? '',
-    code,
-    status: 'active',
-    expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-    used_at: null,
-    revoked_at: null,
-    token_hash: `hash-${Date.now().toString(36)}`,
-  });
-  emit();
-  return code;
+export async function createInvitation(
+  surveyId: string,
+  label: string,
+  expiresAt: string,
+): Promise<{ code: string; token: string }> {
+  const result = await api.createInvitation(surveyId, label, expiresAt);
+  await refreshBootstrap();
+  return { code: result.invitation.code, token: result.token };
 }
 
-export function revokeInvitation(invitationId: string): void {
-  const invitation = data.invitations.find((i) => i.id === invitationId);
-  if (!invitation || invitation.status !== 'active') return;
-  invitation.status = 'revoked';
-  invitation.revoked_at = new Date().toISOString();
-  emit();
+export async function revokeInvitation(invitationId: string): Promise<void> {
+  await api.revokeInvitation(invitationId);
+  await refreshBootstrap();
 }
 
-export function closeVersion(versionId: string): void {
-  const version = data.versions.find((v) => v.id === versionId);
-  if (!version || version.status === 'closed') return;
-  version.status = 'closed';
-  version.closed_at = new Date().toISOString();
-  const survey = data.surveys.find((s) => s.current_version_id === versionId);
-  if (survey) survey.status = 'closed';
-  emit();
+export async function closeVersion(surveyId: string): Promise<void> {
+  await api.closeSurvey(surveyId);
+  await refreshBootstrap();
 }
 
-export function archiveSurvey(surveyId: string): void {
-  const survey = data.surveys.find((s) => s.id === surveyId);
-  if (!survey) return;
-  survey.status = 'archived';
-  emit();
+export async function archiveSurvey(surveyId: string): Promise<void> {
+  await api.archiveSurvey(surveyId);
+  await refreshBootstrap();
 }
 
-export function saveSettings(surveyId: string, allowResults: boolean, allowIndividual: boolean): void {
-  data.settings = {
-    ...data.settings,
+export async function saveSettings(
+  surveyId: string,
+  allowResults: boolean,
+  allowIndividual: boolean,
+): Promise<void> {
+  await api.saveSettings(surveyId, allowResults, allowIndividual);
+  settings = {
+    ...settings,
     [surveyId]: { allowResults, allowIndividual, savedAt: new Date().toISOString() },
   };
   emit();
 }
 
-export function saveGrants(next: Record<string, GrantState>): void {
-  data.grants = { ...next };
-  emit();
+export async function saveGrants(next: Record<string, GrantState>): Promise<void> {
+  const byAccount = new Map<string, Array<{
+    survey_id: string | null;
+    can_read_individual: boolean;
+    can_export: boolean;
+    can_read_free_text: boolean;
+  }>>();
+  for (const grant of accessGrants) {
+    const state = next[grant.id] ?? {
+      read: grant.can_read_individual,
+      export: grant.can_export,
+      text: grant.can_read_free_text,
+    };
+    const list = byAccount.get(grant.account_id) ?? [];
+    list.push({
+      survey_id: grant.survey_id,
+      can_read_individual: state.read,
+      can_export: state.export,
+      can_read_free_text: state.text,
+    });
+    byAccount.set(grant.account_id, list);
+  }
+  for (const [accountId, list] of byAccount) {
+    await api.adminSaveGrants(accountId, list);
+  }
+  grants = { ...next };
+  await refreshBootstrap();
 }
 
-export function replayEvent(eventId: string): void {
-  const current = data.events[eventId];
-  data.events = {
-    ...data.events,
-    [eventId]: { attempts: (current?.attempts ?? 0) + 1, status: 'delivered' },
-  };
+export async function replayEvent(eventId: string): Promise<void> {
+  await api.adminRetryEvent(eventId);
+  await refreshBootstrap();
+}
+
+export async function setAdminStats(next: Snapshot['stats']): Promise<void> {
+  stats = next;
   emit();
 }
 
 export function setIntegrationNote(note: string): void {
-  data.integrationNote = note;
+  integrationNote = note;
+  try {
+    localStorage.setItem(NOTE_KEY, note);
+  } catch {
+    // Catatan tetap hidup selama sesi ini.
+  }
   emit();
 }
+
+export function localSettingsFor(surveyId: string): SettingsState | undefined {
+  return settings[surveyId];
+}
+
+export function localGrantsFor(accountId: string): AccessGrant[] {
+  return accessGrants.filter((grant) => grant.account_id === accountId);
+}
+
+export function sessionRole(): Role | null {
+  return session?.serverRole ?? null;
+}
+
+export function isAdmin(): boolean {
+  return session?.role === 'admin';
+}
+
+export function isCreator(): boolean {
+  return session?.role === 'creator' && session.serverRole === 'creator';
+}
+
+export function ensureAccount(account: Account | undefined): Account | undefined {
+  return account;
+}
+
+export function allAccounts(): Account[] {
+  return accounts;
+}
+
+export function allAuditLogs(): AuditLog[] {
+  return auditLogs;
+}
+
+export function allIntegrationEvents(): IntegrationEvent[] {
+  return integrationEvents;
+}
+
+export function allProfiles(): DeploymentProfile[] {
+  return Object.values(profiles);
+}
+
+export function allNotices(): Notice[] {
+  return Object.values(notices);
+}
+
+export function allQuestions(): Question[] {
+  return questions;
+}
+
+export function allOptions(): QuestionOption[] {
+  return options;
+}
+
+export function allVersions(): SurveyVersion[] {
+  return versions;
+}
+
+export function allInvitations(): Invitation[] {
+  return invitations;
+}
+
+export type { Survey, SurveyVersion, Question, QuestionOption, Invitation, PublicLink };

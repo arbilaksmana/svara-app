@@ -49,22 +49,19 @@ export function StateView({
 
     case 'error':
       return (
-        <div className="flex flex-col gap-4">
-          <ErrorState
-            title={errorTitle ?? 'Data contoh tidak dapat dimuat'}
-            detail={errorDetail ?? 'Terjadi gangguan pada lapisan tampilan. Tidak ada rincian basis data yang ditampilkan.'}
-            action={
-              <button
-                type="button"
-                onClick={() => setState('default')}
-                className="min-h-[44px] rounded-md border border-n200 bg-n0 px-4 text-body-sm font-bold text-action hover:bg-action-soft"
-              >
-                Muat ulang tampilan
-              </button>
-            }
-          />
-          {children}
-        </div>
+        <ErrorState
+          title={errorTitle ?? 'Data tidak dapat dimuat'}
+          detail={errorDetail ?? 'Terjadi gangguan saat memuat data. Tidak ada data lama yang ditampilkan.'}
+          action={
+            <button
+              type="button"
+              onClick={() => setState('default')}
+              className="min-h-[44px] rounded-md border border-n200 bg-n0 px-4 text-body-sm font-bold text-action hover:bg-action-soft"
+            >
+              Muat ulang tampilan
+            </button>
+          }
+        />
       );
 
     case 'permission-denied':
@@ -143,7 +140,4 @@ export function ValidationSummary({ items }: { items: string[] }) {
   );
 }
 
-/** Hint state tidak ditampilkan pada permukaan produk; ?state= tetap bekerja. */
-export function StateDebugHint(_props: { routeId: RouteId; state: StateCode }): null {
-  return null;
-}
+

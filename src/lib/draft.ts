@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export type DraftValue = { optionId: string | null; text: string };
 
@@ -39,6 +39,23 @@ export function useDraft(token: string, questionCodes: string[]) {
     }
     return base;
   });
+
+  useEffect(() => {
+    setDraft((prev) => {
+      const all = readAll();
+      const next = { ...prev };
+      let changed = false;
+      for (const code of questionCodes) {
+        if (!(code in next)) {
+          next[code] = all[token]?.[code] ?? { optionId: null, text: '' };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // Kode pertanyaan berubah setelah konteks server selesai dimuat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, questionCodes.join('|')]);
 
   const setOption = useCallback((code: string, optionId: string) => {
     setDraft((prev) => {

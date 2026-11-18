@@ -100,6 +100,8 @@ export interface Invitation {
   revoked_at: string | null;
   /** Hash token hanya untuk kontrak; tidak pernah dirender pada UI (PRD §9.1). */
   token_hash: string;
+  /** Token tautan undangan. Hanya tersedia bagi pengelola survei. */
+  token?: string;
 }
 
 export type LinkStatus = 'active' | 'expired' | 'closed';
@@ -168,6 +170,7 @@ export interface AuditLog {
   object: string;
   outcome: AuditOutcome;
   at: string;
+  metadata?: string | null;
 }
 
 export type Role = 'super_admin' | 'creator' | 'authorized_officer';
@@ -178,6 +181,7 @@ export interface Account {
   display_name: string;
   role: Role;
   status: AccountStatus;
+  email?: string;
 }
 
 export interface AccessGrant {
@@ -201,6 +205,8 @@ export interface IntegrationEvent {
   attempts: number;
   at: string;
   simulated: boolean;
+  response_id?: string | null;
+  last_error?: string | null;
 }
 
 export interface Notice {

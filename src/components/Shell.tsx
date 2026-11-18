@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PlainLink, PolicyLinks } from './ui';
@@ -21,15 +21,13 @@ const NAV: Record<ShellKind, NavEntry[]> = {
   public: GUEST_NAV,
   creator: [
     { to: ROUTES.creator, label: 'Daftar survei' },
-    { to: ROUTES.creatorEdit('s_demo1'), label: 'Editor' },
-    { to: ROUTES.creatorResults('s_demo1'), label: 'Hasil' },
-    { to: ROUTES.creatorSettings('s_demo1'), label: 'Pengaturan' },
   ],
   admin: [
     { to: ROUTES.admin, label: 'Ringkasan' },
     { to: ROUTES.adminAccounts, label: 'Akun & izin' },
     { to: ROUTES.adminAudit, label: 'Log audit' },
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
+    { to: ROUTES.adminRequests, label: 'Permintaan data' },
   ],
   respondent: GUEST_NAV,
 };
@@ -45,7 +43,7 @@ function Wordmark({ to }: { to: string }) {
   return (
     <Link
       to={to}
-      className={`inline-flex min-h-[40px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
+      className={`inline-flex min-h-[44px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       Svara
     </Link>
@@ -57,7 +55,7 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
     <Link
       to={to}
       aria-current={active ? 'page' : undefined}
-      className={`inline-flex min-h-[40px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
+      className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
         active ? 'text-n0' : 'text-n400 hover:text-n0'
       }`}
     >
@@ -124,7 +122,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               aria-expanded={menuOpen}
               aria-controls="pill-menu"
               onClick={() => setMenuOpen((v) => !v)}
-              className={`inline-flex min-h-[40px] items-center rounded-full px-2.5 text-body-sm font-normal text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
+              className={`inline-flex min-h-[44px] items-center rounded-full px-2.5 text-body-sm font-normal text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
             >
               Menu
             </button>
@@ -135,11 +133,12 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               <button
                 type="button"
                 onClick={() => {
-                  signOut();
-                  notify('Anda telah keluar.');
-                  navigate(ROUTES.home);
+                  void signOut().finally(() => {
+                    notify('Anda telah keluar.');
+                    navigate(ROUTES.home);
+                  });
                 }}
-                className={`inline-flex min-h-[40px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
+                className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
               >
                 Keluar
               </button>
@@ -147,7 +146,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
           ) : (
             <Link
               to={ROUTES.login}
-              className={`inline-flex min-h-[40px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
+              className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
             >
               Masuk
             </Link>
@@ -191,6 +190,7 @@ export function Shell({
   hideHeading = false,
   guestOnly = false,
   chromeless = false,
+  bottomInset = false,
 }: {
   kind: ShellKind;
   children: ReactNode;
@@ -202,39 +202,41 @@ export function Shell({
   guestOnly?: boolean;
   /** Halaman yang mengatur layout sendiri (mis. login): tanpa navbar dan footer. */
   chromeless?: boolean;
+  /** Beri ruang bawah di footer saat halaman memiliki action bar tetap di mobile. */
+  bottomInset?: boolean;
 }) {
   const location = useLocation();
   const { session } = useStore();
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    mainRef.current?.focus({ preventScroll: true });
+  }, [location.pathname]);
   const sectionNav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
   // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
-  const activeSession = guestOnly ? null : session;
+  const activeSession = guestOnly || kind === 'respondent' ? null : session;
   const homeTo = activeSession
     ? activeSession.role === 'admin'
       ? ROUTES.admin
       : ROUTES.creator
     : ROUTES.home;
   const topNav = activeSession ? (activeSession.role === 'admin' ? NAV.admin : NAV.creator) : GUEST_NAV;
-  const activePath =
-    kind === 'respondent'
-      ? ROUTES.home
-      : location.pathname.startsWith(ROUTES.creator)
-        ? ROUTES.creator
-        : location.pathname;
+  const activePath = kind === 'respondent' ? ROUTES.home : location.pathname;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
       <a
         href="#konten-utama"
-        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-action focus:px-4 focus:py-2 focus:text-n0"
+        className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[60] focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-md focus:bg-action focus:px-4 focus:py-2 focus:text-n0"
       >
         Lewati ke konten utama
       </a>
 
-      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly} homeTo={homeTo} />}
+      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} homeTo={homeTo} />}
 
       {chromeless ? (
-        <main id="konten-utama" tabIndex={-1} className="flex flex-1 flex-col">
+        <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
           {children}
         </main>
       ) : (
@@ -242,12 +244,13 @@ export function Shell({
         {inWorkspace && (
           <aside aria-label="Navigasi bagian" className="shrink-0 lg:w-48">
             <p className="mb-3 hidden font-mono text-annotation tracking-mono text-n600 lg:block">WORKSPACE</p>
-            <nav className="flex flex-row gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+            <nav className="flex flex-row flex-wrap gap-2 lg:flex-col">
               {sectionNav.map((item) => (
                 <PlainLink
                   key={item.to}
                   to={item.to}
-                  className={`min-h-[40px] shrink-0 rounded-sm px-3 py-2 text-body-sm font-bold no-underline ${
+                  aria-current={location.pathname === item.to ? 'page' : undefined}
+                  className={`min-h-[44px] shrink-0 rounded-sm px-3 py-2 text-body-sm font-bold no-underline ${
                     location.pathname === item.to ? 'bg-n100 text-action' : 'text-n600 hover:bg-n50'
                   }`}
                 >
@@ -265,7 +268,7 @@ export function Shell({
           </aside>
         )}
 
-        <main id="konten-utama" tabIndex={-1} className="min-w-0 flex-1">
+        <main id="konten-utama" ref={mainRef} tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
           {!hideHeading && (
             <div className="mb-6 flex flex-col gap-2">
               <h1 className="text-h1 font-bold text-ink">{title}</h1>
@@ -279,10 +282,10 @@ export function Shell({
 
       {!chromeless && (
       <footer className="border-t border-n200 bg-n50">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-2 px-4 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+        <div className={`mx-auto flex max-w-[1200px] flex-col gap-2 px-4 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${bottomInset ? 'pt-6 pb-24 lg:pb-6' : 'py-6'}`}>
           <div>
             <p className="text-body-sm font-bold text-ink">Svara</p>
-            <p className="text-caption text-muted">Lingkungan demonstrasi dengan data contoh. Perubahan tersimpan di peramban ini.</p>
+            <p className="text-caption text-muted">Instrumen berskala dan isian singkat, dikelola per versi.</p>
           </div>
           <PolicyLinks />
         </div>

@@ -321,7 +321,21 @@ export function findSurvey(id: string): Survey | undefined {
 }
 
 export function versionsFor(surveyId: string): SurveyVersion[] {
-  return versions.filter((v) => v.survey_id === surveyId);
+  return versions
+    .filter((v) => v.survey_id === surveyId)
+    .sort((a, b) => b.number - a.number);
+}
+
+export function draftVersionFor(surveyId: string): SurveyVersion | undefined {
+  return versionsFor(surveyId).find((version) => version.status === 'draft');
+}
+
+export function publishedVersionFor(surveyId: string): SurveyVersion | undefined {
+  return versionsFor(surveyId).find((version) => version.status === 'published');
+}
+
+export function editorVersionFor(surveyId: string): SurveyVersion | undefined {
+  return draftVersionFor(surveyId) ?? publishedVersionFor(surveyId) ?? versionsFor(surveyId)[0];
 }
 
 export function questionsFor(versionId: string): Question[] {

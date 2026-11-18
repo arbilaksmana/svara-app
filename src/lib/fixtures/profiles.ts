@@ -1,4 +1,5 @@
 import type { DeploymentProfile, Notice } from '../types';
+import { findSurvey } from './surveys';
 
 /**
  * Profil deployment sintetis (PRD §1.2).
@@ -73,9 +74,11 @@ export const notices: Record<string, Notice> = {
 };
 
 export function profileForSurvey(surveyId: string): DeploymentProfile {
-  return surveyId === 's_demo2' ? profiles.p_perpus : profiles.p_smk;
+  const survey = findSurvey(surveyId);
+  return (survey && profiles[survey.profile_id]) || profiles.p_smk;
 }
 
 export function noticeForSurvey(surveyId: string): Notice {
-  return surveyId === 's_demo2' ? notices.p_perpus : notices.p_smk;
+  const profile = profileForSurvey(surveyId);
+  return notices[profile.id] || notices.p_smk;
 }

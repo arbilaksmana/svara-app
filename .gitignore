@@ -3,3 +3,10 @@ dist/
 .vite/
 *.local
 .DS_Store
+
+# runtime
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+server/test/.tmp-*

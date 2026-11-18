@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -13,9 +13,10 @@ import {
   TextInput,
 } from '../components/ui';
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
-import { DevStateSwitcher, useScreenState } from '../lib/state';
+import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
 import { signIn } from '../lib/store';
+import { ApiError, resolveInvitationCode, submitDataRequest } from '../lib/api';
 import { ROUTES } from '../lib/routes';
 
 /* ---------------- Login ---------------- */
@@ -27,6 +28,11 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const formInvalid = !email || !password;
 
@@ -34,8 +40,8 @@ export function LoginPage() {
     <Shell kind="public" title="Masuk ke workspace" chromeless>
       <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
         <div className="relative z-10 flex flex-col bg-n0 lg:rounded-tr-lg lg:rounded-br-lg">
-          <div className="px-5 pt-6 sm:px-8 lg:px-14">
-            <ActionLink to={ROUTES.home} variant="ghost" className="text-ink!">
+          <div className="relative flex min-h-[56px] items-center justify-center px-5 pt-6 sm:px-8 lg:px-14">
+            <ActionLink to={ROUTES.home} variant="ghost" className="absolute start-5 top-6 text-ink! sm:start-8 lg:start-14">
               <svg
                 aria-hidden="true"
                 viewBox="0 0 20 20"
@@ -50,10 +56,13 @@ export function LoginPage() {
               </svg>
               Kembali
             </ActionLink>
+            <Link to={ROUTES.home} className="inline-flex min-h-[44px] items-center text-h3 font-bold text-ink">
+              Svara
+            </Link>
           </div>
           <div className="flex flex-1 flex-col justify-center px-5 pb-12 pt-6 sm:px-8 lg:px-14">
             <div className="mx-auto flex w-full max-w-[360px] flex-col gap-7">
-              <h1 className="self-center text-h2 font-bold text-ink">Masuk</h1>
+              <h1 className="self-center text-h2 font-bold text-ink">Masuk ke workspace</h1>
               <StateView
         routeId="login"
         state={state}
@@ -70,38 +79,115 @@ export function LoginPage() {
             {state === 'loading' && <Banner tone="neutral" title="Memeriksa kredensial">Tombol masuk dinonaktifkan sementara.</Banner>}
             {state === 'permission-denied' && <Banner tone="danger" title="Peran tidak memadai">Akses workspace memerlukan peran pengelola.</Banner>}
 
+            {authError && <Banner tone="danger" title="Tidak dapat masuk">{authError}</Banner>}
             <form
               className="flex flex-col gap-4"
               noValidate
               onSubmit={(e) => {
                 e.preventDefault();
                 setSubmitted(true);
+                setAuthError(null);
                 if (formInvalid) return;
-                const role = email.includes('admin') ? 'admin' : 'creator';
-                signIn(email, role);
-                notify('Berhasil masuk. Selamat datang kembali.');
-                navigate(role === 'admin' ? ROUTES.admin : ROUTES.creator);
+                setBusy(true);
+                void signIn(email, password)
+                  .then((session) => {
+                    notify('Berhasil masuk. Selamat datang kembali.');
+                    navigate(session.role === 'admin' ? ROUTES.admin : ROUTES.creator);
+                  })
+                  .catch((error: unknown) => {
+                    setAuthError(
+                      error instanceof ApiError
+                        ? error.message
+                        : 'Koneksi ke server gagal. Periksa kembali alamat email dan kata sandi Anda.',
+                    );
+                  })
+                  .finally(() => setBusy(false));
               }}
             >
               <Field id="login-email" label="Email" required>
                 {(aria) => (
-                  <TextInput {...aria} type="email" autoComplete="username" value={email}
-                    onChange={(e) => setEmail(e.target.value)} placeholder="nama@organisasi.id" />
+                  <TextInput
+                    {...aria}
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="nama@organisasi.id"
+                    aria-invalid={submitted && !email}
+                    aria-describedby={submitted && !email ? 'login-email-error' : aria['aria-describedby']}
+                  />
                 )}
               </Field>
+              {submitted && !email && (
+                <p id="login-email-error" role="alert" className="text-caption font-bold text-danger">Email wajib diisi.</p>
+              )}
               <Field id="login-password" label="Kata sandi" required>
                 {(aria) => (
-                  <TextInput {...aria} type="password" autoComplete="current-password" value={password}
-                    onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+                  <TextInput
+                    {...aria}
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    aria-invalid={submitted && !password}
+                    aria-describedby={submitted && !password ? 'login-password-error' : aria['aria-describedby']}
+                  />
                 )}
               </Field>
-
-              {submitted && formInvalid && !['validation', 'loading', 'error', 'permission-denied', 'expired', 'revoked'].includes(state) && (
-                <p role="alert" className="text-caption font-bold text-danger">Isi email dan kata sandi sebelum melanjutkan.</p>
+              {submitted && !password && (
+                <p id="login-password-error" role="alert" className="text-caption font-bold text-danger">Kata sandi wajib diisi.</p>
               )}
 
-              <Button type="submit" block disabled={state === 'loading'} loading={state === 'loading'}>Masuk</Button>
+              <Button type="submit" block disabled={busy || state === 'loading'} loading={busy || state === 'loading'}>Masuk</Button>
             </form>
+
+              <details className="rounded-md border border-n200 bg-n50 p-3">
+                <summary className="min-h-[44px] cursor-pointer py-2 text-body-sm font-bold text-ink">
+                  Saya memiliki kode undangan
+                </summary>
+                <form
+                  className="mt-2 flex flex-col gap-3"
+                  noValidate
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setInviteError(null);
+                    const code = inviteCode.trim();
+                    if (!code) {
+                      setInviteError('Masukkan kode undangan yang Anda terima.');
+                      return;
+                    }
+                    setInviteBusy(true);
+                    void resolveInvitationCode(code)
+                      .then((result) => {
+                        navigate(ROUTES.respondentIntro(result.token));
+                      })
+                      .catch((error: unknown) => {
+                        setInviteError(
+                          error instanceof ApiError ? error.message : 'Kode undangan tidak dapat diperiksa saat ini.',
+                        );
+                      })
+                      .finally(() => setInviteBusy(false));
+                  }}
+                >
+                  <Field id="invite-code" label="Kode undangan" hint="Contoh format: UND-XXXXXX." required>
+                    {(aria) => (
+                      <TextInput
+                        {...aria}
+                        value={inviteCode}
+                        onChange={(event) => setInviteCode(event.target.value)}
+                        autoComplete="one-time-code"
+                        aria-invalid={Boolean(inviteError)}
+                        aria-describedby={inviteError ? 'invite-code-error' : aria['aria-describedby']}
+                      />
+                    )}
+                  </Field>
+                  {inviteError && <p id="invite-code-error" role="alert" className="text-caption font-bold text-danger">{inviteError}</p>}
+                  <Button type="submit" variant="secondary" block loading={inviteBusy} disabled={inviteBusy}>
+                    Buka undangan
+                  </Button>
+                </form>
+              </details>
 
               <p className="text-center text-caption text-muted">
                 Responden tidak perlu akun. Administrator memantau operasional tanpa membuka jawaban individual.
@@ -143,7 +229,7 @@ export function NotFoundPage() {
           <ActionLink to={ROUTES.creator} variant="secondary">Daftar survei</ActionLink>
         </div>
       </Card>
-      <DevStateSwitcher routeId="notfound" />
+      
     </Shell>
   );
 }
@@ -169,6 +255,91 @@ const TERMS_SECTIONS = [
   { title: 'Batas tanggung jawab', body: 'Layanan diberikan sesuai ketentuan yang berlaku. Pertanyaan dan permintaan data disalurkan melalui kanal resmi pengendali.' },
   { title: 'Penghentian', body: 'Versi dapat ditutup atau diarsipkan. Riwayat dipertahankan sesuai retensi yang ditetapkan pengendali.' },
 ];
+
+
+function DataRequestForm() {
+  const [type, setType] = useState('access');
+  const [contact, setContact] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ id: string } | null>(null);
+
+  if (result) {
+    return (
+      <div className="mt-4">
+        <Banner tone="success" title="Permintaan diterima">
+          Nomor permintaan <span className="font-mono">{result.id}</span>. Pengelola akan memverifikasi kontak sebelum menindaklanjuti. Log tidak memuat jawaban atau token.
+        </Banner>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="mt-4 flex flex-col gap-3 border-t border-n200 pt-4"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError(null);
+        if (!contact.trim()) {
+          setError('Kontak wajib diisi agar pengelola dapat memverifikasi dan menindaklanjuti.');
+          return;
+        }
+        setBusy(true);
+        void submitDataRequest({ type, contact: contact.trim(), note: note.trim() || undefined })
+          .then((request) => setResult({ id: request.id }))
+          .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Permintaan tidak dapat dikirim. Coba lagi.'))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <div>
+        <Field id="data-request-type" label="Jenis permintaan" required>
+          {(aria) => (
+            <select
+              {...aria}
+              value={type}
+              onChange={(event) => setType(event.target.value)}
+              className="min-h-[44px] w-full rounded-md border border-n200 bg-n0 px-3 text-body text-ink"
+            >
+              <option value="access">Akses data</option>
+              <option value="correction">Koreksi data</option>
+              <option value="withdrawal">Penarikan persetujuan</option>
+              <option value="deletion">Penghapusan data</option>
+            </select>
+          )}
+        </Field>
+      </div>
+      <div>
+        <Field id="data-request-contact" label="Kontak terverifikasi" hint="Email atau nomor yang dapat dihubungi pengelola." required>
+          {(aria) => (
+            <TextInput
+              {...aria}
+              value={contact}
+              onChange={(event) => setContact(event.target.value)}
+              autoComplete="email"
+            />
+          )}
+        </Field>
+      </div>
+      <div>
+        <Field id="data-request-note" label="Keterangan" hint="Jangan tulis jawaban survei atau data sensitif di sini.">
+          {(aria) => (
+            <textarea
+              {...aria}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-n200 bg-n0 px-3 py-2 text-body text-ink"
+            />
+          )}
+        </Field>
+      </div>
+      {error && <Banner tone="danger" title="Permintaan gagal dikirim">{error}</Banner>}
+      <Button type="submit" variant="secondary" block loading={busy} disabled={busy}>Kirim permintaan</Button>
+    </form>
+  );
+}
 
 function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
   const routeId = which;
@@ -201,10 +372,11 @@ function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
               </PlainLink>
               <PlainLink to={ROUTES.home}>Beranda</PlainLink>
             </div>
+            {isPrivacy && <DataRequestForm />}
           </Card>
         </div>
       </StateView>
-      <DevStateSwitcher routeId={routeId} />
+      
     </Shell>
   );
 }
