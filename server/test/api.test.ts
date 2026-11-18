@@ -97,6 +97,7 @@ before(async () => {
       DB_PATH,
       INTEGRATION_TOKEN,
       COOKIE_SECURE: '0',
+      ENABLE_HSTS: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -145,6 +146,27 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   assert.equal(adminSummary.status, 403, 'administrator tanpa grant tidak membaca jawaban');
   const adminCsv = await call('/surveys/s_demo1/export?version=1', { cookie: admin });
   assert.equal(adminCsv.status, 403);
+});
+
+test('Security headers: CSP dan hardening aktif pada API dan 404', async () => {
+  const health = await call('/health');
+  assert.equal(health.status, 200);
+  assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(health.headers.get('x-frame-options'), 'DENY');
+  assert.equal(health.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.equal(health.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=()');
+  const csp = health.headers.get('content-security-policy') ?? '';
+  for (const directive of ["default-src 'self'", "script-src 'self'", "font-src 'self' data:", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'self'"]) {
+    assert.ok(csp.includes(directive), `CSP harus memuat ${directive}`);
+  }
+  assert.equal(health.headers.get('strict-transport-security'), null, 'HSTS hanya dikirim saat ENABLE_HSTS=1');
+
+  const missing = await fetch(`http://127.0.0.1:${PORT}/api/tidak-ada`, {
+    headers: { 'X-Svara-Client': 'web' },
+  });
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok((missing.headers.get('content-security-policy') ?? '').includes("frame-ancestors 'none'"));
 });
 
 test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi tanpa respons', async () => {
@@ -356,13 +378,27 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(noConsent.status, 403);
 
+  const ambientCreator = creator;
   const created = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
     idempotencyKey: 'kunci-undangan-0001',
+    cookie: ambientCreator,
     body,
   });
   assert.equal(created.status, 201, created.text);
   const receipt = data<{ response_id: string }>(created);
+
+  const auditRows = data<Array<{ action: string; actor: string; metadata: string | null }>>(
+    await call('/admin/audit?limit=500', { cookie: await login('admin@svara.local') }),
+  );
+  const responseAudit = auditRows.find(
+    (row) => row.action === 'Kirim respons' && row.metadata?.includes(receipt.response_id),
+  );
+  assert.equal(responseAudit?.actor, 'publik', 'submission publik tidak boleh memakai akun dari cookie ambient');
+  assert.ok(
+    auditRows.filter((row) => row.action === 'Kirim respons').every((row) => row.actor === 'publik'),
+    'semua audit Kirim respons lewat route publik harus memakai aktor publik',
+  );
 
   const replay = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
@@ -436,13 +472,15 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   const officer = await login('officer@svara.local');
   const creatorB = await login('creator.b@svara.local');
 
-  const summary = data<{ total: number; items: Array<{ code: string; options: Array<{ count: number }> }> }>(
-    await call('/surveys/s_demo1/summary?version=v_demo1_1', { cookie: creator }),
-  );
+  const summary = data<{
+    total: number;
+    items: Array<{ code: string; answered: number; options: Array<{ count: number }> }>;
+  }>(await call('/surveys/s_demo1/summary?version=v_demo1_1', { cookie: creator }));
   assert.ok(summary.total >= 5);
   const ad01 = summary.items.find((item) => item.code === 'AD01');
   assert.ok(ad01);
   assert.equal(ad01.options.length, 5, 'opsi tanpa pemilih tetap tampil');
+  assert.equal(ad01.answered, summary.total, 'semua respons seed harus menjawab item wajib AD01');
 
   const officerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: officer });
   assert.equal(officerCsv.status, 200);

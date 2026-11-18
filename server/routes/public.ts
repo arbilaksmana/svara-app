@@ -5,7 +5,7 @@ import { rateLimit, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
-  audit,
+  auditPublic,
   fail,
   newId,
   pathParam,
@@ -466,7 +466,7 @@ publicRouter.post('/public/surveys/:token/consent', (req: AuthedRequest, res: Re
       context.guardianRequired ? evidenceRef : null,
       context.invitation?.id ?? null,
     );
-    audit(req, 'Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
+    auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
     res.status(201).json({
       data: {
         consent_id: consentId,
@@ -635,7 +635,7 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
         responseId,
       );
     });
-    audit(req, 'Kirim respons', auditObject, 'berhasil', {
+    auditPublic('Kirim respons', auditObject, 'berhasil', {
       response_id: responseId,
       version_id: context.version.id,
       kind: context.kind,
@@ -643,7 +643,7 @@ publicRouter.post('/public/surveys/:token/responses', (req: AuthedRequest, res: 
     res.status(201).json({ data: receiptFor(responseId) });
   } catch (error) {
     if (error instanceof ApiError && error.status >= 400) {
-      audit(req, 'Kirim respons', auditObject, 'ditolak', { code: error.code });
+      auditPublic('Kirim respons', auditObject, 'ditolak', { code: error.code });
     }
     sendError(res, error);
   }
@@ -714,7 +714,7 @@ publicRouter.post('/data-requests', (req: AuthedRequest, res: Response) => {
       at,
       at,
     );
-    audit(req, 'Permintaan data', id, 'berhasil', { type });
+    auditPublic('Permintaan data', id, 'berhasil', { type });
     res.status(201).json({
       data: {
         id,

@@ -8,7 +8,7 @@ import type {
 } from '../types';
 
 /**
- * Fixture skoring PRD §7: 5 respons final, nilai AD01 = 2, 4, 4, 5, kosong.
+ * Fixture skoring PRD §7: 5 respons final, nilai AD01 = 2, 3, 4, 4, 5.
  * Ringkasan dihitung dari sini oleh summary.ts, bukan angka hardcode.
  */
 function answer(questionCode: string, value: number | null, text: string | null = null) {
@@ -50,7 +50,7 @@ export const responses: Response[] = [
     id: 'r_demo05', version_id: 'v_demo1_1', survey_id: 's_demo1', assignment_id: 'a_demo05',
     respondent_id: 'p_demo05', collection_mode: 'standalone', identity_source: 'local',
     submitted_at: '2026-11-09T05:16:00Z', idempotency_key: 'key-demo05',
-    answers: [answer('AD01', null), answer('TS01', 4), answer('K02', null, null)],
+    answers: [answer('AD01', 3), answer('TS01', 4), answer('K02', null, null)],
   },
   {
     id: 'r_perpus01', version_id: 'v_demo2_1', survey_id: 's_demo2', assignment_id: 'a_perpus01',

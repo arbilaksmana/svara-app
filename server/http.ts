@@ -159,24 +159,46 @@ export function actorFor(req: AuthedRequest): string {
   return req.account?.id ?? 'publik';
 }
 
+type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
+
 /** Audit hanya menyimpan metadata operasional; token, kata sandi, dan jawaban tidak boleh masuk. */
-export function audit(
-  req: AuthedRequest,
+function insertAudit(
+  actor: string,
   action: string,
   object: string,
-  outcome: 'berhasil' | 'ditolak' | 'gagal',
+  outcome: AuditOutcome,
   metadata?: Record<string, unknown>,
 ): void {
   run(
     'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
     newId('log'),
-    actorFor(req),
+    actor,
     action,
     object,
     outcome,
     nowIso(),
     metadata ? JSON.stringify(metadata) : null,
   );
+}
+
+export function audit(
+  req: AuthedRequest,
+  action: string,
+  object: string,
+  outcome: AuditOutcome,
+  metadata?: Record<string, unknown>,
+): void {
+  insertAudit(actorFor(req), action, object, outcome, metadata);
+}
+
+/** Aksi route publik tidak boleh diatribusikan ke akun dari cookie ambient. */
+export function auditPublic(
+  action: string,
+  object: string,
+  outcome: AuditOutcome,
+  metadata?: Record<string, unknown>,
+): void {
+  insertAudit('publik', action, object, outcome, metadata);
 }
 
 export function csvCell(value: unknown, neutralizeFormula = true): string {

@@ -378,7 +378,7 @@ export function seedIfEmpty(): boolean {
     answer('r_demo04', 'AD01', 'q_ad01', 5);
     answer('r_demo04', 'TS01', 'q_ts01', 1);
     answer('r_demo04', 'K02', 'q_k02', null);
-    answer('r_demo05', 'AD01', 'q_ad01', null);
+    answer('r_demo05', 'AD01', 'q_ad01', 3);
     answer('r_demo05', 'TS01', 'q_ts01', 4);
     answer('r_demo05', 'K02', 'q_k02', null);
     answer('r_perpus01', 'P01', 'q_p01', 3);

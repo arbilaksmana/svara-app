@@ -41,6 +41,7 @@ pnpm build          # typecheck + Vite
 | `DB_PATH` | `data/svara.sqlite` | Lokasi SQLite; dibuat dan di-seed bila kosong |
 | `APP_ORIGIN` | `http://127.0.0.1:3000` | Origin yang diizinkan untuk mutasi |
 | `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
+| `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
 | `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis saat basis data dibuat |

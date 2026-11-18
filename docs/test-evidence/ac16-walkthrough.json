@@ -1,6 +1,6 @@
 {
   "label": "DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.",
-  "generated_at": "2026-11-18T04:48:26.912Z",
+  "generated_at": "2026-11-18T14:26:12.321Z",
   "environment": {
     "node": "v24.15.0",
     "platform": "win32 x64",
@@ -32,9 +32,9 @@
     "summary_total": 8,
     "csv_rows": 8,
     "created_response_ids": [
-      "r_5ff15ef5409d74c4",
-      "r_62338a6d32c2332c",
-      "r_e2d8b8f17a38ee57"
+      "r_29b02324f13edef7",
+      "r_89453594dc760835",
+      "r_b04f43f8cf8d8fe7"
     ],
     "all_created_ids_present": true,
     "survey_version_values": [
@@ -42,9 +42,8 @@
     ],
     "ad01_matches_summary": true,
     "ad01_csv_counts": {
-      "0": 1,
       "2": 2,
-      "3": 1,
+      "3": 2,
       "4": 3,
       "5": 1
     },
@@ -59,7 +58,7 @@
       },
       {
         "value": 3,
-        "count": 1
+        "count": 2
       },
       {
         "value": 4,
