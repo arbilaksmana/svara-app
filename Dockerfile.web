@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS deps
+WORKDIR /app
+RUN npm install -g pnpm@11.5.2
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+RUN npm install -g pnpm@11.5.2
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+# Rewrites are resolved at build time. In production the ingress sends /api/*
+# straight to Express; the rewrite remains for single-origin/local deployments.
+ARG API_ORIGIN=http://127.0.0.1:3001
+ENV API_ORIGIN=$API_ORIGIN
+RUN pnpm build
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    NEXT_TELEMETRY_DISABLED=1
+WORKDIR /app
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
+COPY --from=build --chown=node:node /app/public ./public
+USER node
+EXPOSE 3000
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/auth/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+CMD ["node", "server.js"]

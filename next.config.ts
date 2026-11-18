@@ -1,0 +1,20 @@
+import type { NextConfig } from 'next';
+
+/**
+ * Same-origin API routing for development and single-origin deployments.
+ * Production uses an ingress split (`/api/*` -> Express) documented in README.md;
+ * the rewrite is not required there but stays harmless when both origins are
+ * reachable from the web container.
+ */
+const apiOrigin = (process.env.API_ORIGIN ?? 'http://127.0.0.1:3001').replace(/\/+$/, '');
+
+const nextConfig: NextConfig = {
+  output: 'standalone',
+  poweredByHeader: false,
+  reactStrictMode: true,
+  async rewrites() {
+    return [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }];
+  },
+};
+
+export default nextConfig;

@@ -1,6 +1,9 @@
+'use client';
+
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { PlainLink, PolicyLinks } from './ui';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
@@ -42,7 +45,7 @@ const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
 function Wordmark({ to }: { to: string }) {
   return (
     <Link
-      to={to}
+      href={to}
       className={`inline-flex min-h-[44px] shrink-0 items-center px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       Svara
@@ -53,7 +56,7 @@ function Wordmark({ to }: { to: string }) {
 function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   return (
     <Link
-      to={to}
+      href={to}
       aria-current={active ? 'page' : undefined}
       className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
         active ? 'text-n0' : 'text-n400 hover:text-n0'
@@ -65,17 +68,17 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
 }
 
 function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; homeTo: string }) {
-  const navigate = useNavigate();
+  const router = useRouter();
+  const pathname = usePathname() ?? '';
   const notify = useToast();
   const { session } = useStore();
   // Di landing, pengguna dianggap belum masuk walau stor masih menyimpan sesi.
   const current = guestOnly ? null : session;
   const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
 
   useEffect(() => {
     setMenuOpen(false);
-  }, [location.pathname]);
+  }, [pathname]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -135,7 +138,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 onClick={() => {
                   void signOut().finally(() => {
                     notify('Anda telah keluar.');
-                    navigate(ROUTES.home);
+                    router.push(ROUTES.home);
                   });
                 }}
                 className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink ${PRESS_BUTTON} hover:bg-n100`}
@@ -145,7 +148,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
             </div>
           ) : (
             <Link
-              to={ROUTES.login}
+              href={ROUTES.login}
               className={`inline-flex min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${PRESS_LINK}`}
             >
               Masuk
@@ -163,7 +166,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               {nav.map((item) => (
                 <li key={item.to}>
                   <Link
-                    to={item.to}
+                    href={item.to}
                     onClick={() => setMenuOpen(false)}
                     aria-current={activePath === item.to ? 'page' : undefined}
                     className={`flex min-h-[44px] items-center px-3 text-body-sm font-normal no-underline ${INNER} transition-colors duration-150 ease-out ${
@@ -205,13 +208,13 @@ export function Shell({
   /** Beri ruang bawah di footer saat halaman memiliki action bar tetap di mobile. */
   bottomInset?: boolean;
 }) {
-  const location = useLocation();
+  const pathname = usePathname() ?? '';
   const { session } = useStore();
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
     window.scrollTo(0, 0);
     mainRef.current?.focus({ preventScroll: true });
-  }, [location.pathname]);
+  }, [pathname]);
   const sectionNav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
   // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
@@ -222,7 +225,7 @@ export function Shell({
       : ROUTES.creator
     : ROUTES.home;
   const topNav = activeSession ? (activeSession.role === 'admin' ? NAV.admin : NAV.creator) : GUEST_NAV;
-  const activePath = kind === 'respondent' ? ROUTES.home : location.pathname;
+  const activePath = kind === 'respondent' ? ROUTES.home : pathname;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -249,9 +252,9 @@ export function Shell({
                 <PlainLink
                   key={item.to}
                   to={item.to}
-                  aria-current={location.pathname === item.to ? 'page' : undefined}
+                  aria-current={pathname === item.to ? 'page' : undefined}
                   className={`min-h-[44px] shrink-0 rounded-sm px-3 py-2 text-body-sm font-bold no-underline ${
-                    location.pathname === item.to ? 'bg-n100 text-action' : 'text-n600 hover:bg-n50'
+                    pathname === item.to ? 'bg-n100 text-action' : 'text-n600 hover:bg-n50'
                   }`}
                 >
                   {item.label}

@@ -3,8 +3,15 @@ node_modules
 .github
 data
 dist
+.next
+out
+docs
 docs/test-evidence
 server/test/.tmp-*
+scripts/smoke-web.mjs
+Dockerfile
+Dockerfile.*
+docker-compose.yml
 *.log
 .env
 .env.*

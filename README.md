@@ -15,21 +15,34 @@ pnpm install
 docker compose up -d db      # PostgreSQL lokal 127.0.0.1:5432 (role aplikasi non-superuser)
 export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
 SEED_DEMO=1 pnpm db:reset    # reset schema + migrasi + data sintetis
-pnpm dev                     # API 127.0.0.1:3001 + Vite 127.0.0.1:5173
+pnpm dev                     # API 127.0.0.1:3001 + Next.js 127.0.0.1:3000
 ```
 
 PowerShell: `$env:DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'; $env:SEED_DEMO='1'; pnpm db:reset`.
 
-`DATABASE_URL` adalah satu-satunya sumber data runtime. Tidak ada fallback SQLite.
+Buka `http://127.0.0.1:3000`. `DATABASE_URL` adalah satu-satunya sumber data runtime. Tidak ada fallback SQLite.
+
+`pnpm dev` menjalankan dua proses: Express di `:3001` dan Next.js di `:3000`. Browser hanya memanggil origin web; rewrite Next meneruskan `/api/:path*` ke `API_ORIGIN`.
 
 Produksi lokal:
 
 ```bash
 pnpm build
-pnpm start          # API + dist pada 127.0.0.1:3000; migrasi berjalan saat startup
+pnpm start          # API :3001 + Next production :3000; migrasi berjalan saat startup API
 ```
 
 Server menjalankan migrasi versioned sebelum menerima permintaan. Untuk basis data kosong, jalankan `pnpm admin:bootstrap` agar ada akun admin.
+
+### Ingress produksi
+
+Pisahkan trafik di reverse proxy/load balancer:
+
+| Path | Tujuan |
+| --- | --- |
+| `/api/*` | Express (`api:3001`) |
+| semua path lain | Next.js (`web:3000`) |
+
+Dengan pembagian ini Next tidak memproksikan API di produksi. Rewrite `/api/:path*` tetap ada untuk pengembangan dan deployment satu-origin; jangan mengandalkannya sebagai jalur produksi.
 
 ## Migrasi basis data
 
@@ -43,6 +56,8 @@ Server menjalankan migrasi versioned sebelum menerima permintaan. Untuk basis da
 
 ## Docker
 
+Tiga layanan terpisah: `web` (Next.js standalone), `api` (Express), `db` (Postgres).
+
 ```bash
 docker compose build
 docker compose up -d db
@@ -50,39 +65,48 @@ docker compose run --rm \
   -e BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
   -e BOOTSTRAP_ADMIN_NAME=Administrator \
   -e BOOTSTRAP_ADMIN_PASSWORD='Sandi-Kuat-Dari-Secret-Manager-2026!' \
-  app tsx server/scripts/bootstrap-admin.ts
+  api tsx server/scripts/bootstrap-admin.ts
 docker compose up -d
 ```
 
 - `db` memakai `postgres:17-alpine` dengan healthcheck dan volume `svara_pgdata`.
 - Peran aplikasi `svara` dibuat oleh `docker/postgres/init/01-app-role.sh`: LOGIN, bukan superuser, tanpa CREATEDB/CREATEROLE; hanya memiliki basis data `svara`.
 - `POSTGRES_PASSWORD`, `POSTGRES_USER`, dan `POSTGRES_DB` dapat dioverride; `DATABASE_URL` aplikasi dirakit dari nilai yang sama.
-- Port hanya bind ke `127.0.0.1:3000` (app) dan `127.0.0.1:5432` (db); letakkan reverse proxy/TLS di depan app.
-- Set `APP_ORIGIN` ke origin publik, lalu `COOKIE_SECURE=1` dan `ENABLE_HSTS=1` setelah HTTPS aktif.
-- Jangan set `SEED_DEMO=1` di production; container memakai `NODE_ENV=production` dan akan menolak startup.
+- `api` menjalankan `tsx server/index.ts` pada `:3001`, tanpa static hosting.
+- `web` menjalankan output `standalone` Next.js pada `:3000`; guard server membaca `API_INTERNAL_URL=http://api:3001`.
+- Rewrite web dibekukan saat build (`API_ORIGIN_BUILD`, default `http://api:3001`). Untuk produksi, arahkan ingress `/api/*` langsung ke `api` seperti tabel di atas.
+- Port host hanya bind ke `127.0.0.1:3000` (web), `127.0.0.1:3001` (api), dan `127.0.0.1:5432` (db); letakkan reverse proxy/TLS di depan web.
+- Set `APP_ORIGIN` ke origin publik web (boleh beberapa origin dipisah koma), lalu `COOKIE_SECURE=1` dan `ENABLE_HSTS=1` setelah HTTPS aktif.
+- Jangan set `SEED_DEMO=1` di production; container API memakai `NODE_ENV=production` dan akan menolak startup.
 
 Perintah verifikasi:
 
 ```bash
-pnpm typecheck      # TypeScript web + server
+pnpm typecheck      # next typegen + TypeScript web + server
 pnpm lint           # ESLint
 pnpm test           # typecheck + migrasi + suite HTTP + seed gate (butuh PostgreSQL uji)
-pnpm build          # typecheck + Vite
+pnpm build          # typecheck + next build
 pnpm db:migrate     # terapkan migrasi ke DATABASE_URL
+SMOKE_WEB_ORIGIN=http://127.0.0.1:3000 \
+  SMOKE_EMAIL=admin@example.org SMOKE_PASSWORD='...' \
+  pnpm smoke:web    # root, login, CSP nonce, rewrite health, login + bootstrap
 ```
 
 ## Konfigurasi
 
 | Variabel | Default | Keterangan |
 | --- | --- | --- |
-| `PORT` | `3000` saat `--serve`, `3001` saat API dev | Port HTTP |
-| `HOST` | `127.0.0.1` | Alamat bind |
+| `PORT` | `3000` web, `3001` API | Port HTTP per layanan |
+| `HOST` | `127.0.0.1` | Alamat bind API |
+| `API_INTERNAL_URL` | `http://127.0.0.1:3001` | Basis URL bootstrap untuk guard server component |
+| `API_ORIGIN` | `http://127.0.0.1:3001` | Target rewrite `/api/:path*`; dibekukan saat `next build` |
+| `API_ORIGIN_BUILD` | `http://api:3001` | Nilai `API_ORIGIN` untuk build image web Docker Compose |
 | `DATABASE_URL` | wajib | Koneksi PostgreSQL runtime; tidak ada fallback SQLite |
 | `PG_POOL_MAX` | `10` | Batas koneksi pool (1-50) |
 | `PG_IDLE_TIMEOUT_MS` | `10000` | Batas idle koneksi |
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Batas waktu membuka koneksi |
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
-| `APP_ORIGIN` | `http://127.0.0.1:3000` | Origin yang diizinkan untuk mutasi |
+| `APP_ORIGIN` | `http://127.0.0.1:3000` | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma |
 | `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
@@ -114,11 +138,21 @@ pnpm admin:bootstrap
 - `server/` — Express 5, PostgreSQL via `pg` Pool (semua akses data async), migrasi versioned, cookie sesi HttpOnly, hash kata sandi `scrypt`, header `X-Svara-Client` untuk mutasi, pembatasan laju kiriman, audit append-only.
 - `server/db.ts` — `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`; query di dalam `withTx` otomatis ikut transaksi dan rollback saat error.
 - `server/migrations/` — skema 21 tabel dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi + checksum.
-- `src/` — React 19 + Vite + Tailwind v4; seluruh data bisnis dibaca dari API, bukan `localStorage`.
-- `src/lib/api.ts` — kontrak HTTP; `src/lib/store.ts` — snapshot untuk render dan aksi.
+- `src/app/` — Next.js App Router (React 19, Node runtime) untuk semua rute UI; `src/screens/` menyimpan komponen layar lama tanpa perubahan perilaku.
+- `src/proxy.ts` — konvensi `middleware` Next.js 16: nonce CSP per request (tanpa `unsafe-inline` pada `script-src`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, dan HSTS saat `ENABLE_HSTS=1`.
+- `src/lib/server/guards.ts` — guard role server untuk `/creator` dan `/admin`: baca cookie sesi, panggil `/api/v1/bootstrap` di `API_INTERNAL_URL`, redirect ke `/auth/login` bila belum masuk. Tidak mengimpor store klien.
+- `src/lib/api.ts` — kontrak HTTP; `src/lib/store.ts` — snapshot untuk render dan aksi, tetap memuat bootstrap di klien dan mengirim semua mutasi ke `/api/v1`.
 - Respons publik disimpan dengan kunci idempotensi dan bukti yang hanya dapat dibuka dengan kunci yang sama.
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses.
 - Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
+
+### Rute
+
+UI mempertahankan URL lama:
+
+`/`, `/auth/login`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s/[token]/*` tetap publik tanpa guard.
+
+`super_admin` yang membuka `/creator` mendapat tampilan “Akses ditolak”, dan peran creator yang membuka `/admin` juga ditolak; ini sama dengan guard klien sebelumnya.
 
 ### Akun sintetis
 

@@ -68,10 +68,4 @@ app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
   sendError(res, error);
 });
 
-export function attachStatic(target: express.Express, distDir: string): void {
-  target.use(express.static(distDir, { index: false }));
-  target.use((req, res, next) => {
-    if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
-    res.sendFile(`${distDir}/index.html`);
-  });
-}
+

@@ -1,5 +1,7 @@
+'use client';
+
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { StateLink } from '../lib/state';
 
 /* ---------- Tipografi ---------- */
@@ -189,7 +191,7 @@ export function TextLink({ to, children, className = '' }: { to: string; childre
 /** Tautan ke rute absolut yang tidak perlu membawa state (mis. ke halaman kebijakan). */
 export function PlainLink({ to, children, className = '' }: { to: string; children: ReactNode; className?: string }) {
   return (
-    <Link to={to} className={`inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover ${className}`}>
+    <Link href={to} className={`inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover ${className}`}>
       {children}
     </Link>
   );

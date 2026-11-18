@@ -1,9 +1,10 @@
-import { createContext, useContext } from 'react';
+'use client';
+
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { useLocation, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import type { RouteId } from './routes';
 import { withState } from './routes';
-
 
 export const STATE_CODES = [
   'default',
@@ -49,41 +50,9 @@ export const ROUTE_STATES: Record<RouteId, readonly StateCode[]> = {
   notfound: ['default'],
 };
 
-interface StateContextValue {
-  raw: StateCode | null;
-  link: (to: string) => string;
-  navigateWithState: (state: StateCode) => void;
-}
-
-const StateContext = createContext<StateContextValue | null>(null);
-
-/** Membaca ?state= dari URL. Dipasang di dalam Router. */
-export function ScreenStateProvider({ children }: { children: ReactNode }) {
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const param = params.get('state');
-  const raw = import.meta.env.DEV && STATE_CODES.includes(param as StateCode) ? (param as StateCode) : null;
-
-  const value: StateContextValue = {
-    raw,
-    link: (to: string) => withState(to, raw),
-    navigateWithState: (state: StateCode) => {
-      const next = new URLSearchParams(location.search);
-      if (state === 'default') next.delete('state');
-      else next.set('state', state);
-      const qs = next.toString();
-      navigate(`${location.pathname}${qs ? `?${qs}` : ''}`);
-    },
-  };
-
-  return <StateContext.Provider value={value}>{children}</StateContext.Provider>;
-}
-
-function useProvider(): StateContextValue {
-  const ctx = useContext(StateContext);
-  if (!ctx) throw new Error('ScreenStateProvider belum dipasang');
-  return ctx;
+function rawState(param: string | null): StateCode | null {
+  if (process.env.NODE_ENV === 'production') return null;
+  return STATE_CODES.includes(param as StateCode) ? (param as StateCode) : null;
 }
 
 export interface ScreenState {
@@ -94,11 +63,24 @@ export interface ScreenState {
   allowed: readonly StateCode[];
 }
 
+/** Membaca ?state= dari URL halaman aktif. */
 export function useScreenState(routeId: RouteId): ScreenState {
-  const ctx = useProvider();
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname() ?? '';
+  const raw = rawState(params?.get('state') ?? null);
   const allowed = ROUTE_STATES[routeId];
-  const state: StateCode = ctx.raw && allowed.includes(ctx.raw) ? ctx.raw : 'default';
-  return { state, link: ctx.link, setState: ctx.navigateWithState, allowed };
+  const state: StateCode = raw && allowed.includes(raw) ? raw : 'default';
+
+  const setState = (next: StateCode) => {
+    const query = new URLSearchParams(params?.toString() ?? '');
+    if (next === 'default') query.delete('state');
+    else query.set('state', next);
+    const qs = query.toString();
+    router.push(`${pathname}${qs ? `?${qs}` : ''}`);
+  };
+
+  return { state, link: (to: string) => withState(to, raw), setState, allowed };
 }
 
 /** Link yang otomatis membawa ?state= aktif. */
@@ -117,9 +99,15 @@ export function StateLink({
   ariaCurrent?: 'page';
   onClick?: () => void;
 }) {
-  const ctx = useProvider();
+  const params = useSearchParams();
   return (
-    <Link to={ctx.link(to)} className={className} aria-label={ariaLabel} aria-current={ariaCurrent} onClick={onClick}>
+    <Link
+      href={withState(to, rawState(params?.get('state') ?? null))}
+      className={className}
+      aria-label={ariaLabel}
+      aria-current={ariaCurrent}
+      onClick={onClick}
+    >
       {children}
     </Link>
   );
