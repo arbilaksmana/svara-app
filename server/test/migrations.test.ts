@@ -25,7 +25,12 @@ after(async () => {
 test('migrasi membuat 21 tabel aplikasi dan mencatat versi', async () => {
   assert.equal(await tableCount(), 21);
   const versions = await appliedVersions();
-  assert.deepEqual(versions, ['001_initial.sql', '002_operational_indexes.sql', '003_public_link_uniqueness.sql']);
+  assert.deepEqual(versions, [
+    '001_initial.sql',
+    '002_operational_indexes.sql',
+    '003_public_link_uniqueness.sql',
+    '004_account_consent.sql',
+  ]);
 });
 
 test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
@@ -37,6 +42,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
     '001_initial.sql',
     '002_operational_indexes.sql',
     '003_public_link_uniqueness.sql',
+    '004_account_consent.sql',
   ]);
 });
 
@@ -56,7 +62,11 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
     await client.end();
   }
 
-  assert.deepEqual(await migrate(), ['002_operational_indexes.sql', '003_public_link_uniqueness.sql']);
+  assert.deepEqual(await migrate(), [
+    '002_operational_indexes.sql',
+    '003_public_link_uniqueness.sql',
+    '004_account_consent.sql',
+  ]);
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
   assert.equal(await indexExists('ux_public_links_survey_version'), true);
@@ -64,8 +74,13 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();
   try {
-    const row = await verify.query('SELECT email FROM accounts WHERE id = $1', ['u_upgrade']);
+    const row = await verify.query<{ email: string; consent_version: string | null; consent_accepted_at: string | null }>(
+      'SELECT email, consent_version, consent_accepted_at FROM accounts WHERE id = $1',
+      ['u_upgrade'],
+    );
     assert.equal(row.rows[0]?.email, 'upgrade@example.org', 'data lama tetap ada setelah upgrade');
+    assert.equal(row.rows[0]?.consent_version, null, 'akun lama tidak memiliki bukti persetujuan versi baru');
+    assert.equal(row.rows[0]?.consent_accepted_at, null);
   } finally {
     await verify.end();
   }

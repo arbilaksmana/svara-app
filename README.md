@@ -137,6 +137,8 @@ pnpm admin:bootstrap
 
 `/auth/register` membuat akun baru dengan peran `creator`, langsung memasang sesi, dan mengarahkan ke `/creator`. Backend memberlakukan email unik, sandi 12-256 karakter dengan minimal tiga kelas karakter, persetujuan kebijakan/ketentuan, rate limit per alamat IP, dan mencatat registrasi ke audit log.
 
+Versi dan waktu persetujuan disimpan di `accounts.consent_version` dan `accounts.consent_accepted_at`, serta metadata audit `Registrasi`. Naikkan `CURRENT_CONSENT_VERSION` di `server/routes/auth.ts` ketika teks kebijakan privasi atau ketentuan layanan berubah; akun lama tetap `NULL` karena dibuat sebelum bukti persetujuan ada.
+
 Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin tetap mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk.
 
 ## Arsitektur

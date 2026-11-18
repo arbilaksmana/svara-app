@@ -97,6 +97,9 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Bump ketika isi halaman kebijakan privasi atau ketentuan layanan berubah. */
+const CURRENT_CONSENT_VERSION = '2026-11-19';
+
 authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
   try {
     const displayName = typeof req.body?.name === 'string' ? req.body.name.replace(/\s+/g, ' ').trim() : '';
@@ -127,17 +130,20 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     }
 
     const accountId = newId('u');
+    const acceptedAt = nowIso();
     try {
       await withTx(async () => {
         await run(
-          'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, consent_version, consent_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           accountId,
           email,
           displayName,
           'creator',
           'active',
           hashPassword(password),
-          nowIso(),
+          acceptedAt,
+          CURRENT_CONSENT_VERSION,
+          acceptedAt,
         );
         await run(
           'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -146,8 +152,8 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           'Registrasi',
           'akun',
           'berhasil',
-          nowIso(),
-          null,
+          acceptedAt,
+          JSON.stringify({ consentVersion: CURRENT_CONSENT_VERSION, acceptedAt }),
         );
       });
     } catch (error) {

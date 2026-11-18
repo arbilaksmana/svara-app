@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Client } from 'pg';
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
 const PORT = 3191;
@@ -772,10 +773,35 @@ test('Registrasi publik membuat creator baru dan langsung memberi sesi', async (
   const rawCookie = created.headers.get('set-cookie') ?? '';
   assert.ok(rawCookie.startsWith('svara_session='), 'registrasi harus memasang cookie sesi');
   const cookie = rawCookie.split(';')[0]!;
-  const account = (created.json as { data: { account: { email: string; role: string; status: string } } }).data.account;
+  const account = (created.json as {
+    data: { account: { id: string; email: string; role: string; status: string } };
+  }).data.account;
   assert.equal(account.email, email);
   assert.equal(account.role, 'creator');
   assert.equal(account.status, 'active');
+
+  const stored = new Client({ connectionString: databaseUrl });
+  await stored.connect();
+  try {
+    const row = await stored.query<{ consent_version: string | null; consent_accepted_at: string | null }>(
+      'SELECT consent_version, consent_accepted_at FROM accounts WHERE id = $1',
+      [account.id],
+    );
+    assert.equal(row.rows[0]?.consent_version, '2026-11-19');
+    assert.ok(row.rows[0]?.consent_accepted_at, 'timestamp persetujuan harus tersimpan');
+    const audit = await stored.query<{ metadata: string | null }>(
+      "SELECT metadata FROM audit_logs WHERE actor = $1 AND action = 'Registrasi'",
+      [account.id],
+    );
+    const metadata = JSON.parse(audit.rows[0]?.metadata ?? '{}') as {
+      consentVersion?: string;
+      acceptedAt?: string;
+    };
+    assert.equal(metadata.consentVersion, '2026-11-19');
+    assert.equal(metadata.acceptedAt, row.rows[0]?.consent_accepted_at);
+  } finally {
+    await stored.end();
+  }
 
   const bootstrap = data<{ account: { email: string }; surveys: unknown[]; accounts: unknown[] }>(
     await call('/bootstrap', { cookie }),
