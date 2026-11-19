@@ -487,7 +487,7 @@ export function AdminIntegrationPage() {
   const down = state === 'error';
 
   return (
-    <Shell kind="admin" title="Status Modul 13 dan 15" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
+    <Shell kind="admin" title="Status integrasi" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
       <StateView
         routeId="admin-integration"
         state={state}
