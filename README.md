@@ -141,7 +141,7 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `PG_IDLE_TIMEOUT_MS` | `10000` | Batas idle koneksi |
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Batas waktu membuka koneksi |
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
-| `APP_ORIGIN` | `http://127.0.0.1:3000` | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma |
+| `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
 | `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |

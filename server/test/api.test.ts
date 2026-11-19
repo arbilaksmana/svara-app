@@ -147,6 +147,24 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   assert.equal(adminCsv.status, 403);
 });
 
+test('Mutasi menerima origin web lokal dan menolak origin asing', async () => {
+  const body = { type: 'akses', contact: 'qa@example.org', note: 'Uji origin' };
+  const local = await call('/data-requests', {
+    method: 'POST',
+    body,
+    headers: { Origin: 'http://127.0.0.1:3000' },
+  });
+  assert.equal(local.status < 400, true, `origin web lokal ditolak: ${local.text}`);
+
+  const foreign = await call('/data-requests', {
+    method: 'POST',
+    body,
+    headers: { Origin: 'http://evil.example' },
+  });
+  assert.equal(foreign.status, 403);
+  assert.equal(foreign.json?.code, 'origin_rejected');
+});
+
 test('Security headers: CSP dan hardening aktif pada API dan 404', async () => {
   const health = await call('/health');
   assert.equal(health.status, 200);

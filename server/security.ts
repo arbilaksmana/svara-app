@@ -143,7 +143,12 @@ export function requireRole(roles: AccountRow['role'][]): (req: AuthedRequest, r
   };
 }
 
-const ALLOWED_ORIGINS = (process.env.APP_ORIGIN ?? '')
+// Rewrite Next ke API mengganti Host, jadi origin browser tidak lagi sama dengan host API.
+// Di luar produksi izinkan origin dev standar; produksi wajib menetapkan APP_ORIGIN.
+const DEV_ORIGINS = 'http://127.0.0.1:3000,http://localhost:3000';
+const defaultOrigins = process.env.NODE_ENV === 'production' ? '' : DEV_ORIGINS;
+
+const ALLOWED_ORIGINS = (process.env.APP_ORIGIN ?? defaultOrigins)
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
