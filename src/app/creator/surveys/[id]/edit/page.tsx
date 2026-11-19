@@ -1,6 +1,8 @@
 import { CreatorPage } from '../../../../../components/CreatorPage';
 import { EditorPage } from '../../../../../screens/CreatorCore';
 
+export const metadata = { title: 'Editor instrumen' };
+
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return (

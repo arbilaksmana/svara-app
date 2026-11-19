@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { requireCreator } from '../lib/server/guards';
 import { AccessDenied } from './AccessDenied';
+import { CreatorBootGate } from './CreatorBootGate';
 
 /** Guard server untuk seluruh halaman creator; redirect ke login bila belum masuk. */
 export async function CreatorPage({ children }: { children: ReactNode }) {
@@ -8,5 +9,5 @@ export async function CreatorPage({ children }: { children: ReactNode }) {
   if (!account) {
     return <AccessDenied detail="Super admin tidak membuka workspace creator. Gunakan ringkasan operasional." />;
   }
-  return <>{children}</>;
+  return <CreatorBootGate>{children}</CreatorBootGate>;
 }

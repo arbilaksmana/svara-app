@@ -8,6 +8,7 @@ import { BrandMark } from './Brand';
 import { PlainLink, PolicyLinks } from './ui';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
+import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
@@ -44,9 +45,11 @@ const PRESS_LINK = `${PRESS} motion-safe:active:scale-[0.96]`;
 const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
 
 function Wordmark({ to }: { to: string }) {
+  const guard = useNavigationGuard();
   return (
     <Link
       href={to}
+      onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
       className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       <BrandMark />
@@ -56,9 +59,11 @@ function Wordmark({ to }: { to: string }) {
 }
 
 function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
+  const guard = useNavigationGuard();
   return (
     <Link
       href={to}
+      onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
       aria-current={active ? 'page' : undefined}
       className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
         active ? 'text-n0' : 'text-n400 hover:text-n0'
@@ -74,6 +79,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
   const pathname = usePathname() ?? '';
   const notify = useToast();
   const { session } = useStore();
+  const guard = useNavigationGuard();
   // Di landing, pengguna dianggap belum masuk walau stor masih menyimpan sesi.
   const current = guestOnly ? null : session;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,6 +98,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
   }, [menuOpen]);
 
   function handleSignOut() {
+    if (!confirmIfDirty(guard)) return;
     setMenuOpen(false);
     void signOut().finally(() => {
       notify('Anda telah keluar.');
@@ -194,7 +201,10 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 <li key={item.to}>
                   <Link
                     href={item.to}
-                    onClick={() => setMenuOpen(false)}
+                    onClick={(event) => {
+                      if (!allowNavigation(event, guard)) return;
+                      setMenuOpen(false);
+                    }}
                     aria-current={activePath === item.to ? 'page' : undefined}
                     className={`flex min-h-[44px] items-center px-3 text-body-sm font-normal no-underline ${INNER} transition-colors duration-150 ease-out ${
                       activePath === item.to ? 'bg-action-soft text-action' : 'text-ink hover:bg-n100'
@@ -217,7 +227,13 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               ) : (
                 <Link
                   href={ROUTES.login}
-                  onClick={() => setMenuOpen(false)}
+                  onClick={(event) => {
+                    if (!allowNavigation(event, guard)) {
+                      event.preventDefault();
+                      return;
+                    }
+                    setMenuOpen(false);
+                  }}
                   className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
                 >
                   Masuk

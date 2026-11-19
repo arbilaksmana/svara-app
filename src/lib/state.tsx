@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { RouteId } from './routes';
 import { withState } from './routes';
+import { allowNavigation, useNavigationGuard } from './navigation-guard';
 
 export const STATE_CODES = [
   'default',
@@ -102,13 +103,20 @@ export function StateLink({
   onClick?: () => void;
 }) {
   const params = useSearchParams();
+  const guard = useNavigationGuard();
   return (
     <Link
       href={withState(to, rawState(params?.get('state') ?? null))}
       className={className}
       aria-label={ariaLabel}
       aria-current={ariaCurrent}
-      onClick={onClick}
+      onClick={(event) => {
+        if (!allowNavigation(event, guard)) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.();
+      }}
     >
       {children}
     </Link>

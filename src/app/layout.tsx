@@ -9,7 +9,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Svara · Pembuat Survei',
+  title: {
+    default: 'Svara · Pembuat Survei',
+    template: '%s · Svara',
+  },
   description:
     'Svara, pembuat survei untuk menyusun instrumen, membagikan tautan, dan membaca hasil per versi.',
   icons: { icon: '/favicon.svg' },

@@ -10,6 +10,7 @@ import {
   Card,
   Checkbox,
   Code,
+  ConfirmDialog,
   Divider,
   Field,
   Label,
@@ -41,7 +42,7 @@ import {
   saveSettings,
   useStore,
 } from '../lib/store';
-import { SurveyNav } from './CreatorCore';
+import { MissingSurvey, SurveyNav } from './CreatorCore';
 import { profileForSurvey, noticeForSurvey } from '../lib/fixtures/profiles';
 import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, ORGANIZATION_TYPE_LABEL, STATUS_LABEL } from '../lib/labels';
 
@@ -64,13 +65,18 @@ const INVITE_LABEL = {
 export function SharePage({ id }: { id: string }) {
   const { state, link } = useScreenState('creator-share');
   const notify = useToast();
-  const { revision } = useStore();
+  const { revision, session } = useStore();
   void revision;
+  const survey = findSurvey(id);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const hasPublishedVersion = Boolean(publishedVersionFor(id));
+  const canInvite = hasPublishedVersion && survey?.status !== 'closed' && survey?.status !== 'archived' && state !== 'closed';
   const [label, setLabel] = useState('');
   const [expiresAt, setExpiresAt] = useState('2026-12-31');
   const [busy, setBusy] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [newInvite, setNewInvite] = useState<{ code: string; token: string } | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<{ id: string; code: string } | null>(null);
 
   const links = allPublicLinks().filter((linkItem) => linkItem.survey_id === id);
   const invites = allInvitations().filter((invite) => invite.survey_id === id);
@@ -88,7 +94,15 @@ export function SharePage({ id }: { id: string }) {
     }
   }
 
-  return (
+  if (!survey || !isOwner) {
+    return (
+      <Shell kind="creator" title="Bagikan survei" subtitle="Survei tidak ditemukan.">
+        <MissingSurvey />
+      </Shell>
+    );
+  }
+
+  const shareBody = (
     <Shell kind="creator" title="Bagikan survei" subtitle="Bagikan tautan umum atau kirim undangan individual kepada peserta.">
       <StateView
         routeId="creator-share"
@@ -140,11 +154,14 @@ export function SharePage({ id }: { id: string }) {
                       <Button
                         variant="secondary"
                         onClick={() => void copyLink(`${window.location.origin}/s/${l.token}`, l.token)}
-                        disabled={state === 'loading' || state === 'closed'}
+                        disabled={state === 'loading' || l.status !== 'active'}
                       >
                         {copied === l.token ? 'Tersalin' : 'Salin tautan'}
                       </Button>
-                      <ActionLink to={ROUTES.respondentIntro(l.token)} variant="secondary">Buka sebagai responden</ActionLink>
+                      <ActionLink to={ROUTES.respondentIntro(l.token)} variant="secondary" disabled={l.status !== 'active'} disabledReason="Tautan nonaktif">Buka sebagai responden</ActionLink>
+                      {l.status !== 'active' && (
+                        <span className="self-center text-caption text-muted">Tautan nonaktif tidak menerima jawaban.</span>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -163,7 +180,7 @@ export function SharePage({ id }: { id: string }) {
                 <tr key={i.id}>
                   <Th>
                     <Code>{i.code}</Code>
-                    {i.token ? (
+                    {i.token && i.status === 'active' ? (
                       <div className="mt-1 flex items-center gap-3">
                         <PlainLink to={ROUTES.respondentIntro(i.token)} className="min-h-[44px]">Buka</PlainLink>
                         <button
@@ -187,16 +204,17 @@ export function SharePage({ id }: { id: string }) {
                   <Td>{i.revoked_at ? i.revoked_at.slice(0, 10) : 'Belum ada'}</Td>
                   <Td>
                     {i.status === 'active' ? (
-                      <button type="button" onClick={() => {
-                        setBusy(true);
-                        setShareError(null);
-                        void revokeInvitation(i.id)
-                          .then(() => notify(`Kode ${i.code} dicabut.`))
-                          .catch((error: unknown) => setShareError(error instanceof Error ? error.message : 'Undangan gagal dicabut.'))
-                          .finally(() => setBusy(false));
-                      }}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShareError(null);
+                          setRevokeTarget({ id: i.id, code: i.code });
+                        }}
                         disabled={busy}
-                        className="min-h-[44px] rounded-sm border border-danger-fill px-2 text-caption font-bold text-danger hover:bg-danger-soft disabled:opacity-60">Cabut</button>
+                        className="min-h-[44px] rounded-sm border border-danger-fill px-2 text-caption font-bold text-danger hover:bg-danger-soft disabled:opacity-60"
+                      >
+                        Cabut
+                      </button>
                     ) : <span className="text-caption text-muted">Tidak ada aksi</span>}
                   </Td>
                 </tr>
@@ -209,6 +227,12 @@ export function SharePage({ id }: { id: string }) {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Buat undangan baru</SectionTitle>
+            {!hasPublishedVersion && (
+              <p className="text-caption text-muted">Terbitkan satu versi terlebih dahulu; undangan hanya dapat dibuat untuk versi terbit.</p>
+            )}
+            {hasPublishedVersion && !canInvite && (
+              <p className="text-caption text-muted">Survei sudah ditutup atau diarsipkan, sehingga undangan baru tidak dapat dibuat.</p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field id="penugasan-baru" label="Label penugasan">
                 {(aria) => <TextInput {...aria} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nama kelas atau kelompok" />}
@@ -218,7 +242,7 @@ export function SharePage({ id }: { id: string }) {
               </Field>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button disabled={state === 'loading' || state === 'closed' || busy} loading={busy} onClick={() => {
+              <Button disabled={state === 'loading' || !canInvite || busy} loading={busy} onClick={() => {
                 if (!label.trim()) { notify('Isi label penugasan terlebih dahulu.', 'danger'); return; }
                 setBusy(true);
                 setShareError(null);
@@ -237,8 +261,31 @@ export function SharePage({ id }: { id: string }) {
           </Card>
         </div>
       </StateView>
-      
+
     </Shell>
+  );
+
+  return (
+    <>
+      {shareBody}
+      <ConfirmDialog
+        open={Boolean(revokeTarget)}
+        title="Cabut kode undangan ini?"
+        detail={revokeTarget
+          ? `Kode ${revokeTarget.code} tidak dapat dipakai lagi. Responden yang sudah mengirim jawaban tidak terpengaruh.`
+          : ''}
+        confirmLabel="Cabut undangan"
+        onClose={() => setRevokeTarget(null)}
+        onConfirm={() => {
+          const target = revokeTarget;
+          if (!target) return;
+          setRevokeTarget(null);
+          void revokeInvitation(target.id)
+            .then(() => notify('Undangan dicabut.'))
+            .catch((error: unknown) => setShareError(error instanceof Error ? error.message : 'Undangan gagal dicabut.'));
+        }}
+      />
+    </>
   );
 }
 
@@ -250,9 +297,14 @@ export function ResultsPage({ id }: { id: string }) {
   void revision;
   const { state } = useScreenState('creator-results');
   const survey = findSurvey(id);
-  const versionList = versionsFor(id).filter((version) => version.status !== 'draft');
-  const fallbackVersion = publishedVersionFor(id)?.id ?? versionList[0]?.id ?? versionsFor(id)[0]?.id ?? '';
+  const versionList = versionsFor(id);
+  const selectableVersions = versionList.filter((version) => version.status !== 'draft');
+  const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? versionList[0]?.id ?? '';
   const [versionId, setVersionId] = useState(fallbackVersion);
+  useEffect(() => {
+    if (versionId && versionList.some((version) => version.id === versionId)) return;
+    if (fallbackVersion) setVersionId(fallbackVersion);
+  }, [versionId, fallbackVersion, versionList]);
   const [summary, setSummary] = useState<VersionSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -291,9 +343,10 @@ export function ResultsPage({ id }: { id: string }) {
   const myGrants = accessGrants.filter(
     (grant) => grant.account_id === session?.id && grant.survey_id === id,
   );
-  const exportAllowed = myGrants.some((grant) => grants[grant.id]?.export);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
   const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
-  const availableVersions = versionList.length > 0 ? versionList : versionsFor(id);
+  const availableVersions = selectableVersions.length > 0 ? selectableVersions : versionList;
 
   const loadResponses = () => {
     setResponsesBusy(true);
@@ -386,13 +439,20 @@ export function ResultsPage({ id }: { id: string }) {
               <Divider />
               {item.type === 'short_text' ? (
                 <div>
-                  <p className="text-body-sm text-muted">Isian teks bebas hanya untuk penerima berizin.</p>
-                  {denied ? (
-                    <Banner tone="danger" title="Teks bebas tidak ditampilkan">Izin baca teks bebas terpisah dari izin ekspor.</Banner>
+                  {denied || !individualAllowed ? (
+                    <>
+                      <p className="text-body-sm text-muted">Isian teks bebas hanya untuk penerima berizin.</p>
+                      <p className="mt-2 text-body-sm text-ink">
+                        {item.free_text_count > 0 ? `${item.free_text_count} isian teks dalam dataset.` : 'Belum ada jawaban'}
+                      </p>
+                    </>
                   ) : (
-                    <p className="mt-2 text-body-sm text-ink">
-                      {item.free_text_count > 0 ? `${item.free_text_count} isian teks tersedia.` : 'Belum ada jawaban'}
-                    </p>
+                    <>
+                      <p className="text-body-sm text-muted">Isian teks bebas untuk penerima berizin.</p>
+                      <p className="mt-2 text-body-sm text-ink">
+                        {item.free_text_count > 0 ? `${item.free_text_count} isian teks dalam dataset.` : 'Belum ada jawaban'}
+                      </p>
+                    </>
                   )}
                 </div>
               ) : (
@@ -549,14 +609,30 @@ export function ResultsPage({ id }: { id: string }) {
 
 export function SettingsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { settings, revision } = useStore();
+  const { settings, revision, session } = useStore();
   void revision;
   const { state } = useScreenState('creator-settings');
   const profile = profileForSurvey(id);
   const notice = noticeForSurvey(id);
+  const survey = findSurvey(id);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
   const [allowIndividual, setAllowIndividual] = useState(settings[id]?.allowIndividual ?? false);
   const [busy, setBusy] = useState(false);
+
+  // Sinkronkan dari server setelah bootstrap; perubahan lokal sesudahnya tetap dipakai.
+  useEffect(() => {
+    setAllowResults(settings[id]?.allowResults ?? true);
+    setAllowIndividual(settings[id]?.allowIndividual ?? false);
+  }, [id, settings]);
+
+  if (!survey || !isOwner) {
+    return (
+      <Shell kind="creator" title="Pengaturan dan pemberitahuan" subtitle="Survei tidak ditemukan.">
+        <MissingSurvey />
+      </Shell>
+    );
+  }
 
   return (
     <Shell kind="creator" title="Pengaturan dan pemberitahuan" subtitle="Kelola pemberitahuan, retensi, dan hak akses hasil untuk survei ini.">
@@ -632,12 +708,26 @@ export function SettingsPage({ id }: { id: string }) {
 
 export function HistoryPage({ id }: { id: string }) {
   const notify = useToast();
-  const { revision } = useStore();
+  const { revision, session } = useStore();
   void revision;
   const { state, link } = useScreenState('creator-history');
+  const survey = findSurvey(id);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const versionList = versionsFor(id);
+  const activeVersion = versionList.find((version) => version.status === 'published');
+  const archived = survey?.status === 'archived' || state === 'closed';
+  const [pending, setPending] = useState<'close' | 'archive' | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  return (
+  if (!survey || !isOwner) {
+    return (
+      <Shell kind="creator" title="Riwayat versi" subtitle="Survei tidak ditemukan.">
+        <MissingSurvey />
+      </Shell>
+    );
+  }
+
+  const historyBody = (
     <Shell kind="creator" title="Riwayat versi" subtitle="Lihat versi yang pernah diterbitkan, tutup penerimaan, atau arsipkan survei.">
       <StateView
         routeId="creator-history"
@@ -685,23 +775,55 @@ export function HistoryPage({ id }: { id: string }) {
           </Card>
 
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" disabled={state === 'loading' || state === 'closed'} onClick={() => {
-              const target = versionList.find((v) => v.status === 'published');
-              if (!target) { notify('Tidak ada versi aktif untuk ditutup.', 'info'); return; }
-              void closeVersion(id)
-                .then(() => notify(`Versi ${target.number} ditutup. Kiriman baru tidak diterima.`))
-                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Versi gagal ditutup.', 'danger'));
-            }}>Tutup versi aktif</Button>
-            <Button variant="secondary" disabled={state === 'loading' || state === 'closed'} onClick={() => {
-              void archiveSurvey(id)
-                .then(() => notify('Survei diarsipkan. Riwayat tetap dapat dibaca.'))
-                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Survei gagal diarsipkan.', 'danger'));
-            }}>Arsipkan survei</Button>
+            <Button
+              variant="danger"
+              disabled={state === 'loading' || !activeVersion || busy}
+              onClick={() => setPending('close')}
+            >
+              {activeVersion ? `Tutup versi ${activeVersion.number}` : 'Tidak ada versi aktif'}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={state === 'loading' || archived || busy}
+              onClick={() => setPending('archive')}
+            >
+              {archived ? 'Survei sudah diarsipkan' : 'Arsipkan survei'}
+            </Button>
             <ActionLink to={link(ROUTES.creatorResults(id))} variant="secondary">Lihat hasil per versi</ActionLink>
           </div>
         </div>
       </StateView>
-      
+
     </Shell>
+  );
+
+  return (
+    <>
+      {historyBody}
+      <ConfirmDialog
+        open={pending !== null}
+        tone="danger"
+        title={pending === 'archive' ? 'Arsipkan survei ini?' : `Tutup versi ${activeVersion?.number ?? ''}?`}
+        detail={pending === 'archive'
+          ? 'Survei disembunyikan dari daftar aktif dan semua tautan publiknya ditutup. Riwayat, respons, dan versi tetap tersimpan.'
+          : 'Responden tidak dapat lagi mengirim jawaban ke versi ini. Versi yang sudah ditutup tidak dapat dibuka kembali.'}
+        confirmLabel={pending === 'archive' ? 'Arsipkan survei' : 'Tutup versi'}
+        busy={busy}
+        onClose={() => setPending(null)}
+        onConfirm={() => {
+          const action = pending;
+          if (!action) return;
+          setBusy(true);
+          const request = action === 'archive' ? archiveSurvey(id) : closeVersion(id);
+          void request
+            .then(() => {
+              notify(action === 'archive' ? 'Survei diarsipkan. Riwayat tetap dapat dibaca.' : `Versi ${activeVersion?.number ?? ''} ditutup. Kiriman baru tidak diterima.`);
+              setPending(null);
+            })
+            .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Tindakan gagal.', 'danger'))
+            .finally(() => setBusy(false));
+        }}
+      />
+    </>
   );
 }

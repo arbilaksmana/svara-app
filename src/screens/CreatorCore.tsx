@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Shell } from '../components/Shell';
 import {
@@ -11,7 +11,9 @@ import {
   Card,
   Checkbox,
   Code,
+  ConfirmDialog,
   Divider,
+  EmptyState,
   Field,
   Label,
   Muted,
@@ -33,6 +35,7 @@ import { profileForSurvey } from '../lib/fixtures/profiles';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
 import { ApiError } from '../lib/api';
+import { NavigationGuardProvider } from '../lib/navigation-guard';
 import { createSurvey, duplicateVersion, publishVersion, saveDraft, useStore } from '../lib/store';
 
 const STATUS_TONE = {
@@ -42,7 +45,7 @@ const STATUS_TONE = {
   archived: 'neutral',
 } as const;
 
-function MissingSurvey() {
+export function MissingSurvey() {
   return (
     <Card>
       <h1 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h1>
@@ -174,18 +177,28 @@ export function CreatorListPage() {
             </Button>
           </Card>
 
-          {rows.length === 0 && query !== '' ? (
-            <div className="rounded-lg border border-dashed border-n200 bg-n50 p-6">
-              <p className="text-h3 font-bold text-ink">Hasil pencarian kosong</p>
-              <p className="mt-1 text-body-sm text-muted">Tidak ada survei yang cocok dengan “{query}”.</p>
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                className="mt-3 min-h-[44px] rounded-md border border-n200 bg-n0 px-4 text-body-sm font-bold text-action hover:bg-action-soft"
+          {rows.length === 0 ? (
+            query !== '' ? (
+              <div className="rounded-lg border border-dashed border-n200 bg-n50 p-6">
+                <p className="text-h3 font-bold text-ink">Hasil pencarian kosong</p>
+                <p className="mt-1 text-body-sm text-muted">Tidak ada survei yang cocok dengan “{query}”.</p>
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="mt-3 min-h-[44px] rounded-md border border-n200 bg-n0 px-4 text-body-sm font-bold text-action hover:bg-action-soft"
+                >
+                  Hapus kata kunci
+                </button>
+              </div>
+            ) : (
+              <EmptyState
+                title={filter === 'semua' ? 'Belum memiliki survei' : 'Tidak ada survei pada status ini'}
               >
-                Hapus kata kunci
-              </button>
-            </div>
+                {filter === 'semua'
+                  ? 'Buat draf pertama untuk mulai menyusun pertanyaan dan skala.'
+                  : 'Ubah filter status untuk melihat survei lain.'}
+              </EmptyState>
+            )
           ) : (
             <Card className="overflow-hidden">
               <Table head={['Judul', 'Status', 'Versi', 'Diperbarui', 'Aksi']}>
@@ -194,7 +207,7 @@ export function CreatorListPage() {
                   const canManage = canCreate && s.owner_id === session?.id;
                   return (
                     <tr key={s.id}>
-                      <Th>
+                      <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
                         <span className="mt-1 block text-caption text-muted">{vs.length} versi · diperbarui {s.updated_at.slice(0, 10)}</span>
                       </Th>
@@ -202,7 +215,7 @@ export function CreatorListPage() {
                       <Td>{vs.length} versi</Td>
                       <Td>{s.updated_at.slice(0, 10)}</Td>
                       <Td>
-                        <div className="flex flex-col items-start gap-1">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           {canManage && <PlainLink to={link(ROUTES.creatorEdit(s.id))}>Buka editor</PlainLink>}
                           <PlainLink to={link(ROUTES.creatorResults(s.id))}>Lihat hasil</PlainLink>
                           {canManage && <Button
@@ -260,6 +273,10 @@ interface EditableQuestion {
   options: EditableOption[];
 }
 
+type PendingDelete =
+  | { kind: 'question'; key: string; label: string }
+  | { kind: 'option'; questionKey: string; key: string; label: string };
+
 let editorKeyCounter = 0;
 function nextEditorKey(prefix: string): string {
   editorKeyCounter += 1;
@@ -305,9 +322,10 @@ function blankQuestion(): EditableQuestion {
 
 export function EditorPage({ id }: { id: string }) {
   const notify = useToast();
-  const { drafts, revision } = useStore();
+  const { drafts, revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const { state } = useScreenState('creator-edit');
   const activeVersion = editorVersionFor(id);
   const [title, setTitle] = useState(drafts[id]?.title ?? survey?.title ?? '');
@@ -319,10 +337,24 @@ export function EditorPage({ id }: { id: string }) {
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [attempted, setAttempted] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const baselineRef = useRef<string | null>(null);
+  const snapshot = JSON.stringify({ title, purpose, instructions, editorQuestions });
+
+  useEffect(() => {
+    if (baselineRef.current === null) {
+      baselineRef.current = snapshot;
+      return;
+    }
+    setDirty(snapshot !== baselineRef.current);
+  }, [snapshot]);
 
   const duplicate = editorQuestions
     .map((question) => question.code.trim().toUpperCase())
     .filter((code, index, list) => code !== '' && list.indexOf(code) !== index);
+  const duplicateSet = new Set(duplicate);
   const missingLabel = editorQuestions.filter((question) => question.label.trim() === '');
   const invalidOptions = editorQuestions.filter((question) => {
     if (question.type === 'short_text') return question.options.length > 0;
@@ -340,8 +372,9 @@ export function EditorPage({ id }: { id: string }) {
   if (state === 'validation') {
     issues.push('Draf belum lengkap: periksa kembali kode, label, dan opsi item.');
   }
+  const showIssues = attempted || state === 'validation';
 
-  if (!survey) {
+  if (!survey || !isOwner) {
     return (
       <Shell kind="creator" title="Editor instrumen" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -378,8 +411,10 @@ export function EditorPage({ id }: { id: string }) {
   };
 
   const onSave = () => {
-    setBusy(true);
+    setAttempted(true);
     setSaveError(null);
+    if (editorQuestions.length === 0) return;
+    setBusy(true);
     void saveDraft(id, {
       title,
       purpose,
@@ -404,6 +439,8 @@ export function EditorPage({ id }: { id: string }) {
       })),
     })
       .then((at) => {
+        baselineRef.current = snapshot;
+        setDirty(false);
         setSaved(at);
         notify('Draf berhasil disimpan.');
       })
@@ -416,8 +453,10 @@ export function EditorPage({ id }: { id: string }) {
   };
 
   return (
-    <Shell kind="creator" title="Editor instrumen" subtitle="Susun judul, petunjuk, kode item, dan urutan. Draf tersimpan di server." bottomInset>
-      <StateView
+    <>
+      <NavigationGuardProvider dirty={dirty} message="Perubahan editor belum disimpan. Tinggalkan halaman ini?">
+        <Shell kind="creator" title="Editor instrumen" subtitle="Susun judul, petunjuk, kode item, dan urutan. Draf tersimpan di server." bottomInset>
+          <StateView
         routeId="creator-edit"
         state={state}
         emptyTitle="Belum ada pertanyaan"
@@ -430,7 +469,7 @@ export function EditorPage({ id }: { id: string }) {
           <SurveyNav id={id} />
 
           {state === 'success' && <SuccessBanner title="Draf disimpan">Perubahan tersimpan dan tetap tersedia saat Anda kembali.</SuccessBanner>}
-          {(issues.length > 0) && (
+          {showIssues && issues.length > 0 && (
             <ValidationSummary items={issues} />
           )}
           {saved && <Banner tone="success" title="Draf tersimpan">Disimpan {formatWIB(saved)}.</Banner>}
@@ -440,7 +479,12 @@ export function EditorPage({ id }: { id: string }) {
             <div className="flex min-w-0 flex-col gap-5">
               <Card className="flex flex-col gap-4">
                 <SectionTitle>Metadata survei</SectionTitle>
-                <Field id="judul-survei" label="Judul survei" required>
+                <Field
+                  id="judul-survei"
+                  label="Judul survei"
+                  required
+                  error={showIssues && title.trim() === '' ? 'Judul survei wajib diisi.' : undefined}
+                >
                   {(aria) => <TextInput {...aria} value={title} onChange={(e) => setTitle(e.target.value)} />}
                 </Field>
                 <Field id="tujuan-survei" label="Tujuan" hint="Ditampilkan pada pemberitahuan responden.">
@@ -478,7 +522,12 @@ export function EditorPage({ id }: { id: string }) {
                             <Button variant="ghost" disabled={index === editorQuestions.length - 1} onClick={() => moveQuestion(index, 1)} aria-label={`Turunkan pertanyaan ${index + 1}`}>Turun</Button>
                             <Button
                               variant="ghost"
-                              onClick={() => setEditorQuestions((current) => current.filter((item) => item.key !== question.key))}
+                              className="text-danger hover:bg-danger-soft"
+                              onClick={() => setPendingDelete({
+                                kind: 'question',
+                                key: question.key,
+                                label: question.label || `Pertanyaan ${index + 1}`,
+                              })}
                               aria-label={`Hapus pertanyaan ${index + 1}`}
                             >
                               Hapus
@@ -486,7 +535,12 @@ export function EditorPage({ id }: { id: string }) {
                           </div>
                         </div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <Field id={`code-${question.key}`} label="Kode item" hint="Unik per versi.">
+                          <Field
+                            id={`code-${question.key}`}
+                            label="Kode item"
+                            hint="Unik per versi."
+                            error={showIssues && duplicateSet.has(question.code.trim().toUpperCase()) ? 'Kode item duplikat pada versi ini.' : undefined}
+                          >
                             {(aria) => (
                               <TextInput
                                 {...aria}
@@ -513,7 +567,7 @@ export function EditorPage({ id }: { id: string }) {
                                       ];
                                 patchQuestion(question.key, { type, options });
                               }}
-                              className="min-h-[44px] rounded-sm border border-n300 bg-n0 px-3 text-body-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action"
+                              className="min-h-[44px] rounded-sm border border-control-border bg-n0 px-3 text-body-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action"
                             >
                               <option value="likert">Likert numerik</option>
                               <option value="single_choice">Pilihan tunggal</option>
@@ -522,7 +576,12 @@ export function EditorPage({ id }: { id: string }) {
                           </div>
                         </div>
                         <div className="mt-3 flex flex-col gap-3">
-                          <Field id={`label-${question.key}`} label="Label pertanyaan" required>
+                          <Field
+                            id={`label-${question.key}`}
+                            label="Label pertanyaan"
+                            required
+                            error={showIssues && question.label.trim() === '' ? 'Label pertanyaan wajib diisi.' : undefined}
+                          >
                             {(aria) => (
                               <TextInput {...aria} value={question.label} onChange={(e) => patchQuestion(question.key, { label: e.target.value })} />
                             )}
@@ -578,7 +637,11 @@ export function EditorPage({ id }: { id: string }) {
                               {question.options.map((option, optionIndex) => (
                                 <div key={option.key} className="flex flex-wrap items-end gap-2">
                                   <div className="min-w-[180px] flex-1">
-                                    <Field id={`option-label-${option.key}`} label={`Label opsi ${optionIndex + 1}`}>
+                                    <Field
+                                      id={`option-label-${option.key}`}
+                                      label={`Label opsi ${optionIndex + 1}`}
+                                      error={showIssues && option.label.trim() === '' ? 'Label opsi wajib diisi.' : undefined}
+                                    >
                                       {(aria) => (
                                         <TextInput {...aria} value={option.label} onChange={(e) => patchOption(question.key, option.key, { label: e.target.value })} />
                                       )}
@@ -599,7 +662,13 @@ export function EditorPage({ id }: { id: string }) {
                                   </div>
                                   <Button
                                     variant="ghost"
-                                    onClick={() => patchQuestion(question.key, { options: question.options.filter((item) => item.key !== option.key) })}
+                                    className="text-danger hover:bg-danger-soft"
+                                    onClick={() => setPendingDelete({
+                                      kind: 'option',
+                                      questionKey: question.key,
+                                      key: option.key,
+                                      label: option.label || `Opsi ${optionIndex + 1}`,
+                                    })}
                                     aria-label={`Hapus opsi ${optionIndex + 1}`}
                                   >
                                     Hapus
@@ -627,12 +696,13 @@ export function EditorPage({ id }: { id: string }) {
               <Panel className="h-fit">
                 <SectionTitle>Tindakan</SectionTitle>
                 <div className="mt-3 flex flex-col gap-2">
-                  <Button variant="secondary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
-                  <ActionLink to={ROUTES.creatorPreview(id)} variant="secondary" block>Lihat pratinjau</ActionLink>
-                  <ActionLink to={ROUTES.creatorPublish(id)} block>Lanjut ke publikasi</ActionLink>
+                  <Button variant="primary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
+                  {dirty && <p className="text-caption font-bold text-danger">Perubahan belum disimpan.</p>}
+                  <ActionLink to={ROUTES.creatorPreview(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lihat pratinjau</ActionLink>
+                  <ActionLink to={ROUTES.creatorPublish(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lanjut ke publikasi</ActionLink>
                 </div>
                 <p className="mt-3 text-caption text-muted">
-                  Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
+                  Simpan draf sebelum membuka pratinjau atau publikasi. Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
                 </p>
               </Panel>
             </div>
@@ -640,14 +710,40 @@ export function EditorPage({ id }: { id: string }) {
 
           <div role="region" aria-label="Aksi editor" className="fixed inset-x-0 bottom-0 z-20 border-t border-n200 bg-n0 px-4 py-3 lg:hidden">
             <div className="mx-auto grid max-w-[1200px] grid-cols-2 gap-2">
-              <Button variant="secondary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
-              <ActionLink to={ROUTES.creatorPublish(id)} block>Publikasi</ActionLink>
+              <Button variant="primary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
+              <ActionLink to={ROUTES.creatorPublish(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Publikasi</ActionLink>
             </div>
           </div>
         </div>
       </StateView>
-      
-    </Shell>
+
+        </Shell>
+      </NavigationGuardProvider>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title={pendingDelete?.kind === 'option' ? 'Hapus opsi ini?' : 'Hapus pertanyaan ini?'}
+        detail={pendingDelete
+          ? `“${pendingDelete.label}” akan dihapus dari draf. Perubahan baru tersimpan setelah Anda menekan Simpan draf.`
+          : ''}
+        confirmLabel="Hapus"
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.kind === 'question') {
+            setEditorQuestions((current) => current.filter((question) => question.key !== pendingDelete.key));
+            notify('Pertanyaan dihapus dari draf.');
+          } else {
+            setEditorQuestions((current) => current.map((question) => (
+              question.key === pendingDelete.questionKey
+                ? { ...question, options: question.options.filter((option) => option.key !== pendingDelete.key) }
+                : question
+            )));
+            notify('Opsi dihapus dari draf.');
+          }
+          setPendingDelete(null);
+        }}
+      />
+    </>
   );
 }
 
@@ -655,11 +751,14 @@ export function EditorPage({ id }: { id: string }) {
 
 export function PreviewPage({ id }: { id: string }) {
   const survey = findSurvey(id);
+  const { session, revision } = useStore();
+  void revision;
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const { state, link } = useScreenState('creator-preview');
   const version = editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
 
-  if (!survey) {
+  if (!survey || !isOwner) {
     return (
       <Shell kind="creator" title="Pratinjau tampilan responden" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -734,13 +833,16 @@ export function PublishPage({ id }: { id: string }) {
   const { revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
+  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const { state, link } = useScreenState('creator-publish');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishBlockers, setPublishBlockers] = useState<string[]>([]);
   const [publishedToken, setPublishedToken] = useState<string | null>(null);
-  const version = draftVersionFor(id) ?? editorVersionFor(id);
+  const draft = draftVersionFor(id);
+  const hasDraft = Boolean(draft);
+  const version = draft ?? editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
   const duplicateCodes = items
     .map((item) => item.code.trim().toUpperCase())
@@ -759,9 +861,9 @@ export function PublishPage({ id }: { id: string }) {
     ...(emptyLabels.length > 0 ? [`Label kosong pada: ${emptyLabels.map((item) => item.code).join(', ')}.`] : []),
     ...(badOptions.length > 0 ? [`Opsi belum lengkap pada: ${badOptions.map((item) => item.code).join(', ')}.`] : []),
   ];
-  const blocking = blockers.length > 0 || state === 'closed' || state === 'permission-denied' || state === 'error' || state === 'loading';
+  const blocking = !hasDraft || blockers.length > 0 || state === 'closed' || state === 'permission-denied' || state === 'error' || state === 'loading';
 
-  if (!survey) {
+  if (!survey || !isOwner) {
     return (
       <Shell kind="creator" title="Publikasi versi" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -785,6 +887,11 @@ export function PublishPage({ id }: { id: string }) {
               Tautan responden siap dibagikan.
               <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Kelola tautan</ActionLink></div>
             </SuccessBanner>
+          )}
+          {!hasDraft && (
+            <Banner tone="info" title="Tidak ada draf untuk diterbitkan">
+              Semua versi sudah terbit atau ditutup. Buat draf baru dari editor sebelum menerbitkan versi berikutnya.
+            </Banner>
           )}
           {blockers.length > 0 && <ValidationSummary items={blockers} />}
           {publishBlockers.length > 0 && <ValidationSummary items={publishBlockers} />}
@@ -811,9 +918,10 @@ export function PublishPage({ id }: { id: string }) {
               label="Saya memahami bahwa perubahan isi setelah terbit memerlukan versi baru."
               checked={confirm}
               onChange={setConfirm}
+              disabled={!hasDraft || Boolean(publishedToken)}
             />
             <div className="flex flex-wrap gap-3">
-              <Button disabled={!confirm || blocking || busy} loading={busy} onClick={() => {
+              <Button disabled={!confirm || blocking || busy || Boolean(publishedToken)} loading={busy} onClick={() => {
                 setBusy(true);
                 setPublishError(null);
                 setPublishBlockers([]);
@@ -839,7 +947,7 @@ export function PublishPage({ id }: { id: string }) {
                   })
                   .finally(() => setBusy(false));
               }}>
-                Terbitkan versi
+                {publishedToken ? 'Versi sudah diterbitkan' : hasDraft ? 'Terbitkan versi' : 'Tidak ada draf'}
               </Button>
               <ActionLink to={ROUTES.creatorEdit(id)} variant="secondary">Kembali ke editor</ActionLink>
               <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!publishedToken}>

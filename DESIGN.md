@@ -58,7 +58,8 @@ success:           #0a7a3b
 | N0 / Paper | `#ffffff` | `--color-n0` | Page canvas, surface kartu, teks invert |
 | N50 ↻ | `#fbfcff` | `--color-n50` | Read-only input surface (sumber: token dipakai, HEX tidak dipublikasikan) |
 | N100 | `#f4f7fe` | `--color-n100` | Disabled surface, read-only, soft panel |
-| N200 | `#d8dce8` | `--color-n200` | Border, outline input, divider |
+| N200 | `#d8dce8` | `--color-n200` | Border, divider |
+| Control border | `#8d919c` | `--color-control-border` | Border input/select; 3.15:1 terhadap N0 (WCAG 1.4.11) |
 | N400 | `#aeb2be` | `--color-n400` | Disabled text/icon, icon low-emphasis — **dekoratif saja, bukan teks** |
 | N600 | `#71747d` | `--color-n600` | Muted / low-emphasis text (4.67:1) |
 | N700 | `#4d4f56` | `--color-n700` | High-emphasis icon (8.18:1) |
@@ -254,7 +255,7 @@ Singkatan: **Container / Icon / Text / Dimension / State / Behavior**. Komponen 
 Fill `--color-action` (primary) atau transparent + 1px `--color-n200` (secondary/ghost). Radius 8px, width `full | hug`, padding `10px 20px` ↻. Text `--text-body` weight 700, `--text-invert` / `--text-activity` / `--text-alert` / `--text-high` / `--text-disabled`. Icon opsional 20×20. States: default · hover (`--color-action-hover`) · active · focus-visible · disabled (`--color-n200` + `--text-disabled`) · loading. Truncation `end`, align-center.
 
 ### Textfield
-Surface `--color-n0` (default) / `--color-n50` (read-only), border 1px `--color-n200`, radius 8px, height 52px fixed. Outline per state: `--color-n200` (unfilled/filled/read-only), `--color-danger-fill` (error), `--color-action` (focus/typing). Placeholder `--text-caption` `--text-low`; input `--text-body-sm` `--text-high`; helper `--text-caption` tanpa max-line. Icon 20×20. **Wajib** ada `<label>` terkait dan `aria-describedby` untuk helper/error, plus `aria-invalid` saat error ↻.
+Surface `--color-n0` (default) / `--color-n50` (read-only), border 1px `--color-control-border`, radius 8px, height 52px fixed. Outline per state: `--color-control-border` (unfilled/filled/read-only), `--color-danger-fill` (error), `--color-action` (focus/typing). Placeholder `--text-caption` `--text-low`; input `--text-body-sm` `--text-high`; helper `--text-caption` tanpa max-line. Icon 20×20. **Wajib** ada `<label>` terkait dan `aria-describedby` untuk helper/error, plus `aria-invalid` saat error ↻.
 
 ### Checkbox
 Container 20×20 ↻, radius 4px, outline `1px inside`. States: unselected (`N0` + `N400`) · selected (`--color-action`) · error (`N0` + `--color-danger-fill`) · indeterminate (`--color-action`) · read-only (`--color-n100` + `N400`) · disabled. Gunakan input asli + `accent-color: var(--color-action)` ↻.

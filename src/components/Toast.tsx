@@ -16,13 +16,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ToastEntry[]>([]);
   const nextId = useRef(0);
 
+  const dismiss = useCallback((id: number) => {
+    setEntries((prev) => prev.filter((entry) => entry.id !== id));
+  }, []);
+
   const notify = useCallback((message: string, tone: ToastTone = 'success') => {
     const id = ++nextId.current;
     setEntries((prev) => [...prev, { id, message, tone }]);
-    window.setTimeout(() => {
-      setEntries((prev) => prev.filter((e) => e.id !== id));
-    }, 4200);
-  }, []);
+    // Error perlu bertahan sampai ditutup; pengguna bisa saja sedang membaca halaman lain.
+    if (tone !== 'danger') {
+      window.setTimeout(() => dismiss(id), 4200);
+    }
+  }, [dismiss]);
 
   return (
     <ToastContext.Provider value={notify}>
@@ -35,14 +40,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {entries.map((e) => (
           <div
             key={e.id}
-            role="status"
-            className={`pointer-events-auto w-full rounded-md border px-4 py-3 shadow-overlay ${
+            role={e.tone === 'danger' ? 'alert' : 'status'}
+            aria-atomic="true"
+            className={`pointer-events-auto flex w-full items-start gap-3 rounded-md border px-4 py-3 shadow-overlay ${
               e.tone === 'success' ? 'border-success-soft bg-success-soft text-success'
                 : e.tone === 'danger' ? 'border-danger-soft bg-danger-soft text-danger'
                   : 'border-action-subtle bg-action-soft text-action'
             }`}
           >
-            <p className="text-body-sm font-bold">{e.message}</p>
+            <p className="min-w-0 flex-1 text-body-sm font-bold">{e.message}</p>
+            {e.tone === 'danger' && (
+              <button
+                type="button"
+                onClick={() => dismiss(e.id)}
+                aria-label="Tutup pesan"
+                className="min-h-[24px] min-w-[24px] shrink-0 text-body-sm font-bold leading-none"
+              >
+                ×
+              </button>
+            )}
           </div>
         ))}
       </div>

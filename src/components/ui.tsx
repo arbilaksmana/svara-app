@@ -1,8 +1,10 @@
 'use client';
 
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, MouseEvent, ReactNode, TextareaHTMLAttributes } from 'react';
 import Link from 'next/link';
 import { StateLink } from '../lib/state';
+import { allowNavigation, useNavigationGuard } from '../lib/navigation-guard';
 
 /* ---------- Tipografi ---------- */
 
@@ -151,6 +153,7 @@ export function ActionLink({
   children,
   variant = 'primary',
   disabled = false,
+  disabledReason,
   block = false,
   className = '',
   onClick,
@@ -160,6 +163,7 @@ export function ActionLink({
   children: ReactNode;
   variant?: ButtonVariant;
   disabled?: boolean;
+  disabledReason?: string;
   block?: boolean;
   className?: string;
   onClick?: () => void;
@@ -168,7 +172,11 @@ export function ActionLink({
   const cls = `inline-flex min-h-[44px] cursor-pointer items-center justify-center gap-2 rounded-md px-5 text-body font-bold transition-colors duration-fast ${BUTTON_VARIANTS[variant]} ${block ? 'w-full' : ''} ${className}`;
   if (disabled) {
     return (
-      <span aria-disabled="true" className={`${cls} cursor-not-allowed border-n200 bg-n100 text-n600`}>
+      <span
+        aria-disabled="true"
+        title={disabledReason}
+        className={`${cls} cursor-not-allowed border-n200 bg-n100 text-n600`}
+      >
         {children}
       </span>
     );
@@ -189,9 +197,30 @@ export function TextLink({ to, children, className = '' }: { to: string; childre
 }
 
 /** Tautan ke rute absolut yang tidak perlu membawa state (mis. ke halaman kebijakan). */
-export function PlainLink({ to, children, className = '' }: { to: string; children: ReactNode; className?: string }) {
+export function PlainLink({
+  to,
+  children,
+  className = '',
+  onClick,
+}: {
+  to: string;
+  children: ReactNode;
+  className?: string;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  const guard = useNavigationGuard();
   return (
-    <Link href={to} className={`inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover ${className}`}>
+    <Link
+      href={to}
+      onClick={(event) => {
+        if (!allowNavigation(event, guard)) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.(event);
+      }}
+      className={`inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4 hover:text-action-hover ${className}`}
+    >
       {children}
     </Link>
   );
@@ -230,7 +259,7 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink placeholder:text-n600 focus:border-action disabled:bg-n50 disabled:text-n400 ${props.className ?? ''}`}
+      className={`min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink placeholder:text-n600 focus:border-action aria-invalid:border-2 aria-invalid:border-danger disabled:bg-n50 disabled:text-n400 ${props.className ?? ''}`}
     />
   );
 }
@@ -239,7 +268,7 @@ export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
       {...props}
-      className={`min-h-[96px] w-full rounded-md border border-n200 bg-n0 px-3 py-2 text-body-sm text-ink placeholder:text-n600 focus:border-action ${props.className ?? ''}`}
+      className={`min-h-[96px] w-full rounded-md border border-control-border bg-n0 px-3 py-2 text-body-sm text-ink placeholder:text-n600 focus:border-action aria-invalid:border-2 aria-invalid:border-danger ${props.className ?? ''}`}
     />
   );
 }
@@ -300,6 +329,64 @@ export function ErrorState({ title, detail, action }: { title: string; detail: s
       <p className="text-body-sm text-ink">{detail}</p>
       {action}
     </div>
+  );
+}
+
+export function ConfirmDialog({
+  open,
+  title,
+  detail,
+  confirmLabel = 'Hapus',
+  cancelLabel = 'Batal',
+  tone = 'danger',
+  busy = false,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  detail: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: 'danger' | 'primary';
+  busy?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const detailId = useId();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      aria-describedby={detailId}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+      className="m-auto max-h-[90dvh] w-[min(92vw,32rem)] overflow-y-auto overscroll-contain rounded-lg border border-n200 bg-n0 p-0 text-ink shadow-overlay backdrop:bg-[rgba(23,25,24,0.5)]"
+    >
+      <div className="p-5">
+        <h2 id={titleId} className="text-h3 font-bold text-ink">{title}</h2>
+        <p id={detailId} className="mt-2 text-body-sm text-muted">{detail}</p>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={busy}>{cancelLabel}</Button>
+          <Button variant={tone} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 
@@ -373,7 +460,7 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
           event.currentTarget.scrollLeft += event.key === 'ArrowRight' ? 80 : -80;
         } : undefined}
       >
-        <table className={`w-full table-fixed border-collapse text-left text-body-sm ${minWidth}`}>
+        <table className={`w-full table-auto border-collapse text-left text-body-sm ${minWidth}`}>
           <thead>
             <tr className="border-b border-n200">
               {head.map((h) => (
