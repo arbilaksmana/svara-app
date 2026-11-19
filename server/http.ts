@@ -133,6 +133,7 @@ export async function canReadIndividual(account: AccountRow, survey: SurveyRow):
 }
 
 export async function canExport(account: AccountRow, survey: SurveyRow): Promise<boolean> {
+  if (canManageSurvey(account, survey)) return true;
   return Boolean((await grantFor(account.id, survey.id))?.can_export);
 }
 

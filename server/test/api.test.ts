@@ -500,6 +500,9 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.equal(creatorCsv.status, 200);
   assert.ok(!creatorCsv.text.includes('Perlu panduan singkat.'), 'teks bebas disamarkan tanpa izin');
 
+  const ownerCsv = await call('/surveys/s_demo4/export?version=v_demo4_1&format=csv', { cookie: creator });
+  assert.equal(ownerCsv.status, 200, 'pemilik survei otomatis boleh ekspor tanpa grant');
+
   const denied = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: creatorB });
   assert.equal(denied.status, 403);
 

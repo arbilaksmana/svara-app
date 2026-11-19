@@ -314,12 +314,21 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     if (req.account.role !== 'creator') fail(403, 'forbidden_role', 'Hanya pembuat survei yang dapat membuat survei.');
     const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : 'Survei baru';
-    const profileId = typeof req.body?.profile_id === 'string' ? req.body.profile_id : 'p_smk';
-    const profile = await get<{ id: string; notice_version: string }>(
+    const requestedProfileId = typeof req.body?.profile_id === 'string' && req.body.profile_id
+      ? req.body.profile_id
+      : null;
+    let profile = await get<{ id: string; notice_version: string }>(
       'SELECT id, notice_version FROM profiles WHERE id = ?',
-      profileId,
+      requestedProfileId ?? 'p_smk',
     );
-    if (!profile) fail(422, 'profile_not_found', 'Profil deployment tidak dikenal.');
+    if (!profile && !requestedProfileId) {
+      profile = await get<{ id: string; notice_version: string }>(
+        'SELECT id, notice_version FROM profiles ORDER BY id LIMIT 1',
+      );
+    }
+    if (!profile) {
+      fail(409, 'profile_missing', 'Profil deployment belum dikonfigurasi. Seed data profil terlebih dahulu.');
+    }
     const id = newId('s');
     const now = nowIso();
     await withTx(async () => {
