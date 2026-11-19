@@ -1,98 +1,133 @@
-# Svara · Modul 14
+# Svara
 
-Aplikasi full-stack untuk membuat survei berskala, menerbitkan versi tetap, mengumpulkan respons dengan persetujuan, dan menyajikan hasil agregat serta ekspor terbatas.
+Aplikasi survei berbasis versi. Creator menyusun instrumen, menerbitkan tautan per versi, mengumpulkan jawaban dengan persetujuan, lalu membaca hasil agregat dan mengekspor data sesuai izin tiap akun.
 
-> Data awal **sintetis**. Tidak ada pekerjaan lapangan, peserta nyata, atau klaim kepatuhan hukum di repositori ini. Skrip AC13/AC15/AC16 adalah **DEMO ONLY**, bukan bukti kapasitas produksi atau audit pihak ketiga.
+Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Express, skema PostgreSQL, data demo sintetis, dan skrip verifikasi. Seluruh basis data bersifat sintetis. Tidak ada peserta nyata, pekerjaan lapangan, atau klaim kepatuhan hukum, jadi proyek ini bukan produk siap pakai.
 
-Sumber kebenaran produk: `PRD.md` dan `DESIGN.md`.
+**Daftar isi**
 
-## Menjalankan
+- [Fitur](#fitur)
+- [Teknologi](#teknologi)
+- [Mulai cepat](#mulai-cepat)
+- [Alur pemakaian](#alur-pemakaian)
+- [Arsitektur](#arsitektur)
+- [Rute](#rute)
+- [Keamanan dan privasi](#keamanan-dan-privasi)
+- [Konfigurasi](#konfigurasi)
+- [Basis data dan migrasi](#basis-data-dan-migrasi)
+- [Menjalankan](#menjalankan)
+- [Pengujian](#pengujian)
+- [Deployment](#deployment)
+- [Akun dan tautan demo](#akun-dan-tautan-demo)
+- [Skrip demo](#skrip-demo)
+- [Dokumentasi](#dokumentasi)
+- [Batasan](#batasan-yang-disengaja)
+- [Lisensi](#lisensi)
 
-Prasyarat: Node.js 24 atau lebih baru, PostgreSQL 16/17, pnpm 11.
+## Fitur
+
+| Area | Isi |
+| --- | --- |
+| Instrumen | Editor pertanyaan Likert, pilihan tunggal, dan isian singkat; kode item unik; validasi sebelum simpan dan sebelum terbit |
+| Versi | Terbitkan, duplikasi, tutup, dan arsipkan versi; tautan selalu menunjuk satu versi tetap |
+| Distribusi | Tautan umum dan undangan individual berkode, dengan status, masa berlaku, dan pencabutan |
+| Pengumpulan | Persetujuan tercatat di server, kiriman idempoten, bukti terima yang dapat dibuka kembali |
+| Hasil | Agregat per versi, ekspor CSV, dan codebook per versi |
+| Akses | Sesi cookie HttpOnly, guard peran di server, izin baca/ekspor/teks bebas per akun dan survei, audit log append-only |
+| UI | Tata letak responsif dari lebar ponsel, navigasi keyboard, dialog konfirmasi native, pesan galat terhubung ke field |
+
+## Teknologi
+
+- Next.js 16 (App Router, React 19) untuk UI dan middleware CSP.
+- Express 5 untuk API, aturan akses, dan audit.
+- PostgreSQL 17 dengan migrasi SQL versioned, diakses lewat `pg` Pool.
+- Tailwind CSS 4, TypeScript, pnpm.
+- Docker Compose untuk basis data lokal dan deployment `web` / `api` / `db`.
+
+## Mulai cepat
+
+Prasyarat: Node.js 24 atau lebih baru, PostgreSQL 16/17, pnpm 11, dan Docker Desktop untuk basis data lokal.
 
 ```bash
 pnpm install
-docker compose up -d db      # PostgreSQL lokal 127.0.0.1:5432 (role aplikasi non-superuser)
-export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
-SEED_DEMO=1 pnpm db:reset    # reset schema + migrasi + data sintetis
-pnpm dev                     # API 127.0.0.1:3001 + Next.js 127.0.0.1:3000
-```
-
-PowerShell: `$env:DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'; $env:SEED_DEMO='1'; pnpm db:reset`.
-
-Buka `http://127.0.0.1:3000`. `DATABASE_URL` adalah satu-satunya sumber data runtime. Tidak ada fallback SQLite.
-
-`pnpm dev` menjalankan dua proses: Express di `:3001` dan Next.js di `:3000`. Browser hanya memanggil origin web; rewrite Next meneruskan `/api/:path*` ke `API_ORIGIN`.
-
-Produksi lokal:
-
-```bash
-pnpm build
-pnpm start          # API :3001 + Next production :3000; migrasi berjalan saat startup API
-```
-
-Server menjalankan migrasi versioned sebelum menerima permintaan. Untuk basis data kosong, jalankan `pnpm admin:bootstrap` agar ada akun admin.
-
-### Ingress produksi
-
-Pisahkan trafik di reverse proxy/load balancer:
-
-| Path | Tujuan |
-| --- | --- |
-| `/api/*` | Express (`api:3001`) |
-| semua path lain | Next.js (`web:3000`) |
-
-Dengan pembagian ini Next tidak memproksikan API di produksi. Rewrite `/api/:path*` tetap ada untuk pengembangan dan deployment satu-origin; jangan mengandalkannya sebagai jalur produksi.
-
-## Migrasi basis data
-
-- `server/migrations/*.sql` diterapkan berurutan dan dicatat di `schema_migrations` (versi + checksum).
-- Runner (`server/migrate.ts`) memakai advisory lock, satu transaksi per migrasi, dan rollback bila gagal.
-- `pnpm db:migrate` menerapkan migrasi yang belum ada.
-- `SEED_DEMO=1 pnpm db:reset` menghapus schema `public`, menerapkan semua migrasi, lalu memuat data sintetis.
-- `pnpm test` memakai basis data uji terpisah (`TEST_DATABASE_URL`), me-reset schema, lalu menjalankan migrasi.
-- Migrasi mengubah checksum yang sudah tercatat akan ditolak; buat file migrasi baru, jangan edit yang sudah dirilis.
-- Data SQLite lama tidak diimpor otomatis oleh perubahan ini. Ekspor/impor data nyata harus dilakukan sebagai prosedur terpisah dengan verifikasi.
-
-## Docker
-
-Tiga layanan terpisah: `web` (Next.js standalone), `api` (Express), `db` (Postgres).
-
-```bash
-docker compose build
 docker compose up -d db
-docker compose run --rm \
-  -e BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
-  -e BOOTSTRAP_ADMIN_NAME=Administrator \
-  -e BOOTSTRAP_ADMIN_PASSWORD='Sandi-Kuat-Dari-Secret-Manager-2026!' \
-  api tsx server/scripts/bootstrap-admin.ts
-docker compose up -d
+export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
+SEED_DEMO=1 pnpm db:reset
+pnpm dev
 ```
 
-- `db` memakai `postgres:17-alpine` dengan healthcheck dan volume `svara_pgdata`.
-- Peran aplikasi `svara` dibuat oleh `docker/postgres/init/01-app-role.sh`: LOGIN, bukan superuser, tanpa CREATEDB/CREATEROLE; hanya memiliki basis data `svara`.
-- `POSTGRES_PASSWORD`, `POSTGRES_USER`, dan `POSTGRES_DB` dapat dioverride; `DATABASE_URL` aplikasi dirakit dari nilai yang sama.
-- `api` menjalankan `tsx server/index.ts` pada `:3001`, tanpa static hosting.
-- `web` menjalankan output `standalone` Next.js pada `:3000`; guard server membaca `API_INTERNAL_URL=http://api:3001`.
-- Rewrite web dibekukan saat build (`API_ORIGIN_BUILD`, default `http://api:3001`). Untuk produksi, arahkan ingress `/api/*` langsung ke `api` seperti tabel di atas.
-- Port host hanya bind ke `127.0.0.1:3000` (web), `127.0.0.1:3001` (api), dan `127.0.0.1:5432` (db); letakkan reverse proxy/TLS di depan web.
-- Set `APP_ORIGIN` ke origin publik web (boleh beberapa origin dipisah koma), lalu `COOKIE_SECURE=1` dan `ENABLE_HSTS=1` setelah HTTPS aktif.
-- Jangan set `SEED_DEMO=1` di production; container API memakai `NODE_ENV=production` dan akan menolak startup.
+PowerShell:
 
-Perintah verifikasi:
-
-```bash
-pnpm typecheck      # next typegen + TypeScript web + server
-pnpm lint           # ESLint
-pnpm test           # typecheck + migrasi + suite HTTP + seed gate (butuh PostgreSQL uji)
-pnpm build          # typecheck + next build
-pnpm db:migrate     # terapkan migrasi ke DATABASE_URL
-SMOKE_WEB_ORIGIN=http://127.0.0.1:3000 \
-  SMOKE_EMAIL=admin@example.org SMOKE_PASSWORD='...' \
-  pnpm smoke:web    # root, login, CSP nonce, rewrite health, login + bootstrap
+```powershell
+$env:DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
+$env:SEED_DEMO='1'
+pnpm db:reset
+pnpm dev
 ```
+
+Buka `http://127.0.0.1:3000` dan masuk sebagai `creator.a@svara.local` dengan sandi `SvaraDemo123!`. Daftar survei berisi tiga contoh milik akun itu. Buka salah satunya untuk melihat editor, publikasi, tautan responden, dan hasil.
+
+Tanpa `SEED_DEMO=1` basis data tetap kosong dan admin pertama dibuat lewat `pnpm admin:bootstrap`.
+
+## Alur pemakaian
+
+1. Creator menyusun draf instrumen: judul, tujuan, petunjuk, pertanyaan, opsi, dan kode item.
+2. Draf diterbitkan menjadi versi tetap. Tautan umum dan undangan menunjuk versi itu.
+3. Responden membuka tautan, membaca pemberitahuan, memberi persetujuan, mengisi, lalu menerima bukti kirim.
+4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah.
+5. Perubahan berikutnya membuat versi baru; versi lama tetap terbaca dan dapat ditutup.
+
+## Arsitektur
+
+```text
+Browser
+  |
+  v
+Next.js :3000  --rewrite /api/:path*-->  Express :3001  -->  PostgreSQL 17
+rute UI, metadata,                       sesi, izin,         satu-satunya
+middleware CSP nonce                     audit, migrasi      sumber data
+```
+
+Next.js merender UI di server dan memanggil API lewat rewrite `/api/:path*`. Express memegang seluruh aturan akses, transaksi, dan audit. PostgreSQL adalah satu-satunya sumber data runtime.
+
+### Peta kode
+
+```text
+server/          Express: rute API, migrasi SQL, seed, skrip demo, uji
+src/app/         Rute Next.js, layout, metadata
+src/proxy.ts     Middleware: CSP nonce dan header keamanan
+src/screens/     Layar per area: creator, responden, admin
+src/components/  Shell, navigasi, dialog, toast, primitif UI
+src/lib/         Klien API, store bootstrap, guard navigasi, util
+docs/            Bukti uji demo
+scripts/         Smoke test web
+```
+
+- `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
+- `server/migrations/` berisi skema 21 tabel dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum.
+- `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/bootstrap` untuk guard peran di server component.
+- `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
+- `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
+- `src/components/ui.tsx` memuat primitif bersama: `Field` dengan `aria-invalid`/`aria-describedby`, `ActionLink` dengan `disabledReason`, `ConfirmDialog` berbasis `<dialog>` native, dan `Toast` dengan `role="alert"` untuk galat.
+
+## Rute
+
+`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]`, `/s/[token]/form`, `/s/[token]/review`, `/s/[token]/receipt`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain.
+
+`/s` dan `/s/[token]/*` publik tanpa guard. `/creator` menolak `super_admin`, `/admin` menolak peran creator. Setiap route `/creator/surveys/[id]/*` memeriksa kepemilikan dan merender "Survei tidak ditemukan" untuk survei milik akun lain.
+
+## Keamanan dan privasi
+
+- Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt`, dan header `X-Svara-Client` untuk mutasi.
+- Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses.
+- Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
+- Respons publik disimpan dengan kunci idempotensi; bukti hanya dapat dibuka dengan kunci yang sama.
+- Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
+- Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
 
 ## Konfigurasi
+
+Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan commit nilai rahasia produksi.
 
 | Variabel | Default | Keterangan |
 | --- | --- | --- |
@@ -115,11 +150,9 @@ SMOKE_WEB_ORIGIN=http://127.0.0.1:3000 \
 | `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis; hanya dipakai bila `SEED_DEMO=1` |
 | `AC15_ADMIN_DATABASE_URL` | `DATABASE_URL` | Koneksi berizin `CREATE DATABASE` untuk demo AC15 |
 
-Contoh ada di `.env.example`. Jangan commit nilai rahasia produksi.
+### Bootstrap admin
 
-## Bootstrap admin produksi
-
-Server tidak lagi mengisi basis data kosong dengan akun demo secara otomatis. Untuk deployment baru, buat admin pertama secara eksplisit:
+Server tidak mengisi basis data kosong dengan akun demo. Untuk deployment baru, buat admin pertama secara eksplisit:
 
 ```bash
 BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
@@ -128,43 +161,100 @@ BOOTSTRAP_ADMIN_PASSWORD='Sandi-Kuat-Dari-Secret-Manager-2026!' \
 pnpm admin:bootstrap
 ```
 
-- `BOOTSTRAP_ADMIN_PASSWORD` minimal 12 karakter dan memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol.
-- Script idempoten: email yang sudah menjadi `super_admin` tidak ditimpa.
-- Jangan menaruh sandi nyata di shell history, `.env` yang ter-commit, atau argumen command line; gunakan secret manager/environment.
-- `NODE_ENV=production SEED_DEMO=1` akan menghentikan startup. Data demo hanya untuk lokal/CI.
+`BOOTSTRAP_ADMIN_PASSWORD` minimal 12 karakter dan memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol. Script idempoten: email yang sudah menjadi `super_admin` tidak ditimpa. Jangan menaruh sandi nyata di shell history, `.env` yang ter-commit, atau argumen command line; gunakan secret manager atau environment. `NODE_ENV=production SEED_DEMO=1` menghentikan startup.
 
 ### Registrasi creator
 
-`/auth/register` membuat akun baru dengan peran `creator`, langsung memasang sesi, dan mengarahkan ke `/creator`. Backend memberlakukan email unik, sandi 12-256 karakter dengan minimal tiga kelas karakter, persetujuan kebijakan/ketentuan, rate limit per alamat IP, dan mencatat registrasi ke audit log.
+`/auth/register` membuat akun baru dengan peran `creator`, memasang sesi, dan mengarahkan ke `/creator`. Backend memberlakukan email unik, sandi 12-256 karakter dengan minimal tiga kelas karakter, persetujuan kebijakan/ketentuan, rate limit per alamat IP, dan mencatat registrasi ke audit log.
 
 Versi dan waktu persetujuan disimpan di `accounts.consent_version` dan `accounts.consent_accepted_at`, serta metadata audit `Registrasi`. Naikkan `CURRENT_CONSENT_VERSION` di `server/routes/auth.ts` ketika teks kebijakan privasi atau ketentuan layanan berubah; akun lama tetap `NULL` karena dibuat sebelum bukti persetujuan ada.
 
-Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin tetap mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk.
+Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk.
 
-## Arsitektur
+## Basis data dan migrasi
 
-- `server/` — Express 5, PostgreSQL via `pg` Pool (semua akses data async), migrasi versioned, cookie sesi HttpOnly, hash kata sandi `scrypt`, header `X-Svara-Client` untuk mutasi, pembatasan laju kiriman, audit append-only.
-- `server/db.ts` — `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`; query di dalam `withTx` otomatis ikut transaksi dan rollback saat error.
-- `server/migrations/` — skema 21 tabel dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi + checksum.
-- `src/app/` — Next.js App Router (React 19, Node runtime) untuk semua rute UI; `src/screens/` menyimpan komponen layar lama tanpa perubahan perilaku.
-- `src/proxy.ts` — konvensi `middleware` Next.js 16: nonce CSP per request (tanpa `unsafe-inline` pada `script-src`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, dan HSTS saat `ENABLE_HSTS=1`.
-- `src/lib/server/guards.ts` — guard role server untuk `/creator` dan `/admin`: baca cookie sesi, panggil `/api/v1/bootstrap` di `API_INTERNAL_URL`, redirect ke `/auth/login` bila belum masuk. Tidak mengimpor store klien.
-- `src/lib/api.ts` — kontrak HTTP; `src/lib/store.ts` — snapshot untuk render dan aksi, tetap memuat bootstrap di klien dan mengirim semua mutasi ke `/api/v1`.
-- Respons publik disimpan dengan kunci idempotensi dan bukti yang hanya dapat dibuka dengan kunci yang sama.
-- Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses.
-- Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
+- `server/migrations/*.sql` diterapkan berurutan dan dicatat di `schema_migrations` (versi + checksum).
+- Runner (`server/migrate.ts`) memakai advisory lock, satu transaksi per migrasi, dan rollback bila gagal.
+- `pnpm db:migrate` menerapkan migrasi yang belum ada.
+- `SEED_DEMO=1 pnpm db:reset` menghapus schema `public`, menerapkan semua migrasi, lalu memuat data sintetis.
+- `pnpm test` memakai basis data uji terpisah (`TEST_DATABASE_URL`), me-reset schema, lalu menjalankan migrasi.
+- Migrasi yang mengubah checksum yang sudah tercatat ditolak; buat file migrasi baru, jangan edit yang sudah dirilis.
+- Data SQLite lama tidak diimpor otomatis. Ekspor/impor data nyata harus jadi prosedur terpisah dengan verifikasi.
 
-### Rute
+## Menjalankan
 
-UI mempertahankan URL lama:
+```bash
+pnpm dev     # API :3001 + Next.js :3000
+pnpm build
+pnpm start   # API + Next production, migrasi berjalan saat startup API
+```
 
-`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]/{,form,review,receipt}`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain. `/s` dan `/s/[token]/*` tetap publik tanpa guard.
+`pnpm dev` menjalankan dua proses: Express di `:3001` dan Next.js di `:3000`. Browser hanya memanggil origin web; rewrite Next meneruskan `/api/:path*` ke `API_ORIGIN`.
 
-`super_admin` yang membuka `/creator` mendapat tampilan “Akses ditolak”, dan peran creator yang membuka `/admin` juga ditolak; ini sama dengan guard klien sebelumnya.
+Migrasi berjalan saat startup API sebelum menerima permintaan. Untuk basis data kosong, jalankan `pnpm admin:bootstrap`.
 
-### Akun sintetis
+## Pengujian
 
-Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` (atau `SEED_DEMO=1 pnpm db:seed`). Sandi berasal dari `SEED_PASSWORD`; bila tidak diset, nilai demo lokal adalah `SvaraDemo123!` (hanya untuk data sintetis; jangan dipakai di production).
+```bash
+pnpm typecheck      # next typegen + TypeScript web + server
+pnpm lint           # ESLint
+pnpm build          # typecheck + next build
+pnpm db:migrate     # terapkan migrasi ke DATABASE_URL
+SMOKE_WEB_ORIGIN=http://127.0.0.1:3000 \
+  SMOKE_EMAIL=admin@example.org SMOKE_PASSWORD='...' \
+  pnpm smoke:web    # root, login, CSP nonce, rewrite health, login + bootstrap
+```
+
+Suite memakai basis data uji terpisah; tanpa `TEST_DATABASE_URL` skrip berhenti sebelum menyentuh data apa pun.
+
+```bash
+docker compose exec db psql -U postgres -c 'CREATE DATABASE svara_test OWNER svara'   # sekali saja
+TEST_DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara_test' pnpm test
+```
+
+`pnpm test` menjalankan `typecheck`, uji migrasi, suite HTTP, dan gate seed/policy. CI (`.github/workflows/ci.yml`) menjalankan migrasi, lint, `pnpm test`, `pnpm build`, lalu build image Docker dan smoke test terhadap API produksi.
+
+Jika Docker Desktop tidak berjalan, semua login mengembalikan `500` karena API kehilangan koneksi PostgreSQL; itu kegagalan lingkungan, bukan bug UI.
+
+## Deployment
+
+Tiga layanan terpisah: `web` (Next.js standalone), `api` (Express), dan `db` (Postgres).
+
+```bash
+docker compose build
+docker compose up -d db
+docker compose run --rm \
+  -e BOOTSTRAP_ADMIN_EMAIL=admin@example.org \
+  -e BOOTSTRAP_ADMIN_NAME=Administrator \
+  -e BOOTSTRAP_ADMIN_PASSWORD='Sandi-Kuat-Dari-Secret-Manager-2026!' \
+  api tsx server/scripts/bootstrap-admin.ts
+docker compose up -d
+```
+
+- `db` memakai `postgres:17-alpine` dengan healthcheck dan volume `svara_pgdata`.
+- Peran aplikasi `svara` dibuat oleh `docker/postgres/init/01-app-role.sh`: LOGIN, bukan superuser, tanpa CREATEDB/CREATEROLE; hanya memiliki basis data `svara`.
+- `POSTGRES_PASSWORD`, `POSTGRES_USER`, dan `POSTGRES_DB` dapat dioverride; `DATABASE_URL` aplikasi dirakit dari nilai yang sama.
+- `api` menjalankan `tsx server/index.ts` pada `:3001`, tanpa static hosting.
+- `web` menjalankan output `standalone` Next.js pada `:3000`; guard server membaca `API_INTERNAL_URL=http://api:3001`.
+- Rewrite web dibekukan saat build (`API_ORIGIN_BUILD`, default `http://api:3001`).
+- Port host hanya bind ke `127.0.0.1:3000` (web), `127.0.0.1:3001` (api), dan `127.0.0.1:5432` (db); letakkan reverse proxy/TLS di depan web.
+- Set `APP_ORIGIN` ke origin publik web (boleh beberapa origin dipisah koma), lalu `COOKIE_SECURE=1` dan `ENABLE_HSTS=1` setelah HTTPS aktif.
+- Jangan set `SEED_DEMO=1` di production; container API memakai `NODE_ENV=production` dan menolak startup.
+
+### Ingress produksi
+
+Pisahkan trafik di reverse proxy/load balancer:
+
+| Path | Tujuan |
+| --- | --- |
+| `/api/*` | Express (`api:3001`) |
+| semua path lain | Next.js (`web:3000`) |
+
+Dengan pembagian ini Next tidak memproksikan API di produksi. Rewrite `/api/:path*` tetap ada untuk pengembangan dan deployment satu-origin; jangan mengandalkannya sebagai jalur produksi.
+
+## Akun dan tautan demo
+
+Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. Sandi berasal dari `SEED_PASSWORD`; default lokal `SvaraDemo123!`.
 
 | Email | Peran | Cakupan awal |
 | --- | --- | --- |
@@ -174,16 +264,16 @@ Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` (atau `SEED_DEMO=1 pnpm db:seed`).
 | `admin@svara.local` | super_admin | Operasional; tidak otomatis boleh membaca jawaban |
 | `suspended@svara.local` | creator (suspended) | Ditolak saat masuk |
 
-### Tautan sintetis
+- `link-umum-demo`: survei SMK, mode wali, pemberitahuan sintetis.
+- `link-umum-perpus`: survei perpustakaan, persetujuan diri.
+- `undangan-demo`: undangan satu kali.
+- Kode undangan individual juga bisa dibuka dari halaman masuk lewat "Saya memiliki kode undangan".
 
-- `link-umum-demo` — survei SMK, mode wali, notice sintetis.
-- `link-umum-perpus` — survei perpustakaan, persetujuan diri.
-- `undangan-demo` — undangan satu kali.
-- Kode undangan individual juga dapat dibuka dari halaman masuk lewat “Saya memiliki kode undangan”.
+## Skrip demo
 
-## Bukti demo
+Tiga skrip memeriksa perilaku non-fungsional pada data sintetis. Semua keluaran berlabel DEMO ONLY: AC13 bukan uji kapasitas, AC15 bukan prosedur insiden, dan AC16 bukan studi lapangan. Kode `ACxx` merujuk butir penerimaan di `PRD.md`.
 
-Demo memakai `DATABASE_URL` yang menunjuk basis data bernama test/demo (ditolak untuk nama lain) dan me-reset schema-nya. `pnpm test` memakai `TEST_DATABASE_URL`.
+Demo memakai `DATABASE_URL` yang menunjuk basis data bernama test/demo (ditolak untuk nama lain) dan me-reset schema-nya.
 
 ```bash
 pnpm demo:ac13     # 30 kiriman paralel, 20 item, tulis docs/test-evidence/ac13-load.json
@@ -191,9 +281,7 @@ pnpm demo:ac15     # pg_dump, hapus satu respons, recreate DB, pg_restore, tulis
 pnpm demo:ac16     # tiga responden sintetis + rekonsiliasi CSV
 ```
 
-### AC15: prosedur pg_dump/pg_restore
-
-Demo membuat basis data sementara sendiri, bukan memakai ulang data yang ada:
+### Prosedur AC15: pg_dump dan pg_restore
 
 ```bash
 export AC15_ADMIN_DATABASE_URL='postgres://postgres:postgres_admin_dev@127.0.0.1:5432/postgres'
@@ -201,7 +289,7 @@ export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara_te
 pnpm demo:ac15
 ```
 
-Perintah yang diuji (dokumentasi operasional; ganti nama basis data/berkas):
+Perintah yang diuji (ganti nama basis data/berkas sesuai kebutuhan):
 
 ```bash
 pg_dump --dbname="$DATABASE_URL" --format=custom --file=backup.dump
@@ -214,13 +302,23 @@ pg_restore --dbname="$DATABASE_URL" --clean --if-exists --no-owner --no-privileg
 - Restore mengembalikan isi cadangan. Penghapusan data yang diminta setelah restore harus diulang dan dicatat; restore bukan alat penghapusan permanen.
 - Bukti ini tidak menguji cadangan terenkripsi, off-site, RPO/RTO, atau prosedur insiden.
 
-Semua keluaran berlabel **DEMO ONLY**. AC13 bukan uji kapasitas; AC15 bukan prosedur insiden; AC16 bukan studi lapangan. Angka dan keterbatasan ada di `docs/test-evidence/`.
+Angka dan keterbatasan tiap skrip ada di `docs/test-evidence/`.
+
+## Dokumentasi
+
+- [PRD.md](PRD.md): kebutuhan produk dan butir penerimaan `ACxx`.
+- [DESIGN.md](DESIGN.md): token warna, tipografi, radius, dan spesifikasi komponen.
+- [docs/test-evidence/](docs/test-evidence/): keluaran skrip demo AC13, AC15, AC16, dan tangkapan layar.
 
 ## Batasan yang disengaja
 
-- Integrasi Modul 13/15 disimulasikan; tidak ada jaringan lintas layanan nyata.
+- Integrasi ke sistem lain (pengumpulan data lintas layanan) disimulasikan; tidak ada jaringan lintas layanan nyata.
 - Tidak ada email, SMS, atau verifikasi identitas responden.
 - Retensi, kontak pengendali, dan transfer lintas negara tetap `null` sampai pengendali menetapkannya.
 - Teks kebijakan adalah template sintetis, bukan nasihat hukum.
 - Rate limit disimpan di proses; deployment multi-instance memerlukan penyimpanan bersama.
 - Backup demo memakai `VACUUM INTO` lokal; belum ada enkripsi, off-site, atau uji RPO/RTO.
+
+## Lisensi
+
+Repo ini belum menyertakan lisensi. Semua hak dipegang pemilik repo sampai lisensi ditambahkan.
