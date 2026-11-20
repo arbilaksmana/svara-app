@@ -24,6 +24,9 @@ export const ORGANIZATION_INVITATION_COLUMNS =
 /** Semua kode berumur 14 hari; migrasi 009 mengisi baris lama dan mewajibkan expires_at. */
 export const INVITATION_TTL_DAYS = 14;
 
+/** Batas jumlah kode terbaru yang dikembalikan daftar undangan organisasi. */
+export const INVITATION_LIST_LIMIT = 50;
+
 export function invitationStatus(
   row: Pick<OrganizationInvitationRow, 'expires_at' | 'revoked_at' | 'used_at'>,
   now: string,
