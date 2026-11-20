@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -11,6 +11,7 @@ import {
   Checkbox,
   Code,
   Divider,
+  Field,
   Label,
   Muted,
   Panel,
@@ -29,7 +30,9 @@ import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
 import { replayEvent, refreshBootstrap, saveGrants, setAdminStats, setIntegrationNote, useStore } from '../lib/store';
-import { adminSaveAccount, adminSaveGrants, adminStats, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, adminStats, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { ORGANIZATION_TYPE_LABEL } from '../lib/labels';
+import type { OrganizationType } from '../lib/types';
 
 /* ---------------- Ringkasan ---------------- */
 
@@ -141,6 +144,15 @@ export function AdminAccountsPage() {
   const [scopeExport, setScopeExport] = useState(false);
   const [scopeText, setScopeText] = useState(false);
   const [scopeBusy, setScopeBusy] = useState(false);
+  const [orgForm, setOrgForm] = useState({
+    name: '',
+    organization_type: 'school' as OrganizationType,
+    adminName: '',
+    adminEmail: '',
+    adminPassword: '',
+  });
+  const [orgBusy, setOrgBusy] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
   const mutationsBlocked = ['loading', 'validation', 'closed', 'permission-denied'].includes(state);
 
   useEffect(() => {
@@ -184,6 +196,32 @@ export function AdminAccountsPage() {
       })
       .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Status gagal diubah.', 'danger'))
       .finally(() => setAccountBusy(null));
+  };
+
+  const submitOrganization = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOrgError(null);
+    const name = orgForm.name.trim();
+    const displayName = orgForm.adminName.trim().replace(/\s+/g, ' ');
+    const email = orgForm.adminEmail.trim().toLowerCase();
+    if (!name || !displayName || !email || !orgForm.adminPassword) {
+      setOrgError('Nama organisasi, nama admin, email, dan kata sandi awal wajib diisi.');
+      return;
+    }
+    setOrgBusy(true);
+    void adminCreateOrganization({
+      name,
+      organization_type: orgForm.organization_type,
+      admin: { display_name: displayName, email, password: orgForm.adminPassword },
+    })
+      .then((created) => {
+        notify(`Organisasi ${created.organization.name} dibuat dengan admin ${created.account.display_name}.`);
+        setOrgForm({ name: '', organization_type: 'school', adminName: '', adminEmail: '', adminPassword: '' });
+        // Data sudah tersimpan di server; kegagalan menyegarkan snapshot tidak boleh tampil sebagai kegagalan pembuatan.
+        void refreshBootstrap().catch(() => undefined);
+      })
+      .catch((error: unknown) => setOrgError(error instanceof Error ? error.message : 'Organisasi gagal dibuat.'))
+      .finally(() => setOrgBusy(false));
   };
 
   return (
@@ -303,6 +341,101 @@ export function AdminAccountsPage() {
                 </li>
               ))}
             </ul>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionTitle>Organisasi</SectionTitle>
+            <p className="text-body-sm text-muted">
+              Organisasi baru langsung mendapat admin pertama yang mengatur profil, anggota, dan undangannya.
+              Responden dewasa dengan persetujuan diri dipakai sebagai awal; admin organisasi dapat mengubahnya di halaman Organisasi.
+            </p>
+            <ul className="flex flex-col gap-2">
+              {organizations.map((organization) => (
+                <li key={organization.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-n200 p-3">
+                  <div className="min-w-0">
+                    <p className="text-body font-bold text-ink">{organization.name}</p>
+                    <p className="mt-1 font-mono text-annotation tracking-mono text-muted"><Code>{organization.id}</Code></p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="neutral">{ORGANIZATION_TYPE_LABEL[organization.organization_type]}</Badge>
+                    <span className="text-caption text-muted">
+                      {accounts.filter((a) => a.organization_id === organization.id).length} akun
+                    </span>
+                  </div>
+                </li>
+              ))}
+              {organizations.length === 0 && <li className="text-body-sm text-muted">Belum ada organisasi.</li>}
+            </ul>
+            <Divider />
+            <form className="flex flex-col gap-4" noValidate onSubmit={submitOrganization}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field id="org-new-name" label="Nama organisasi" required>
+                  {(aria) => (
+                    <TextInput
+                      {...aria}
+                      value={orgForm.name}
+                      onChange={(event) => setOrgForm((current) => ({ ...current, name: event.target.value }))}
+                      autoComplete="organization"
+                    />
+                  )}
+                </Field>
+                <Field id="org-new-type" label="Tipe organisasi" required>
+                  {(aria) => (
+                    <select
+                      {...aria}
+                      value={orgForm.organization_type}
+                      onChange={(event) => setOrgForm((current) => ({ ...current, organization_type: event.target.value as OrganizationType }))}
+                      className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
+                    >
+                      {(['school', 'organization'] as OrganizationType[]).map((value) => (
+                        <option key={value} value={value}>{ORGANIZATION_TYPE_LABEL[value]}</option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <Field id="org-new-admin-name" label="Nama admin pertama" required>
+                  {(aria) => (
+                    <TextInput
+                      {...aria}
+                      value={orgForm.adminName}
+                      onChange={(event) => setOrgForm((current) => ({ ...current, adminName: event.target.value }))}
+                      autoComplete="off"
+                    />
+                  )}
+                </Field>
+                <Field id="org-new-admin-email" label="Email admin" required hint="Dipakai untuk masuk pertama kali.">
+                  {(aria) => (
+                    <TextInput
+                      {...aria}
+                      type="email"
+                      value={orgForm.adminEmail}
+                      onChange={(event) => setOrgForm((current) => ({ ...current, adminEmail: event.target.value }))}
+                      autoComplete="off"
+                    />
+                  )}
+                </Field>
+                <Field
+                  id="org-new-admin-password"
+                  label="Kata sandi awal"
+                  required
+                  hint="12–256 karakter, minimal tiga dari: huruf kecil, huruf besar, angka, simbol."
+                >
+                  {(aria) => (
+                    <TextInput
+                      {...aria}
+                      type="password"
+                      value={orgForm.adminPassword}
+                      onChange={(event) => setOrgForm((current) => ({ ...current, adminPassword: event.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  )}
+                </Field>
+              </div>
+              {orgError && <Banner tone="danger" title="Tidak dapat membuat organisasi">{orgError}</Banner>}
+              <Button type="submit" loading={orgBusy} disabled={orgBusy || mutationsBlocked}>
+                Buat organisasi
+              </Button>
+            </form>
           </Card>
 
           <Card className="flex flex-col gap-4">

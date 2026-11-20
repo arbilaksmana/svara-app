@@ -792,6 +792,100 @@ test('Super admin menetapkan organisasi akun dan lingkupnya berlaku pada permint
   assert.equal(data<{ organization_id: string | null }>(restored).organization_id, null);
 });
 
+test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () => {
+  const admin = await session('admin@svara.local');
+  const email = 'admin.baru@svara.local';
+  const payload = {
+    name: 'SMA Harapan Baru (sintetis)',
+    organization_type: 'school',
+    respondent_age_category: 'minor',
+    consent_mode: 'guardian',
+    admin: { display_name: 'Dewi Lestari', email, password: 'SvaraBaru123!x' },
+  };
+
+  const forbidden = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: await session('creator.a@svara.local'),
+    body: payload,
+  });
+  assert.equal(forbidden.status, 403);
+
+  const mismatch = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: admin,
+    body: { ...payload, admin: { ...payload.admin, email: 'lain@svara.local' }, consent_mode: 'self' },
+  });
+  assert.equal(mismatch.status, 422);
+  assert.equal((mismatch.json as { code?: string } | null)?.code, 'consent_mode_mismatch');
+
+  const weak = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: admin,
+    body: { ...payload, admin: { ...payload.admin, email: 'lemah@svara.local', password: 'pendek' } },
+  });
+  assert.equal(weak.status, 422);
+  assert.equal((weak.json as { code?: string } | null)?.code, 'weak_password');
+
+  const taken = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: admin,
+    body: { ...payload, admin: { ...payload.admin, email: 'admin@svara.local' } },
+  });
+  assert.equal(taken.status, 409);
+  assert.equal((taken.json as { code?: string } | null)?.code, 'email_taken');
+
+  const created = await call('/admin/organizations', { method: 'POST', cookie: admin, body: payload });
+  assert.equal(created.status, 201);
+  const result = data<{
+    organization: { id: string; name: string; organization_type: string; respondent_age_category: string; consent_mode: string };
+    account: { id: string; role: string; status: string; organization_id: string | null; email: string };
+  }>(created);
+  assert.equal(result.organization.name, payload.name);
+  assert.equal(result.organization.organization_type, 'school');
+  assert.equal(result.organization.respondent_age_category, 'minor');
+  assert.equal(result.organization.consent_mode, 'guardian');
+  assert.equal(result.account.role, 'org_admin');
+  assert.equal(result.account.status, 'active');
+  assert.equal(result.account.organization_id, result.organization.id);
+  assert.equal(result.account.email, email);
+
+  const bootstrap = data<{
+    accounts: Array<{ id: string; role: string; organization_id: string | null }>;
+    organizations: Array<{ id: string; name: string }>;
+  }>(await call('/bootstrap', { cookie: admin }));
+  assert.ok(bootstrap.organizations.some((organization) => organization.id === result.organization.id));
+  assert.equal(bootstrap.accounts.find((row) => row.id === result.account.id)?.role, 'org_admin');
+
+  const fresh = await login(email, 'SvaraBaru123!x');
+  const profile = data<{ source: string; profile: { organization_name: string } }>(
+    await call('/org/profile', { cookie: fresh }),
+  );
+  assert.equal(profile.source, 'organization');
+  assert.equal(profile.profile.organization_name, payload.name);
+
+  const stored = new Client({ connectionString: databaseUrl });
+  await stored.connect();
+  try {
+    const audit = await stored.query("SELECT metadata FROM audit_logs WHERE object = $1 ORDER BY at DESC LIMIT 1", [
+      result.organization.id,
+    ]);
+    const metadata = JSON.parse(String(audit.rows[0]?.metadata ?? '{}')) as { admin_account_id?: string };
+    assert.equal(metadata.admin_account_id, result.account.id);
+  } finally {
+    try {
+      // audit_logs menahan akun lewat account_id (login/admin), jadi bersihkan barisnya dulu.
+      await stored.query('DELETE FROM audit_logs WHERE object = $1 OR object = $2 OR account_id = $2', [
+        result.organization.id,
+        result.account.id,
+      ]);
+      await stored.query('DELETE FROM accounts WHERE id = $1', [result.account.id]);
+      await stored.query('DELETE FROM organizations WHERE id = $1', [result.organization.id]);
+    } finally {
+      await stored.end();
+    }
+  }
+});
+
 test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
   const admin = await session('admin@svara.local');
   const stats = data<{
