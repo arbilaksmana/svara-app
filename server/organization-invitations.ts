@@ -10,7 +10,7 @@ export interface OrganizationInvitationRow {
   code: string;
   created_by: string;
   created_at: string;
-  expires_at: string | null;
+  expires_at: string;
   revoked_at: string | null;
   used_at: string | null;
   used_by: string | null;
@@ -21,7 +21,7 @@ export type OrganizationInvitationStatus = 'active' | 'used' | 'revoked' | 'expi
 export const ORGANIZATION_INVITATION_COLUMNS =
   'id, organization_id, code, created_by, created_at, expires_at, revoked_at, used_at, used_by';
 
-/** Kode baru selalu berumur 14 hari; baris lama dengan expires_at NULL dianggap tanpa batas. */
+/** Semua kode berumur 14 hari; migrasi 009 mengisi baris lama dan mewajibkan expires_at. */
 export const INVITATION_TTL_DAYS = 14;
 
 export function invitationStatus(
@@ -30,7 +30,7 @@ export function invitationStatus(
 ): OrganizationInvitationStatus {
   if (row.used_at) return 'used';
   if (row.revoked_at) return 'revoked';
-  if (row.expires_at && row.expires_at <= now) return 'expired';
+  if (row.expires_at <= now) return 'expired';
   return 'active';
 }
 

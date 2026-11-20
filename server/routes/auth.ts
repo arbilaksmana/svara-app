@@ -179,8 +179,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           // menutup balapan dengan pencabutan atau kode yang kedaluwarsa saat transaksi berjalan.
           const consumed = await run(
             `UPDATE organization_invitations SET used_at = ?, used_by = ?
-              WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL
-                AND (expires_at IS NULL OR expires_at > ?)`,
+              WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
             acceptedAt,
             accountId,
             invitation.id,

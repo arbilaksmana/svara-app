@@ -183,7 +183,7 @@ Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; 
 | `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:67-159`) |
 | `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:160-174`) |
 | `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor (`server/routes/org.ts:175-199`) |
-| `GET /org/invitations` | Daftar kode organisasi sesi; status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu, bukan disimpan (`server/routes/org.ts:200-220`) |
+| `GET /org/invitations` | Daftar kode organisasi sesi; status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan (`server/routes/org.ts:200-220`) |
 | `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi, berlaku 14 hari (`server/routes/org.ts:221-257`) |
 | `DELETE /org/invitations/:id` | Mencabut kode yang belum terpakai; kode terpakai ditolak `409 invitation_used`, kode organisasi lain dijawab `404 invitation_not_found`, pencabutan ulang tetap `200` (`server/routes/org.ts:258-291`) |
 | `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 (`server/routes/org.ts:292-307`) |
@@ -192,7 +192,7 @@ Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body at
 
 ### Onboarding creator lewat kode undangan organisasi
 
-1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual; kode berlaku 14 hari dan dapat dicabut dari tabel undangan sebelum terpakai (`server/routes/org.ts:221-291`).
+1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual; setiap kode berlaku tepat 14 hari sejak dibuat (`expires_at` wajib terisi, termasuk untuk baris lama yang di-backfill migrasi 009) dan dapat dicabut dari tabel undangan sebelum terpakai (`server/routes/org.ts:221-291`).
 2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`src/screens/Register.tsx:103`, `src/screens/Register.tsx:185`).
 3. `POST /auth/register` mencari kode lalu menolak `422 invalid_invite_code` bila kode asing, sudah dipakai, dicabut, atau kedaluwarsa — alasan spesifik tidak dibocorkan (`server/routes/auth.ts:147-159`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama; guard `WHERE` menutup balapan dengan pencabutan (`server/routes/auth.ts:162-192`).
 4. Tanpa `invite_code`, akun dibuat tanpa organisasi.
@@ -290,6 +290,7 @@ Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban
 - `SEED_DEMO=1 pnpm db:reset` menghapus schema `public`, menerapkan semua migrasi, lalu memuat data sintetis.
 - `pnpm test` memakai basis data uji terpisah (`TEST_DATABASE_URL`), me-reset schema, lalu menjalankan migrasi.
 - Migrasi yang mengubah checksum yang sudah tercatat ditolak; buat file migrasi baru, jangan edit yang sudah dirilis.
+- Masa berlaku kode undangan organisasi (`organization_invitations.expires_at`) wajib terisi sejak `009_organization_invitation_expiry_backfill.sql`. Migrasi itu mengisi baris lama dengan `created_at + 14 hari` (ISO-8601 UTC) lalu memasang `NOT NULL`; tidak ada lagi kode tanpa batas.
 - Data SQLite lama tidak diimpor otomatis. Ekspor/impor data nyata harus jadi prosedur terpisah dengan verifikasi.
 
 ## Menjalankan
