@@ -13,6 +13,7 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 - [Arsitektur](#arsitektur)
 - [Rute](#rute)
 - [Keamanan dan privasi](#keamanan-dan-privasi)
+- [Organisasi dan lingkup](#organisasi-dan-lingkup)
 - [Konfigurasi](#konfigurasi)
 - [Basis data dan migrasi](#basis-data-dan-migrasi)
 - [Menjalankan](#menjalankan)
@@ -33,7 +34,8 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 | Distribusi | Tautan umum dan undangan individual berkode, dengan status, masa berlaku, dan pencabutan |
 | Pengumpulan | Persetujuan tercatat di server, kiriman idempoten, bukti terima yang dapat dibuka kembali |
 | Hasil | Agregat per versi, ekspor CSV, dan codebook per versi |
-| Akses | Sesi cookie HttpOnly, guard peran di server, izin baca/ekspor/teks bebas per akun dan survei, audit log append-only |
+| Organisasi | Dua lingkup survei (individual dan organisasi), profil kebijakan per organisasi, anggota dan suspend, undangan creator, audit organisasi |
+| Akses | Sesi cookie HttpOnly, guard peran di server, izin baca/ekspor/teks bebas per akun dan survei, audit log append-only dengan `account_id` dan `organization_id` |
 | UI | Tata letak responsif dari lebar ponsel, navigasi keyboard, dialog konfirmasi native, pesan galat terhubung ke field |
 
 ## Teknologi
@@ -114,18 +116,90 @@ scripts/         Smoke test web
 
 ## Rute
 
-`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]`, `/s/[token]/form`, `/s/[token]/review`, `/s/[token]/receipt`, `/admin`, `/admin/{accounts,audit,integration,requests}`, dan 404 untuk path lain.
+`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]`, `/s/[token]/form`, `/s/[token]/review`, `/s/[token]/receipt`, `/admin`, `/admin/{accounts,audit,integration,requests,org}`, dan 404 untuk path lain.
 
-`/s` dan `/s/[token]/*` publik tanpa guard. `/creator` menolak `super_admin`, `/admin` menolak peran creator. Setiap route `/creator/surveys/[id]/*` memeriksa kepemilikan dan merender "Survei tidak ditemukan" untuk survei milik akun lain.
+`/s` dan `/s/[token]/*` publik tanpa guard. `/creator` menolak `super_admin`, `/admin` hanya untuk `super_admin`, dan `/admin/org` hanya untuk `org_admin` yang terikat organisasi. Setiap route `/creator/surveys/[id]/*` memeriksa kepemilikan dan merender "Survei tidak ditemukan" untuk survei milik akun lain.
 
 ## Keamanan dan privasi
 
 - Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt`, dan header `X-Svara-Client` untuk mutasi.
-- Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses.
+- Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
 - Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
+- Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
+- Lingkup `/org/*` selalu diambil dari sesi (`accounts.organization_id`), tidak pernah dari body atau query; akun tanpa organisasi ditolak `403`.
+- Setiap baris audit mencatat `account_id` pelaku dan `organization_id` dari sesi, sehingga baca jawaban individual, ekspor CSV, dan ekspor kodebook dapat ditelusuri per organisasi. `super_admin` tanpa organisasi menulis `organization_id` NULL.
 - Respons publik disimpan dengan kunci idempotensi; bukti hanya dapat dibuka dengan kunci yang sama.
 - Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
 - Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
+
+## Organisasi dan lingkup
+
+Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
+
+- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `respondent_age_category`, `consent_mode`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql:5-16`, `server/migrations/006_organization_profile.sql:4-5`).
+- `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql:18-30`).
+- `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql:32-33`).
+
+### Lingkup survei saat dibuat
+
+`POST /surveys` menerima `owner_scope`: `individual` atau `organization`; nilai lain ditolak `422` dan nilai kosong berarti `individual` (`server/routes/surveys.ts:309-313`). Hanya `creator` yang boleh membuat survei (`server/routes/surveys.ts:306`).
+
+- `individual` menyimpan `surveys.organization_id = NULL`; survei menjadi milik pembuatnya (`server/routes/surveys.ts:318`).
+- `organization` menyalin `accounts.organization_id` akun pembuat ke survei; akun tanpa organisasi ditolak `403` (`server/routes/surveys.ts:315-318`).
+- `surveys.profile_id` tetap wajib dan masih merujuk baris `profiles` sintetis (`server/routes/surveys.ts:319-328`). Kebijakan yang dipakai survei dibaca dari `organization_id`, bukan dari `profile_id`.
+
+Apa artinya untuk visibilitas (`server/http.ts:108-144`):
+
+| Akun | Daftar survei | Mengelola |
+| --- | --- | --- |
+| `super_admin` | Semua survei | Semua survei |
+| `org_admin` | Survei dengan `organization_id` organisasinya | Survei organisasinya saja; survei `organization_id` NULL tidak pernah jatuh ke `org_admin` |
+| `creator` | Survei miliknya | Survei miliknya |
+| Selain itu | Survei yang diberi grant | Tidak ada, hanya grant |
+
+Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`server/http.ts:108-116`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
+
+### Sumber kebijakan dan notice
+
+- Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`server/http.ts:191-201`, `server/http.ts:218-234`, dipakai `server/routes/surveys.ts:158`).
+- `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`server/routes/surveys.ts:329-330`).
+
+### Siapa boleh membaca jawaban dan teks bebas
+
+- Pemilik survei dan `org_admin` organisasi survei itu membaca penuh: jawaban individual, teks bebas, agregat, ekspor, dan kodebook (`server/http.ts:169-184`).
+- `super_admin` tidak otomatis membaca jawaban individual; tanpa grant permintaan ditolak `403` (`server/http.ts:170-174`, diuji di `server/test/api.test.ts:1026-1029`).
+- Pemegang grant tetap terikat `survey_settings`: grant `can_read_individual` hanya berlaku bila `allow_individual` aktif, dan grant `can_read_aggregate` hanya berlaku bila `allow_results` aktif (`server/http.ts:154-178`).
+- Setiap baca individual dan ekspor dicatat dengan `account_id` pelaku serta `organization_id` sesi, berhasil maupun ditolak (`server/http.ts:297-305`, diuji di `server/test/api.test.ts:1030-1054`).
+
+### Permukaan admin organisasi
+
+`/admin/org` adalah satu layar untuk `org_admin`: profil organisasi, anggota dan suspend, kode undangan creator, dan log audit organisasi (`src/app/admin/org/page.tsx:10-14`, `src/screens/Org.tsx:343-360`). Semua endpoint memakai awalan `/api/v1` dan hanya menerima `org_admin` yang terikat organisasi:
+
+| Endpoint | Perilaku |
+| --- | --- |
+| `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` (`server/routes/org.ts:44-58`) |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:60-134`) |
+| `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:152-163`) |
+| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor (`server/routes/org.ts:166-190`) |
+| `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi (`server/routes/org.ts:192-211`) |
+| `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 (`server/routes/org.ts:214-228`) |
+
+Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body atau query, dan akun tanpa organisasi ditolak `403` sebelum data apa pun disentuh (`server/routes/org.ts:137-150`).
+
+### Onboarding creator lewat kode undangan organisasi
+
+1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual (`server/routes/org.ts:195-201`).
+2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`src/screens/Register.tsx:103`, `src/screens/Register.tsx:175-178`).
+3. `POST /auth/register` mencari kode yang belum terpakai (`used_at IS NULL`); kode tidak dikenal ditolak `422 invalid_invite_code` (`server/routes/auth.ts:134-144`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama (`server/routes/auth.ts:151-170`).
+4. Tanpa `invite_code`, akun dibuat tanpa organisasi.
+
+### Belum tersedia
+
+- Creator belum dapat memilih lingkup dari UI: tombol "Buat draf baru" mengirim tanpa `owner_scope`, sehingga survei baru selalu individu. Scope organisasi baru dapat diminta lewat API (`server/routes/surveys.ts:309-318`).
+- `PATCH /admin/accounts/:id` hanya mengubah `role` dan `status`; `super_admin` belum dapat menetapkan atau memindahkan organisasi sebuah akun (`server/routes/admin.ts:72-88`).
+- `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).
+- Belum ada UI untuk `super_admin` mengubah `platform_profile`; `PUT /org/profile` hanya menulis `organizations` (`server/routes/org.ts:62-66`).
+- Belum ada endpoint untuk mencabut kode undangan organisasi yang belum terpakai, hanya satu kali pakai.
 
 ## Konfigurasi
 
@@ -171,7 +245,7 @@ pnpm admin:bootstrap
 
 Versi dan waktu persetujuan disimpan di `accounts.consent_version` dan `accounts.consent_accepted_at`, serta metadata audit `Registrasi`. Naikkan `CURRENT_CONSENT_VERSION` di `server/routes/auth.ts` ketika teks kebijakan privasi atau ketentuan layanan berubah; akun lama tetap `NULL` karena dibuat sebelum bukti persetujuan ada.
 
-Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk.
+Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk. Organisasi akun baru hanya dapat ditentukan saat pendaftaran lewat `invite_code`; super admin belum dapat menetapkannya lewat `/admin/accounts`.
 
 ## Basis data dan migrasi
 
@@ -258,15 +332,25 @@ Dengan pembagian ini Next tidak memproksikan API di produksi. Rewrite `/api/:pat
 
 ## Akun dan tautan demo
 
-Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. Sandi berasal dari `SEED_PASSWORD`; default lokal `SvaraDemo123!`.
+Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. Sandi berasal dari `SEED_PASSWORD`; default lokal `SvaraDemo123!`. Ada enam akun, dua organisasi sintetis (`org_smk`, `org_perpus`), dan satu profil platform sintetis.
 
-| Email | Peran | Cakupan awal |
-| --- | --- | --- |
-| `creator.a@svara.local` | creator | Pemilik `s_demo1`, `s_demo2`, `s_demo4` |
-| `creator.b@svara.local` | creator | Pemilik `s_demo3` |
-| `officer@svara.local` | creator | Bukan pemilik `s_demo1`, tetapi memegang grant baca individual/ekspor/teks pada `s_demo1` |
-| `admin@svara.local` | super_admin | Operasional; tidak otomatis boleh membaca jawaban |
-| `suspended@svara.local` | creator (suspended) | Ditolak saat masuk |
+| Email | Peran | Organisasi | Cakupan awal |
+| --- | --- | --- | --- |
+| `creator.a@svara.local` | creator | `org_smk` | Pemilik `s_demo1`, `s_demo2`, `s_demo4` |
+| `creator.b@svara.local` | creator | `org_perpus` | Pemilik `s_demo3` |
+| `officer@svara.local` | creator | `org_smk` | Bukan pemilik `s_demo1`, tetapi memegang grant baca individual/ekspor/teks pada `s_demo1` |
+| `orgadmin@svara.local` | org_admin | `org_smk` | Mengelola profil, anggota, undangan, dan audit `org_smk`; membaca penuh survei `org_smk` |
+| `admin@svara.local` | super_admin | Tidak ada | Operasional; tidak otomatis boleh membaca jawaban |
+| `suspended@svara.local` | creator (suspended) | Tidak ada | Ditolak saat masuk |
+
+Organisasi sintetis (`server/seed-data.ts:30-33`):
+
+| ID | Nama | Tipe | Kategori usia | Mode persetujuan | Notice |
+| --- | --- | --- | --- | --- | --- |
+| `org_smk` | SMK Nusantara (sintetis) | `school` | `minor` | `guardian` | `1.2` |
+| `org_perpus` | Perpustakaan Kota (sintetis) | `organization` | `adult` | `self` | `1.2` |
+
+`platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'` (`server/seed-data.ts:48-62`). Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus` (`server/seed-data.ts:234`), jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 
 - `link-umum-demo`: survei SMK, mode wali, pemberitahuan sintetis.
 - `link-umum-perpus`: survei perpustakaan, persetujuan diri.
