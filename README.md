@@ -46,14 +46,14 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 
 ## Mulai cepat
 
-Prasyarat: Node.js 24 atau lebih baru, PostgreSQL 16/17, pnpm 11, dan Docker Desktop untuk basis data lokal.
+Prasyarat: Node.js 24 atau lebih baru, PostgreSQL 16/17, dan Docker Desktop untuk basis data lokal. Repo ini memakai npm (tanpa `packageManager`), jadi `npm install`/`npm run dev` adalah jalur utama; `pnpm` dan `npm` sama-sama bisa karena dependensi ditaruh di `node_modules` biasa.
 
 ```bash
-pnpm install
+npm install
 docker compose up -d db
 export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
-SEED_DEMO=1 pnpm db:reset
-pnpm dev
+SEED_DEMO=1 npm run db:reset
+npm run dev
 ```
 
 PowerShell:
@@ -61,9 +61,11 @@ PowerShell:
 ```powershell
 $env:DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
 $env:SEED_DEMO='1'
-pnpm db:reset
-pnpm dev
+npm run db:reset
+npm run dev
 ```
+
+`npm run dev` menjalankan dua layanan sekaligus (API `:3001` dan Web `:3000`) lewat `scripts/dev.mjs`. Sebelum mulai script memeriksa `DATABASE_URL`, koneksi PostgreSQL di `127.0.0.1:5432`, dan port kosong, lalu berhenti dengan pesan jelas kalau salah satunya gagal. Ini mencegah galat `ECONNREFUSED 127.0.0.1:3001` di halaman masuk saat API tidak ikut hidup. Ctrl+C mematikan keduanya, termasuk proses anak di Windows.
 
 Buka `http://127.0.0.1:3000` dan masuk sebagai `creator.a@svara.local` dengan sandi `SvaraDemo123!`. Daftar survei berisi tiga contoh milik akun itu. Buka salah satunya untuk melihat editor, publikasi, tautan responden, dan hasil.
 
@@ -184,12 +186,14 @@ Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban
 ## Menjalankan
 
 ```bash
-pnpm dev     # API :3001 + Next.js :3000
-pnpm build
-pnpm start   # API + Next production, migrasi berjalan saat startup API
+npm run dev     # API :3001 + Next.js :3000 (dev server, hot reload)
+npm run build
+npm start       # API + Next production, migrasi berjalan saat startup API
 ```
 
-`pnpm dev` menjalankan dua proses: Express di `:3001` dan Next.js di `:3000`. Browser hanya memanggil origin web; rewrite Next meneruskan `/api/:path*` ke `API_ORIGIN`.
+Kedua perintah menjalankan dua proses lewat `scripts/dev.mjs`: Express di `:3001` dan Next.js di `:3000`. Browser hanya memanggil origin web; rewrite Next meneruskan `/api/:path*` ke `API_ORIGIN`. Menjalankan `next start` atau `next dev` sendirian berarti tidak ada API, dan halaman masuk akan melaporkan "Permintaan tidak dapat diselesaikan" (`ECONNREFUSED 127.0.0.1:3001`).
+
+Kalau port dilaporkan terpakai, hentikan proses lama dulu: `netstat -ano | findstr :3001` lalu `taskkill /PID <pid> /T /F` di Windows.
 
 Migrasi berjalan saat startup API sebelum menerima permintaan. Untuk basis data kosong, jalankan `pnpm admin:bootstrap`.
 
