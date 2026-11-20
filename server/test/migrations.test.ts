@@ -33,6 +33,7 @@ test('migrasi membuat 24 tabel aplikasi dan mencatat versi', async () => {
     '005_organizations.sql',
     '006_organization_profile.sql',
     '007_organization_invitations.sql',
+    '008_organization_invitation_lifecycle.sql',
   ]);
 });
 
@@ -49,6 +50,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
     '005_organizations.sql',
     '006_organization_profile.sql',
     '007_organization_invitations.sql',
+    '008_organization_invitation_lifecycle.sql',
   ]);
 });
 
@@ -75,6 +77,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
     '005_organizations.sql',
     '006_organization_profile.sql',
     '007_organization_invitations.sql',
+    '008_organization_invitation_lifecycle.sql',
   ]);
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
