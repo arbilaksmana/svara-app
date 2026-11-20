@@ -148,6 +148,8 @@ Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
 - `organization` menyalin `accounts.organization_id` akun pembuat ke survei; akun tanpa organisasi ditolak `403` (`server/routes/surveys.ts:315-318`).
 - `surveys.profile_id` tetap wajib dan masih merujuk baris `profiles` sintetis (`server/routes/surveys.ts:319-328`). Kebijakan yang dipakai survei dibaca dari `organization_id`, bukan dari `profile_id`.
 
+Di UI, `/creator` menampilkan kontrol "Lingkup" di samping tombol "Buat draf baru" hanya bila akun terikat organisasi, dan nilai awalnya `organization`; akun tanpa organisasi tidak melihat kontrol itu dan selalu membuat survei individu. Pilihan itu dikirim sebagai `owner_scope`, dan baris survei menampilkan "Lingkup organisasi" atau "Lingkup individu" (`src/screens/CreatorCore.tsx:167-184`, `src/lib/api.ts:163-167`).
+
 Apa artinya untuk visibilitas (`server/http.ts:108-144`):
 
 | Akun | Daftar survei | Mengelola |
@@ -195,7 +197,6 @@ Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body at
 
 ### Belum tersedia
 
-- Creator belum dapat memilih lingkup dari UI: tombol "Buat draf baru" mengirim tanpa `owner_scope`, sehingga survei baru selalu individu. Scope organisasi baru dapat diminta lewat API (`server/routes/surveys.ts:309-318`).
 - `PATCH /admin/accounts/:id` hanya mengubah `role` dan `status`; `super_admin` belum dapat menetapkan atau memindahkan organisasi sebuah akun (`server/routes/admin.ts:72-88`).
 - `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).
 - Belum ada UI untuk `super_admin` mengubah `platform_profile`; `PUT /org/profile` hanya menulis `organizations` (`server/routes/org.ts:62-66`).

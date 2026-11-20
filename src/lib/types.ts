@@ -41,6 +41,8 @@ export type SurveyStatus = 'draft' | 'published' | 'closed' | 'archived';
 export interface Survey {
   id: string;
   owner_id: string;
+  /** Lingkup organisasi pemilik survei; null berarti lingkup individu. */
+  organization_id?: string | null;
   profile_id: string;
   title: string;
   purpose: string;

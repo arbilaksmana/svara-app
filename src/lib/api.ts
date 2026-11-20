@@ -160,8 +160,10 @@ export interface SurveyPayload {
   questions: QuestionPayload[];
 }
 
-export async function createSurvey(title: string, profileId?: string): Promise<SurveyDetail> {
-  return call<SurveyDetail>('/surveys', { method: 'POST', body: { title, profile_id: profileId } });
+export type SurveyScope = 'individual' | 'organization';
+
+export async function createSurvey(title: string, ownerScope?: SurveyScope): Promise<SurveyDetail> {
+  return call<SurveyDetail>('/surveys', { method: 'POST', body: { title, owner_scope: ownerScope } });
 }
 
 export async function saveSurvey(id: string, payload: SurveyPayload): Promise<SurveyDetail> {
