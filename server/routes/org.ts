@@ -5,7 +5,7 @@ import { all, get, nowIso, run } from '../db.ts';
 import type { AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
 import {
-  INVITATION_TTL_DAYS,
+  INVITATION_LIST_LIMIT, INVITATION_TTL_DAYS,
   ORGANIZATION_INVITATION_COLUMNS,
   invitationExpiry,
   invitationStatus,
@@ -203,7 +203,7 @@ orgRouter.get('/org/invitations', async (req: AuthedRequest, res: Response) => {
     const now = nowIso();
     const rows = await all<OrganizationInvitationRow>(
       `SELECT ${ORGANIZATION_INVITATION_COLUMNS} FROM organization_invitations
-        WHERE organization_id = ? ORDER BY created_at DESC, id DESC LIMIT 50`,
+        WHERE organization_id = ? ORDER BY created_at DESC, id DESC LIMIT ${INVITATION_LIST_LIMIT}`,
       organizationId,
     );
     res.setHeader('Cache-Control', 'no-store');

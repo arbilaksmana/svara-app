@@ -719,77 +719,90 @@ test('Super admin menetapkan organisasi akun dan lingkupnya berlaku pada permint
   const missingBody = missing.json as { code?: string } | null;
   assert.equal(missingBody?.code, 'unknown_organization');
 
-  const assigned = await call('/admin/accounts/u_creator_b', {
-    method: 'PATCH',
-    cookie: admin,
-    body: { organization_id: 'org_perpus' },
-  });
-  assert.equal(assigned.status, 200);
-  assert.equal(data<{ organization_id: string | null }>(assigned).organization_id, 'org_perpus');
-
   const stored = new Client({ connectionString: databaseUrl });
   await stored.connect();
+  const snapshot = (
+    await stored.query<{ role: string; organization_id: string | null }>(
+      "SELECT role, organization_id FROM accounts WHERE id = 'u_creator_b'",
+    )
+  ).rows[0];
+  assert.ok(snapshot, 'akun u_creator_b harus ada di data seed');
+
+  // Semua langkah setelah ini mengubah u_creator_b; finally mengembalikannya agar
+  // kegagalan assertion tidak meracuni tes berikutnya.
   try {
+    const assigned = await call('/admin/accounts/u_creator_b', {
+      method: 'PATCH',
+      cookie: admin,
+      body: { organization_id: 'org_perpus' },
+    });
+    assert.equal(assigned.status, 200);
+    assert.equal(data<{ organization_id: string | null }>(assigned).organization_id, 'org_perpus');
+
     const audit = await stored.query("SELECT metadata FROM audit_logs WHERE object = 'u_creator_b' ORDER BY at DESC LIMIT 1");
     const metadata = JSON.parse(String(audit.rows[0]?.metadata ?? '{}')) as { organization_id?: string | null };
     assert.equal(metadata.organization_id, 'org_perpus');
+
+    const bootstrap = data<{
+      accounts: Array<{ id: string; organization_id: string | null }>;
+      organizations: Array<{ id: string; name: string }>;
+    }>(await call('/bootstrap', { cookie: admin }));
+    assert.equal(bootstrap.accounts.find((row) => row.id === 'u_creator_b')?.organization_id, 'org_perpus');
+    assert.ok(bootstrap.organizations.some((organization) => organization.id === 'org_smk'));
+
+    const outsider = await session('creator.b@svara.local');
+    const created = await call('/surveys', {
+      method: 'POST',
+      cookie: outsider,
+      body: { title: 'Survei lingkup organisasi', owner_scope: 'organization' },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(
+      data<{ survey: { organization_id: string | null } }>(created).survey.organization_id,
+      'org_perpus',
+    );
+
+    const asOrgAdmin = await call('/admin/accounts/u_creator_b', {
+      method: 'PATCH',
+      cookie: admin,
+      body: { role: 'org_admin', organization_id: 'org_smk' },
+    });
+    assert.equal(asOrgAdmin.status, 200);
+    const profile = await call('/org/profile', { cookie: outsider });
+    assert.equal(profile.status, 200);
+
+    const detached = await call('/admin/accounts/u_creator_b', {
+      method: 'PATCH',
+      cookie: admin,
+      body: { organization_id: null },
+    });
+    assert.equal(detached.status, 422);
+    const detachedBody = detached.json as { code?: string } | null;
+    assert.equal(detachedBody?.code, 'organization_required');
+
+    const promoted = await call('/admin/accounts/u_creator_b', {
+      method: 'PATCH',
+      cookie: admin,
+      body: { role: 'super_admin' },
+    });
+    assert.equal(promoted.status, 422);
+    const promotedBody = promoted.json as { code?: string } | null;
+    assert.equal(promotedBody?.code, 'super_admin_scope');
+
+    const restored = await call('/admin/accounts/u_creator_b', {
+      method: 'PATCH',
+      cookie: admin,
+      body: { role: 'creator', organization_id: null },
+    });
+    assert.equal(restored.status, 200);
+    assert.equal(data<{ organization_id: string | null }>(restored).organization_id, null);
   } finally {
+    await stored.query("UPDATE accounts SET role = $1, organization_id = $2 WHERE id = 'u_creator_b'", [
+      snapshot.role,
+      snapshot.organization_id,
+    ]);
     await stored.end();
   }
-
-  const bootstrap = data<{
-    accounts: Array<{ id: string; organization_id: string | null }>;
-    organizations: Array<{ id: string; name: string }>;
-  }>(await call('/bootstrap', { cookie: admin }));
-  assert.equal(bootstrap.accounts.find((row) => row.id === 'u_creator_b')?.organization_id, 'org_perpus');
-  assert.ok(bootstrap.organizations.some((organization) => organization.id === 'org_smk'));
-
-  const outsider = await session('creator.b@svara.local');
-  const created = await call('/surveys', {
-    method: 'POST',
-    cookie: outsider,
-    body: { title: 'Survei lingkup organisasi', owner_scope: 'organization' },
-  });
-  assert.equal(created.status, 201);
-  assert.equal(
-    data<{ survey: { organization_id: string | null } }>(created).survey.organization_id,
-    'org_perpus',
-  );
-
-  const asOrgAdmin = await call('/admin/accounts/u_creator_b', {
-    method: 'PATCH',
-    cookie: admin,
-    body: { role: 'org_admin', organization_id: 'org_smk' },
-  });
-  assert.equal(asOrgAdmin.status, 200);
-  const profile = await call('/org/profile', { cookie: outsider });
-  assert.equal(profile.status, 200);
-
-  const detached = await call('/admin/accounts/u_creator_b', {
-    method: 'PATCH',
-    cookie: admin,
-    body: { organization_id: null },
-  });
-  assert.equal(detached.status, 422);
-  const detachedBody = detached.json as { code?: string } | null;
-  assert.equal(detachedBody?.code, 'organization_required');
-
-  const promoted = await call('/admin/accounts/u_creator_b', {
-    method: 'PATCH',
-    cookie: admin,
-    body: { role: 'super_admin' },
-  });
-  assert.equal(promoted.status, 422);
-  const promotedBody = promoted.json as { code?: string } | null;
-  assert.equal(promotedBody?.code, 'super_admin_scope');
-
-  const restored = await call('/admin/accounts/u_creator_b', {
-    method: 'PATCH',
-    cookie: admin,
-    body: { role: 'creator', organization_id: null },
-  });
-  assert.equal(restored.status, 200);
-  assert.equal(data<{ organization_id: string | null }>(restored).organization_id, null);
 });
 
 test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () => {
