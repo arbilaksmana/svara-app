@@ -195,9 +195,19 @@ Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body at
 3. `POST /auth/register` mencari kode yang belum terpakai (`used_at IS NULL`); kode tidak dikenal ditolak `422 invalid_invite_code` (`server/routes/auth.ts:134-144`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama (`server/routes/auth.ts:151-170`).
 4. Tanpa `invite_code`, akun dibuat tanpa organisasi.
 
+### Menetapkan lingkup akun
+
+`super_admin` menetapkan organisasi sebuah akun lewat `PATCH /admin/accounts/:id` dengan `organization_id` berupa id organisasi atau `null` (`server/routes/admin.ts:85-116`). Aturannya:
+
+- id yang tidak ada di `organizations` ditolak `422 unknown_organization`;
+- `org_admin` tanpa organisasi ditolak `422 organization_required`, karena guard `/org/*` membaca `accounts.organization_id`;
+- akun `super_admin` tidak boleh terikat organisasi: `422 super_admin_scope`, termasuk saat akun berorganisasi dipromosikan;
+- setiap perubahan dicatat pada log audit dengan `metadata.organization_id` (`server/routes/admin.ts:115`).
+
+Di `/admin/accounts`, kolom "Organisasi" memuat daftar dari `bootstrap.organizations` yang hanya dikirim ke `super_admin` (`server/bootstrap.ts:317-321`), dan pemilih peran kini mencakup `org_admin` (`src/screens/Admin.tsx:206-236`). Memindahkan akun tidak mengubah `surveys.organization_id` yang sudah ada: survei tetap milik organisasi tempat ia dibuat.
+
 ### Belum tersedia
 
-- `PATCH /admin/accounts/:id` hanya mengubah `role` dan `status`; `super_admin` belum dapat menetapkan atau memindahkan organisasi sebuah akun (`server/routes/admin.ts:72-88`).
 - `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).
 - Belum ada UI untuk `super_admin` mengubah `platform_profile`; `PUT /org/profile` hanya menulis `organizations` (`server/routes/org.ts:62-66`).
 - Belum ada endpoint untuk mencabut kode undangan organisasi yang belum terpakai, hanya satu kali pakai.

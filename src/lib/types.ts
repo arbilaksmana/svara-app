@@ -203,6 +203,12 @@ export interface Account {
 }
 
 /** Profil organisasi seperti dikembalikan GET/PUT /org/profile. */
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  organization_type: OrganizationType;
+}
+
 export interface OrgProfile {
   id: string;
   organization_name: string;

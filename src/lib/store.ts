@@ -16,6 +16,7 @@ import {
   accessGrants,
   auditLogs,
   integrationEvents,
+  organizations,
 } from './fixtures/records';
 import * as api from './api';
 import type { AdminStats, SurveyScope } from './api';
@@ -193,6 +194,7 @@ function hydrate(data: api.BootstrapData): void {
   noticeList = [...data.notices];
 
   replace(accounts, data.accounts);
+  replace(organizations, data.organizations ?? []);
   replace(accessGrants, data.grants);
   replace(auditLogs, data.auditLogs);
   replace(
