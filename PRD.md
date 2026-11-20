@@ -49,28 +49,31 @@ Studi kasus SMK Lugina Rancaekek adalah deployment pertama, bukan default produk
 | **Konfigurasi studi kasus** | Contoh yang dapat diganti | Topik Figma, AD01/TS01/K02, skala 1–5 |
 | **Kewajiban deployment SMK** | Mengikat untuk pilot ini | Data anak, bukti wali, kebijakan sekolah, UU PDP |
 
-### 1.2 Profil deployment
+### 1.2 Profil kebijakan per lingkup
 
-Produk membaca satu profil deployment; tidak ada asumsi sekolah di kode. Profil minimal:
+Ada dua sumber kebijakan: `platform_profile` (satu baris untuk platform, dikelola operator platform) dan `organizations` (satu baris per organisasi pelanggan). Survei memakai `platform_profile` bila `surveys.organization_id` NULL, dan baris `organizations` yang ditunjuk bila tidak NULL. Setiap survei membaca tepat satu sumber, dipilih oleh lingkupnya saat survei dibuat; tidak ada fallback diam-diam ke sumber lain. Tidak ada asumsi sekolah di kode; studi kasus SMK hanya salah satu baris `organizations`.
 
-| Field | Default generik | Profil SMK |
-| --- | --- | --- |
-| `organization_name` | Teks bebas | SMK Lugina Rancaekek |
-| `organization_type` | `organization` | `school` |
-| `respondent_age_category` | `adult` | `minor` |
-| `consent_mode` | `self` | `guardian` |
-| `policy_url` | `/privacy` | `/privacy` |
-| `terms_url` | `/terms` | `/terms` |
-| `retention_days` | Wajib diisi sebelum data nyata | Menunggu keputusan sekolah |
-| `data_request_contact` | Wajib diisi sebelum data nyata | Menunggu keputusan sekolah |
-| `cross_border_transfer` | `false` sampai ditinjau | Menunggu keputusan |
+Field minimal dan lokasinya:
+
+| Field | `organizations` | `platform_profile` | Default generik |
+| --- | --- | --- | --- |
+| `organization_name` | `name` | `organization_name` | Teks bebas |
+| `organization_type` | Ya | Ya | `organization` |
+| `respondent_age_category` | Ya | Tidak ada | `adult` |
+| `consent_mode` | Ya | Tidak ada | `self` |
+| `policy_url` | Ya | Ya | `/privacy` |
+| `terms_url` | Ya | Ya | `/terms` |
+| `retention_days` | Ya | Ya | Wajib diisi sebelum data nyata |
+| `data_request_contact` | Ya | Ya | Wajib diisi sebelum data nyata |
+| `cross_border_transfer` | Ya | Ya | `false` sampai ditinjau |
+| `notice_version` | Ya | Ya | Mengikuti template notice yang berlaku |
 
 Aturan:
-- `respondent_age_category=minor` atau `mixed` mewajibkan `consent_mode=guardian`. `consent_mode=self` hanya untuk responden dewasa.
+- `respondent_age_category=minor` atau `mixed` mewajibkan `consent_mode=guardian`. `consent_mode=self` hanya untuk responden dewasa. Aturan ini ditegakkan di `PUT /org/profile` dengan galat `422 consent_mode_mismatch`, sehingga profil organisasi tidak dapat tersimpan dalam kombinasi yang tidak sah.
 - `consent_mode=guardian` mengaktifkan bukti wali dan penolakan kiriman bila bukti belum sah. `consent_mode=self` tetap mencatat `ConsentRecord` dan versi notice.
 - `policy_url` dan `terms_url` harus dapat diakses tanpa login.
 - Profil hanya mengubah policy, consent, dan teks UI; tidak mengubah skema respons atau format ekspor.
-- Development memakai profil sintetis. Profil produksi diisi pengendali sebelum data nyata.
+- Development memakai organisasi dan profil platform sintetis. Profil produksi diisi pengendali sebelum data nyata. `platform_profile` hanya boleh berisi satu baris (`CHECK (id = 'platform')`).
 
 ---
 
