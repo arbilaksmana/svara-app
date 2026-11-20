@@ -469,6 +469,22 @@ export async function adminSaveAccount(
   await call(`/admin/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }
 
+export interface NewOrganizationInput {
+  name: string;
+  organization_type: OrganizationSummary['organization_type'];
+  admin: { display_name: string; email: string; password: string };
+}
+
+/** Onboarding: organisasi baru sekaligus admin pertamanya. */
+export async function adminCreateOrganization(
+  input: NewOrganizationInput,
+): Promise<{ organization: OrganizationSummary; account: Account }> {
+  return call<{ organization: OrganizationSummary; account: Account }>('/admin/organizations', {
+    method: 'POST',
+    body: input,
+  });
+}
+
 /** Halaman organisasi: organisasi selalu ditentukan sesi server, bukan parameter klien. */
 export async function getOrgProfile(): Promise<{ source: string; profile: OrgProfile }> {
   return call<{ source: string; profile: OrgProfile }>('/org/profile');

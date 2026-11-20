@@ -206,6 +206,19 @@ Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body at
 
 Di `/admin/accounts`, kolom "Organisasi" memuat daftar dari `bootstrap.organizations` yang hanya dikirim ke `super_admin` (`server/bootstrap.ts:317-321`), dan pemilih peran kini mencakup `org_admin` (`src/screens/Admin.tsx:206-236`). Memindahkan akun tidak mengubah `surveys.organization_id` yang sudah ada: survei tetap milik organisasi tempat ia dibuat.
 
+### Membuat organisasi baru
+
+Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.ts:132`): organisasi dan admin pertamanya dibuat dalam satu transaksi, sehingga tidak ada organisasi tanpa pengelola. Body wajib memuat `name`, `organization_type` (`school` atau `organization`), dan `admin` berisi `display_name`, `email`, serta `password`.
+
+- `organization_type` selain dua nilai itu ditolak `422 validation_error`; `admin.password` mengikuti kebijakan yang sama dengan pendaftaran (`422 weak_password`).
+- Email yang sudah terdaftar ditolak `409 email_taken`; untuk akun lama, tautkan lewat `PATCH /admin/accounts/:id`.
+- `respondent_age_category`/`consent_mode` opsional dengan default `adult`/`self`; kombinasi minor/mixed dengan `self` ditolak `422 consent_mode_mismatch` (PRD §1.2).
+- `policy_url`/`terms_url` default ke halaman `/kebijakan-privasi` dan `/ketentuan-layanan`, lalu dapat diubah `org_admin` lewat `PUT /org/profile`.
+- Akun admin hasil onboarding belum mencatat persetujuan kebijakan (`consent_version` NULL) karena belum ada yang menyetujui.
+- Respons memuat `organization` dan `account` (tanpa hash kata sandi); perubahan dicatat pada log audit `Buat organisasi` dengan `metadata.admin_account_id`.
+
+Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah akunnya dan formulir pembuatan; setelah sukses daftar akun serta opsi organisasi ikut diperbarui lewat `refreshBootstrap`.
+
 ### Belum tersedia
 
 - `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).

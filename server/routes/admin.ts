@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
 import type { AuthedRequest } from '../security.ts';
-import { requireRole } from '../security.ts';
+import { hashPassword, passwordPolicyError, requireRole } from '../security.ts';
 import {
   asBoolean,
   asString,
@@ -57,7 +57,7 @@ async function activeSuperAdmins(): Promise<number> {
 adminRouter.get('/admin/accounts', async (_req: AuthedRequest, res: Response) => {
   try {
     const accounts = await all<AccountRow & { created_at: string }>(
-      'SELECT id, email, display_name, role, status, created_at FROM accounts ORDER BY display_name',
+      'SELECT id, email, display_name, role, status, organization_id, created_at FROM accounts ORDER BY display_name',
     );
     const grants = await all<Record<string, unknown>>(
       `SELECT g.*, s.title AS survey_title
@@ -114,6 +114,136 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
     );
     await audit(req, 'Ubah akun', account.id, 'berhasil', { role, status, organization_id: organizationId });
     res.json({ data: { ...account, role, status, organization_id: organizationId } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ORGANIZATION_TYPE: Record<string, true> = { school: true, organization: true };
+const AGE_CATEGORY: Record<string, true> = { adult: true, minor: true, mixed: true };
+const CONSENT_MODE: Record<string, true> = { self: true, guardian: true };
+
+/**
+ * Onboarding satu langkah: organisasi baru langsung dengan admin pertamanya.
+ * Akun hasil pembuatan di sini belum menyetujui kebijakan (consent_version NULL);
+ * persetujuan dicatat saat pemiliknya mendaftar atau menerima ulang kebijakan.
+ */
+adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const name = asString(body.name ?? '', 'name', 200);
+    if (!name) fail(422, 'validation_error', 'name wajib diisi.');
+    const organizationType = asString(body.organization_type ?? '', 'organization_type', 50);
+    if (!ORGANIZATION_TYPE[organizationType]) {
+      fail(422, 'validation_error', 'organization_type harus school atau organization.');
+    }
+    const ageCategory =
+      body.respondent_age_category === undefined
+        ? 'adult'
+        : asString(body.respondent_age_category, 'respondent_age_category', 20);
+    if (!AGE_CATEGORY[ageCategory]) {
+      fail(422, 'validation_error', 'respondent_age_category harus adult, minor, atau mixed.');
+    }
+    const consentMode =
+      body.consent_mode === undefined ? 'self' : asString(body.consent_mode, 'consent_mode', 20);
+    if (!CONSENT_MODE[consentMode]) {
+      fail(422, 'validation_error', 'consent_mode harus self atau guardian.');
+    }
+    // PRD §1.2: responden minor/mixed mewajibkan persetujuan wali.
+    if ((ageCategory === 'minor' || ageCategory === 'mixed') && consentMode === 'self') {
+      fail(422, 'consent_mode_mismatch', 'respondent_age_category minor/mixed mewajibkan consent_mode guardian.');
+    }
+    const policyUrl =
+      body.policy_url === undefined ? '/kebijakan-privasi' : asString(body.policy_url, 'policy_url', 500);
+    if (!policyUrl) fail(422, 'validation_error', 'policy_url wajib diisi.');
+    const termsUrl =
+      body.terms_url === undefined ? '/ketentuan-layanan' : asString(body.terms_url, 'terms_url', 500);
+    if (!termsUrl) fail(422, 'validation_error', 'terms_url wajib diisi.');
+    const noticeVersion =
+      body.notice_version === undefined ? '1.0' : asString(body.notice_version, 'notice_version', 20);
+    if (!noticeVersion) fail(422, 'validation_error', 'notice_version wajib diisi.');
+
+    let retentionDays: number | null = null;
+    if (body.retention_days !== undefined && body.retention_days !== null) {
+      const value = body.retention_days;
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+        fail(422, 'validation_error', 'retention_days harus bilangan bulat >= 0.');
+      }
+      retentionDays = value;
+    }
+    let crossBorder: number | null = null;
+    if (body.cross_border_transfer !== undefined && body.cross_border_transfer !== null) {
+      if (typeof body.cross_border_transfer !== 'boolean') {
+        fail(422, 'validation_error', 'cross_border_transfer harus boolean.');
+      }
+      crossBorder = body.cross_border_transfer ? 1 : 0;
+    }
+    const contact =
+      body.data_request_contact === undefined || body.data_request_contact === null
+        ? null
+        : asString(body.data_request_contact, 'data_request_contact', 200) || null;
+
+    const admin = (body.admin ?? {}) as Record<string, unknown>;
+    const adminName = asString(admin.display_name ?? '', 'admin.display_name', 120).replace(/\s+/g, ' ');
+    if (adminName.length < 2) {
+      fail(422, 'validation_error', 'admin.display_name harus 2-120 karakter.');
+    }
+    const adminEmail = asString(admin.email ?? '', 'admin.email', 254).toLowerCase();
+    if (!EMAIL_RE.test(adminEmail)) fail(422, 'validation_error', 'admin.email tidak valid.');
+    const adminPassword = typeof admin.password === 'string' ? admin.password : '';
+    const passwordError = passwordPolicyError(adminPassword);
+    if (passwordError) fail(422, 'weak_password', passwordError);
+
+    if (await get<{ id: string }>('SELECT id FROM accounts WHERE email = ?', adminEmail)) {
+      fail(409, 'email_taken', 'Email sudah terdaftar. Tautkan akun itu ke organisasi lewat tabel akun, atau pakai email lain.');
+    }
+
+    const organizationId = newId('org');
+    const accountId = newId('u');
+    const createdAt = nowIso();
+    await withTx(async () => {
+      await run(
+        `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days,
+                                    data_request_contact, cross_border_transfer, notice_version, created_at,
+                                    respondent_age_category, consent_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        organizationId,
+        name,
+        organizationType,
+        policyUrl,
+        termsUrl,
+        retentionDays,
+        contact,
+        crossBorder,
+        noticeVersion,
+        createdAt,
+        ageCategory,
+        consentMode,
+      );
+      await run(
+        `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at,
+                               consent_version, consent_accepted_at, organization_id)
+         VALUES (?, ?, ?, 'org_admin', 'active', ?, ?, NULL, NULL, ?)`,
+        accountId,
+        adminEmail,
+        adminName,
+        hashPassword(adminPassword),
+        createdAt,
+        organizationId,
+      );
+    });
+    await audit(req, 'Buat organisasi', organizationId, 'berhasil', {
+      organization_id: organizationId,
+      admin_account_id: accountId,
+      organization_type: organizationType,
+    });
+    res.status(201).json({
+      data: {
+        organization: await get<Record<string, unknown>>('SELECT * FROM organizations WHERE id = ?', organizationId),
+        account: await get<AccountRow>('SELECT id, email, display_name, role, status, organization_id FROM accounts WHERE id = ?', accountId),
+      },
+    });
   } catch (error) {
     sendError(res, error);
   }
