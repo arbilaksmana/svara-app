@@ -33,7 +33,7 @@ import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersi
 import { formatWIB } from '../lib/summary';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
-import { ApiError } from '../lib/api';
+import { ApiError, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
 import { createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
@@ -99,9 +99,15 @@ export function CreatorListPage() {
   void revision;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'semua' | 'draft' | 'published' | 'closed' | 'archived'>('semua');
+  const [scopeChoice, setScopeChoice] = useState<SurveyScope | null>(null);
   const [busy, setBusy] = useState(false);
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const canCreate = session?.serverRole === 'creator';
+  const scope: SurveyScope = scopeChoice ?? (session?.organizationId ? 'organization' : 'individual');
+  const scopeHint =
+    scope === 'organization'
+      ? 'Lingkup organisasi: admin organisasi ikut mengelola dan melihat hasil.'
+      : 'Lingkup individu: hanya Anda yang mengelola; admin organisasi tidak melihatnya.';
   const visible = surveys;
 
   const rows = visible.filter((s) => {
@@ -129,7 +135,7 @@ export function CreatorListPage() {
           )}
           {state === 'closed' && <Banner tone="warning" title="Ada versi yang ditutup">Survei dengan versi tertutup masih dapat dibaca riwayatnya.</Banner>}
 
-          <Card className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <Card className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
             <div className="min-w-0 flex-1">
               <Field id="cari-survei" label="Cari survei" hint="Cari berdasarkan judul survei.">
                 {(aria) => (
@@ -143,7 +149,7 @@ export function CreatorListPage() {
                 )}
               </Field>
             </div>
-            <div className="min-w-0 sm:w-48">
+            <div className="min-w-0 lg:w-48">
               <label htmlFor="filter-status" className="text-body-sm font-bold text-ink">Status</label>
               <select
                 id="filter-status"
@@ -158,12 +164,30 @@ export function CreatorListPage() {
                 <option value="archived">Arsip</option>
               </select>
             </div>
+            {session?.organizationId ? (
+              <div className="min-w-0 lg:w-48">
+                <label htmlFor="new-survey-scope" className="text-body-sm font-bold text-ink">Lingkup</label>
+                <select
+                  id="new-survey-scope"
+                  value={scope}
+                  onChange={(e) => setScopeChoice(e.target.value as SurveyScope)}
+                  aria-describedby="new-survey-scope-hint"
+                  className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                >
+                  <option value="organization">Organisasi</option>
+                  <option value="individual">Individu</option>
+                </select>
+              </div>
+            ) : null}
+            {session?.organizationId ? (
+              <p id="new-survey-scope-hint" className="text-caption text-muted lg:order-last lg:basis-full">{scopeHint}</p>
+            ) : null}
             <Button
               disabled={busy || !canCreate || state === 'closed'}
               loading={busy}
               onClick={() => {
                 setBusy(true);
-                void createSurvey()
+                void createSurvey(scope)
                   .then((newId) => {
                     notify('Draf baru dibuat.');
                     router.push(link(ROUTES.creatorEdit(newId)));
@@ -208,7 +232,7 @@ export function CreatorListPage() {
                     <tr key={s.id}>
                       <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block text-caption text-muted">{vs.length} versi · diperbarui {s.updated_at.slice(0, 10)}</span>
+                        <span className="mt-1 block text-caption text-muted">{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {s.updated_at.slice(0, 10)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>

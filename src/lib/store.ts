@@ -18,7 +18,7 @@ import {
   integrationEvents,
 } from './fixtures/records';
 import * as api from './api';
-import type { AdminStats } from './api';
+import type { AdminStats, SurveyScope } from './api';
 import type {
   Account,
   AccessGrant,
@@ -47,6 +47,7 @@ export interface Session {
   /** Peran UI: admin (super_admin), org_admin, atau creator. */
   role: 'creator' | 'org_admin' | 'admin';
   serverRole: Role;
+  organizationId: string | null;
 }
 
 export interface SettingsState {
@@ -145,6 +146,7 @@ function mapSession(account: (Account & { email?: string }) | null): Session | n
     email: account.email ?? '',
     role: account.role === 'super_admin' ? 'admin' : account.role === 'org_admin' ? 'org_admin' : 'creator',
     serverRole: account.role,
+    organizationId: account.organization_id ?? null,
   };
 }
 
@@ -276,8 +278,8 @@ export async function signOut(): Promise<void> {
   }
 }
 
-export async function createSurvey(title = 'Survei baru'): Promise<string> {
-  const detail = await api.createSurvey(title);
+export async function createSurvey(ownerScope: SurveyScope, title = 'Survei baru'): Promise<string> {
+  const detail = await api.createSurvey(title, ownerScope);
   await refreshBootstrap();
   return detail.survey.id;
 }
