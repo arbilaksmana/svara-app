@@ -101,7 +101,7 @@ export const accounts: Account[] = [
   { id: 'u_admin', display_name: 'Rani Wijaya', role: 'super_admin', status: 'active' },
   { id: 'u_creator_a', display_name: 'Andi Pratama', role: 'creator', status: 'active' },
   { id: 'u_creator_b', display_name: 'Sinta Maharani', role: 'creator', status: 'active' },
-  { id: 'u_petugas', display_name: 'Dedi Kurniawan', role: 'authorized_officer', status: 'active' },
+  { id: 'u_petugas', display_name: 'Dedi Kurniawan', role: 'creator', status: 'active' },
   { id: 'u_nonaktif', display_name: 'Bayu Setiawan', role: 'creator', status: 'suspended' },
 ];
 

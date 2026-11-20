@@ -66,7 +66,7 @@ test('CLI seed menolak berjalan tanpa SEED_DEMO=1', async () => {
 test('CLI seed memuat data demo saat diaktifkan eksplisit', async () => {
   const result = run(SEED, { NODE_ENV: 'test', SEED_DEMO: '1', SEED_PASSWORD: 'TestPassword123!' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(await accountCount(), 5);
+  assert.equal(await accountCount(), 6, 'seed demo termasuk akun org_admin sintetis');
 });
 
 test('server start tanpa SEED_DEMO tidak membuat akun demo', { timeout: 20_000 }, async () => {

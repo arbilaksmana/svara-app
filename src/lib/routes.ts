@@ -22,6 +22,7 @@ export const ROUTE_IDS = [
   'admin-audit',
   'admin-integration',
   'admin-requests',
+  'admin-org',
   'privacy',
   'terms',
   'notfound',
@@ -56,6 +57,7 @@ export const ROUTES = {
   adminAudit: '/admin/audit',
   adminIntegration: '/admin/integration',
   adminRequests: '/admin/requests',
+  adminOrg: '/admin/org',
   privacy: '/privacy',
   terms: '/terms',
 } as const;

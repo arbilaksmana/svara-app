@@ -22,6 +22,11 @@ const GUEST_NAV: NavEntry[] = [
   { to: `${ROUTES.home}#faq`, label: 'FAQ' },
 ];
 
+/* Ruang organisasi: hanya org_admin yang melihat entri ini. */
+const ORG_NAV: NavEntry[] = [
+  { to: ROUTES.adminOrg, label: 'Organisasi' },
+];
+
 const NAV: Record<ShellKind, NavEntry[]> = {
   public: GUEST_NAV,
   creator: [
@@ -277,16 +282,27 @@ export function Shell({
     window.scrollTo(0, 0);
     mainRef.current?.focus({ preventScroll: true });
   }, [pathname]);
-  const sectionNav = NAV[kind];
   const inWorkspace = kind === 'creator' || kind === 'admin';
   // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
   const activeSession = guestOnly || kind === 'respondent' ? null : session;
-  const homeTo = activeSession
-    ? activeSession.role === 'admin'
+  const homeTo = !activeSession
+    ? ROUTES.home
+    : activeSession.role === 'admin'
       ? ROUTES.admin
-      : ROUTES.creator
-    : ROUTES.home;
-  const topNav = activeSession ? (activeSession.role === 'admin' ? NAV.admin : NAV.creator) : GUEST_NAV;
+      : activeSession.role === 'org_admin'
+        ? ROUTES.adminOrg
+        : ROUTES.creator;
+  const isOrgAdmin = activeSession?.role === 'org_admin';
+  // Super admin memakai /admin/*; org_admin mendapat ruang organisasinya sendiri.
+  const topNav = activeSession
+    ? isOrgAdmin
+      ? ORG_NAV
+      : activeSession.role === 'admin'
+        ? NAV.admin
+        : NAV.creator
+    : GUEST_NAV;
+  // Sidebar: org_admin hanya melihat entri Organisasi, meski halaman dirender sebagai admin.
+  const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const activePath = kind === 'respondent' ? ROUTES.home : pathname;
 
   return (

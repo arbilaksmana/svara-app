@@ -25,16 +25,53 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
 
   await withTx(async () => {
     const createdAt = '2026-11-01T00:00:00Z';
-    const accounts: Array<[string, string, string, string, string, string]> = [
-      ['u_admin', 'admin@svara.local', 'Rani Wijaya', 'super_admin', 'active', SEED_PASSWORD],
-      ['u_creator_a', 'creator.a@svara.local', 'Andi Pratama', 'creator', 'active', SEED_PASSWORD],
-      ['u_creator_b', 'creator.b@svara.local', 'Sinta Maharani', 'creator', 'active', SEED_PASSWORD],
-      ['u_petugas', 'officer@svara.local', 'Dedi Kurniawan', 'authorized_officer', 'active', SEED_PASSWORD],
-      ['u_nonaktif', 'suspended@svara.local', 'Bayu Setiawan', 'creator', 'suspended', SEED_PASSWORD],
+    // Dua organisasi sintetis agar isolasi lingkup org_admin dapat dibuktikan.
+    // notice_version organisasi sengaja berbeda dari platform agar sumber notice dapat dibuktikan.
+    const organizations: Array<[string, string, string, string, string, string]> = [
+      ['org_smk', 'SMK Nusantara (sintetis)', 'school', 'minor', 'guardian', '1.2'],
+      ['org_perpus', 'Perpustakaan Kota (sintetis)', 'organization', 'adult', 'self', '1.2'],
     ];
-    for (const [id, email, name, role, status, password] of accounts) {
+    for (const [id, name, type, ageCategory, consentMode, noticeVersion] of organizations) {
       await run(
-        'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO organizations (id, name, organization_type, respondent_age_category, consent_mode,
+          policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, created_at)
+         VALUES (?, ?, ?, ?, ?, '/privacy', '/terms', NULL, 'privasi@organisasi.contoh', 0, ?, ?)`,
+        id,
+        name,
+        type,
+        ageCategory,
+        consentMode,
+        noticeVersion,
+        createdAt,
+      );
+    }
+    await run(
+      `INSERT INTO platform_profile (id, organization_name, organization_type, policy_url, terms_url, retention_days,
+        data_request_contact, cross_border_transfer, notice_version, updated_at)
+       VALUES ('platform', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'Svara (sintetis)',
+      'platform',
+      '/privacy',
+      '/terms',
+      null,
+      'privasi@organisasi.contoh',
+      0,
+      // Selaras dengan notices/notice_version profil deployment versi 2.0.
+      '2.0',
+      createdAt,
+    );
+
+    const accounts: Array<[string, string, string, string, string, string, string | null]> = [
+      ['u_admin', 'admin@svara.local', 'Rani Wijaya', 'super_admin', 'active', SEED_PASSWORD, null],
+      ['u_creator_a', 'creator.a@svara.local', 'Andi Pratama', 'creator', 'active', SEED_PASSWORD, 'org_smk'],
+      ['u_creator_b', 'creator.b@svara.local', 'Sinta Maharani', 'creator', 'active', SEED_PASSWORD, 'org_perpus'],
+      ['u_petugas', 'officer@svara.local', 'Dedi Kurniawan', 'creator', 'active', SEED_PASSWORD, 'org_smk'],
+      ['u_orgadmin', 'orgadmin@svara.local', 'Maya Kusuma', 'org_admin', 'active', SEED_PASSWORD, 'org_smk'],
+      ['u_nonaktif', 'suspended@svara.local', 'Bayu Setiawan', 'creator', 'suspended', SEED_PASSWORD, null],
+    ];
+    for (const [id, email, name, role, status, password, organizationId] of accounts) {
+      await run(
+        'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         id,
         email,
         name,
@@ -42,6 +79,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         status,
         hashPassword(password),
         createdAt,
+        organizationId,
       );
     }
 
@@ -180,8 +218,8 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     ];
     for (const [id, owner, profile, title, purpose, objectLabel, instructions, status, created, updated] of surveys) {
       await run(
-        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         owner,
         profile,
@@ -193,6 +231,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         created,
         updated,
         null,
+        owner === 'u_creator_b' ? 'org_perpus' : 'org_smk',
       );
       await run(
         'INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 1)',
@@ -437,8 +476,18 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       ['log_07', 'u_admin', 'Ubah peran akun', 'akun u_creator_b', 'berhasil', '2026-11-12T04:00:00Z'],
       ['log_08', 'u_creator_a', 'Ekspor CSV', 's_demo1 · v1', 'berhasil', '2026-11-12T07:30:00Z'],
     ];
-    for (const row of audit) {
-      await run('INSERT INTO audit_logs (id, actor, action, object, outcome, at) VALUES (?, ?, ?, ?, ?, ?)', ...row);
+    for (const [id, actor, action, object, outcome, at] of audit) {
+      await run(
+        `INSERT INTO audit_logs (id, actor, action, object, outcome, at, account_id)
+         VALUES (?, ?, ?, ?, ?, ?, (SELECT id FROM accounts WHERE id = CAST(? AS text)))`,
+        id,
+        actor,
+        action,
+        object,
+        outcome,
+        at,
+        actor,
+      );
     }
 
     const events: Array<[string, string, string, string, string, number, string, boolean, string | null, string | null]> = [

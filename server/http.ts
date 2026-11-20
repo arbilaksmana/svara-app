@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Response } from 'express';
-import { get, nowIso, run } from './db.ts';
+import { all, get, nowIso, run } from './db.ts';
 import type { AccountRow, AuthedRequest } from './security.ts';
 
 export class ApiError extends Error {
@@ -63,6 +63,7 @@ export interface SurveyRow {
   id: string;
   owner_id: string;
   profile_id: string;
+  organization_id: string | null;
   title: string;
   purpose: string;
   object_label: string;
@@ -100,8 +101,46 @@ export async function versionRow(id: string): Promise<VersionRow | undefined> {
   return get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', id);
 }
 
+/**
+ * Pemilik mengelola surveinya sendiri. org_admin mengelola survei milik organisasinya;
+ * survei tanpa organisasi (NULL) tidak pernah jatuh ke org_admin.
+ */
 export function canManageSurvey(account: AccountRow, survey: SurveyRow): boolean {
-  return survey.owner_id === account.id;
+  if (survey.owner_id === account.id) return true;
+  return (
+    account.role === 'org_admin' &&
+    account.organization_id !== null &&
+    survey.organization_id !== null &&
+    survey.organization_id === account.organization_id
+  );
+}
+
+/**
+ * Survei yang bisa dikelola akun: super_admin semua, org_admin lingkup organisasinya,
+ * creator miliknya sendiri. Dipakai GET /surveys dan bootstrap agar filter tidak diduplikasi.
+ */
+export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[]> {
+  if (account.role === 'super_admin') {
+    return all<SurveyRow>('SELECT * FROM surveys ORDER BY updated_at DESC, id');
+  }
+  if (account.role === 'org_admin' && account.organization_id !== null) {
+    return all<SurveyRow>(
+      `SELECT s.* FROM surveys s
+        WHERE s.organization_id = ?
+        ORDER BY s.updated_at DESC, s.id`,
+      account.organization_id,
+    );
+  }
+  if (account.role === 'creator') {
+    return all<SurveyRow>('SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC, id', account.id);
+  }
+  return all<SurveyRow>(
+    `SELECT DISTINCT s.*
+       FROM surveys s JOIN access_grants g ON g.survey_id = s.id
+      WHERE g.account_id = ?
+      ORDER BY s.updated_at DESC, s.id`,
+    account.id,
+  );
 }
 
 export async function canReadSurveyMetadata(account: AccountRow, survey: SurveyRow): Promise<boolean> {
@@ -127,7 +166,9 @@ export async function canReadAggregate(account: AccountRow, survey: SurveyRow): 
   return Boolean(grant && settings?.allow_results);
 }
 
+/** Pemilik/org_admin membaca penuh; pemegang grant tetap terikat survey_settings. */
 export async function canReadIndividual(account: AccountRow, survey: SurveyRow): Promise<boolean> {
+  if (canManageSurvey(account, survey)) return true;
   const [grant, settings] = await Promise.all([grantFor(account.id, survey.id), settingsFor(survey.id)]);
   return Boolean(grant?.can_read_individual && settings?.allow_individual);
 }
@@ -138,7 +179,58 @@ export async function canExport(account: AccountRow, survey: SurveyRow): Promise
 }
 
 export async function canReadFreeText(account: AccountRow, survey: SurveyRow): Promise<boolean> {
+  if (canManageSurvey(account, survey)) return true;
   return Boolean((await grantFor(account.id, survey.id))?.can_read_free_text);
+}
+
+/**
+ * Sumber notice mengikuti lingkup survei: organisasi → organizations.notice_version,
+ * individual (organization_id NULL) → platform_profile.notice_version.
+ * Tidak ada fallback diam-diam ke profil lain.
+ */
+export async function noticeVersionFor(
+  organizationId: string | null,
+): Promise<{ notice_version: string; source: 'organization' | 'platform' }> {
+  const row = organizationId
+    ? await get<{ notice_version: string }>('SELECT notice_version FROM organizations WHERE id = ?', organizationId)
+    : await get<{ notice_version: string }>("SELECT notice_version FROM platform_profile WHERE id = 'platform'");
+  if (!row) {
+    fail(409, 'notice_source_missing', 'Notice sumber survei ini belum dikonfigurasi.');
+  }
+  return { notice_version: row.notice_version, source: organizationId ? 'organization' : 'platform' };
+}
+
+/** Profil kebijakan efektif sebuah survei: organisasi pemilik lingkup atau platform. */
+export interface SurveyProfile {
+  id: string;
+  organization_name: string;
+  organization_type: string;
+  respondent_age_category: string | null;
+  consent_mode: string | null;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  source: 'organization' | 'platform';
+}
+
+export async function surveyProfileFor(survey: SurveyRow): Promise<SurveyProfile> {
+  const row = survey.organization_id
+    ? await get<Omit<SurveyProfile, 'source'>>(
+        `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+                policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer
+           FROM organizations WHERE id = ?`,
+        survey.organization_id,
+      )
+    : await get<Omit<SurveyProfile, 'source'>>(
+        `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
+                NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
+                cross_border_transfer
+           FROM platform_profile WHERE id = 'platform'`,
+      );
+  if (!row) fail(409, 'profile_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+  return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
 }
 
 export async function requireSurvey(id: string): Promise<SurveyRow> {
@@ -181,13 +273,15 @@ type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
 /** Audit hanya menyimpan metadata operasional; token, kata sandi, dan jawaban tidak boleh masuk. */
 async function insertAudit(
   actor: string,
+  accountId: string | null,
+  organizationId: string | null,
   action: string,
   object: string,
   outcome: AuditOutcome,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
   await run(
-    'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     newId('log'),
     actor,
     action,
@@ -195,6 +289,8 @@ async function insertAudit(
     outcome,
     nowIso(),
     metadata ? JSON.stringify(metadata) : null,
+    accountId,
+    organizationId,
   );
 }
 
@@ -205,7 +301,7 @@ export async function audit(
   outcome: AuditOutcome,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  await insertAudit(actorFor(req), action, object, outcome, metadata);
+  await insertAudit(actorFor(req), req.account?.id ?? null, req.account?.organization_id ?? null, action, object, outcome, metadata);
 }
 
 /** Aksi route publik tidak boleh diatribusikan ke akun dari cookie ambient. */
@@ -215,7 +311,7 @@ export async function auditPublic(
   outcome: AuditOutcome,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  await insertAudit('publik', action, object, outcome, metadata);
+  await insertAudit('publik', null, null, action, object, outcome, metadata);
 }
 
 export function csvCell(value: unknown, neutralizeFormula = true): string {

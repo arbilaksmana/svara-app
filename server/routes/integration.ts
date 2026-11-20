@@ -107,13 +107,14 @@ integrationRouter.get('/integration/survey-data', async (req: Request, res: Resp
       JSON.stringify({ survey_id: survey.id, version_id: version.id, rows: responses.length, offset: safeOffset, limit }),
     );
     await run(
-      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       newId('log'),
       'layanan-15',
       'Ambil data survei',
       `${survey.id} · v${version.number}`,
       'berhasil',
       nowIso(),
+      null,
       null,
     );
     res.setHeader('Cache-Control', 'no-store');

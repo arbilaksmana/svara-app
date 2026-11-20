@@ -30,13 +30,14 @@ function isSecure(req: AuthedRequest): boolean {
 
 async function failLogin(actor: string): Promise<void> {
   await run(
-    'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     newId('log'),
     actor,
     'Masuk',
     'akun',
     'gagal',
     nowIso(),
+    null,
     null,
   );
 }
@@ -75,7 +76,7 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
     res.setHeader('Set-Cookie', sessionCookie(session.token, isSecure(req)));
     res.setHeader('Cache-Control', 'no-store');
     await run(
-      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       newId('log'),
       row.id,
       'Masuk',
@@ -83,6 +84,7 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
       'berhasil',
       nowIso(),
       null,
+      row.id,
     );
     res.json({
       data: {
@@ -129,12 +131,24 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
       throw new ApiError(409, 'email_taken', 'Email sudah terdaftar. Masuk atau gunakan email lain.');
     }
 
+    // Undangan organisasi opsional: kode menentukan organisasi akun, bukan body lain.
+    const inviteCode = typeof req.body?.invite_code === 'string' ? req.body.invite_code.trim().toUpperCase() : '';
+    const invitation = inviteCode
+      ? await get<{ id: string; organization_id: string }>(
+          "SELECT id, organization_id FROM organization_invitations WHERE code = ? AND used_at IS NULL",
+          inviteCode,
+        )
+      : undefined;
+    if (inviteCode && !invitation) {
+      throw new ApiError(422, 'invalid_invite_code', 'Kode undangan organisasi tidak berlaku.');
+    }
+
     const accountId = newId('u');
     const acceptedAt = nowIso();
     try {
       await withTx(async () => {
         await run(
-          'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, consent_version, consent_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, consent_version, consent_accepted_at, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           accountId,
           email,
           displayName,
@@ -144,9 +158,19 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           acceptedAt,
           CURRENT_CONSENT_VERSION,
           acceptedAt,
+          invitation?.organization_id ?? null,
         );
+        if (invitation) {
+          // Kode sekali pakai: pemakaian dicatat pada baris undangan.
+          await run(
+            'UPDATE organization_invitations SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL',
+            acceptedAt,
+            accountId,
+            invitation.id,
+          );
+        }
         await run(
-          'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           newId('log'),
           accountId,
           'Registrasi',
@@ -154,6 +178,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           'berhasil',
           acceptedAt,
           JSON.stringify({ consentVersion: CURRENT_CONSENT_VERSION, acceptedAt }),
+          accountId,
         );
       });
     } catch (error) {
@@ -184,7 +209,7 @@ authRouter.post('/auth/logout', async (req: AuthedRequest, res: Response) => {
     if (token) await destroySession(token);
     if (req.account) {
       await run(
-        'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         newId('log'),
         req.account.id,
         'Keluar',
@@ -192,6 +217,7 @@ authRouter.post('/auth/logout', async (req: AuthedRequest, res: Response) => {
         'berhasil',
         nowIso(),
         null,
+        req.account.id,
       );
     }
     res.setHeader('Set-Cookie', clearSessionCookie());

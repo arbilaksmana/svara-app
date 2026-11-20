@@ -4,6 +4,8 @@
  * the rewrite, and authenticated bootstrap with the returned session cookie.
  */
 const WEB = (process.env.SMOKE_WEB_ORIGIN ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
+// Lewat rewrite /api, origin browser tidak sama dengan host API; API production wajib menyebutnya.
+process.env.APP_ORIGIN ??= new URL(WEB).origin;
 const EMAIL = process.env.SMOKE_EMAIL ?? 'admin@ci.local';
 const PASSWORD = process.env.SMOKE_PASSWORD ?? 'CiStrongPass123!';
 const WAIT_MS = Number(process.env.SMOKE_WAIT_MS ?? 90_000);
@@ -57,7 +59,9 @@ await check('login page', async () => {
   const response = await fetch(`${origin}/auth/login`);
   const html = await response.text();
   if (!response.ok) throw new Error(`status ${response.status}`);
-  if (!html.includes('Masuk ke workspace')) throw new Error('judul login tidak ditemukan');
+  // Judul halaman masuk lewat metadata; h1 juga wajib ada karena layout login menyembunyikan heading Shell.
+  if (!html.includes('<title>Masuk')) throw new Error('judul dokumen login tidak ditemukan');
+  if (!/<h1[^>]*>\s*Masuk ke workspace/.test(html)) throw new Error('h1 login tidak ditemukan');
   pass('login page', `${response.status}`);
 });
 

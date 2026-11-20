@@ -10,7 +10,7 @@ import {
   invitations,
   publicLinks,
 } from './fixtures/surveys';
-import { profiles, notices } from './fixtures/profiles';
+import { profiles } from './fixtures/profiles';
 import {
   accounts,
   accessGrants,
@@ -26,6 +26,7 @@ import type {
   AuditLog,
   DeploymentProfile,
   EventStatus,
+  SurveyProfile,
   IntegrationEvent,
   Invitation,
   Notice,
@@ -43,7 +44,8 @@ export interface Session {
   id: string;
   name: string;
   email: string;
-  role: 'creator' | 'admin';
+  /** Peran UI: admin (super_admin), org_admin, atau creator. */
+  role: 'creator' | 'org_admin' | 'admin';
   serverRole: Role;
 }
 
@@ -75,6 +77,7 @@ export interface Snapshot {
   drafts: Record<string, DraftState>;
   integrationNote: string;
   stats: AdminStats | null;
+  notices: Notice[];
 }
 
 let session: Session | null = null;
@@ -84,6 +87,9 @@ let stats: Snapshot['stats'] = null;
 let settings: Record<string, SettingsState> = {};
 let grants: Record<string, GrantState> = {};
 let drafts: Record<string, DraftState> = {};
+/** Profil kebijakan per survei dari bootstrap; kosong sampai bootstrap berhasil. */
+let surveyProfiles: Record<string, SurveyProfile> = {};
+let noticeList: Notice[] = [];
 let integrationNote = '';
 try {
   integrationNote = localStorage.getItem(NOTE_KEY) ?? '';
@@ -107,6 +113,7 @@ function buildSnapshot(): Snapshot {
     drafts,
     integrationNote,
     stats,
+    notices: noticeList,
   };
 }
 
@@ -136,7 +143,7 @@ function mapSession(account: (Account & { email?: string }) | null): Session | n
     id: account.id,
     name: account.display_name,
     email: account.email ?? '',
-    role: account.role === 'super_admin' ? 'admin' : 'creator',
+    role: account.role === 'super_admin' ? 'admin' : account.role === 'org_admin' ? 'org_admin' : 'creator',
     serverRole: account.role,
   };
 }
@@ -180,10 +187,8 @@ function hydrate(data: api.BootstrapData): void {
 
   for (const key of Object.keys(profiles)) delete profiles[key];
   for (const profile of data.profiles) profiles[profile.id] = profile;
-  for (const key of Object.keys(notices)) delete notices[key];
-  for (const notice of data.notices) {
-    if (!notices[notice.profile_id]) notices[notice.profile_id] = notice;
-  }
+  surveyProfiles = { ...data.surveyProfiles };
+  noticeList = [...data.notices];
 
   replace(accounts, data.accounts);
   replace(accessGrants, data.grants);
@@ -422,12 +427,17 @@ export function allIntegrationEvents(): IntegrationEvent[] {
   return integrationEvents;
 }
 
+/** Profil kebijakan survei dari server. Tidak ada fallback ke profil lain. */
+export function surveyProfileOf(surveyId: string): SurveyProfile | undefined {
+  return surveyProfiles[surveyId];
+}
+
 export function allProfiles(): DeploymentProfile[] {
   return Object.values(profiles);
 }
 
 export function allNotices(): Notice[] {
-  return Object.values(notices);
+  return noticeList;
 }
 
 export function allQuestions(): Question[] {

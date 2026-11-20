@@ -57,6 +57,7 @@ export function LoginPage() {
         conflictTo={ROUTES.creator}
       >
               <div className="flex flex-col gap-5">
+            <h1 className="text-center text-h2 font-bold text-ink">Masuk ke workspace</h1>
             {state === 'success' && <SuccessBanner title="Berhasil masuk">Sesi Anda aktif pada peramban ini.</SuccessBanner>}
             {state === 'validation' && <ValidationSummary items={['Email wajib diisi.', 'Kata sandi wajib diisi.']} />}
             {state === 'expired' && <Banner tone="warning" title="Sesi berakhir">Silakan masuk kembali untuk melanjutkan.</Banner>}

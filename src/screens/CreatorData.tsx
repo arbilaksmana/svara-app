@@ -40,10 +40,10 @@ import {
   createInvitation,
   revokeInvitation,
   saveSettings,
+  surveyProfileOf,
   useStore,
 } from '../lib/store';
 import { MissingSurvey, SurveyNav } from './CreatorCore';
-import { profileForSurvey, noticeForSurvey } from '../lib/fixtures/profiles';
 import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, ORGANIZATION_TYPE_LABEL, STATUS_LABEL } from '../lib/labels';
 
 const INVITE_TONE = {
@@ -609,11 +609,12 @@ export function ResultsPage({ id }: { id: string }) {
 
 export function SettingsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { settings, revision, session } = useStore();
+  const { settings, revision, session, notices } = useStore();
   void revision;
   const { state } = useScreenState('creator-settings');
-  const profile = profileForSurvey(id);
-  const notice = noticeForSurvey(id);
+  const profile = surveyProfileOf(id);
+  // Pemberitahuan dibaca dari bootstrap server, bukan fixture; tidak ada fallback ke profil lain.
+  const notice = notices.find((row) => row.profile_id === profile?.id) ?? null;
   const survey = findSurvey(id);
   const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
@@ -649,34 +650,46 @@ export function SettingsPage({ id }: { id: string }) {
 
           <Card className="flex flex-col gap-4">
             <SectionTitle>Profil deployment</SectionTitle>
-            <Table head={['Bagian', 'Nilai']}>
-              <tr><Th>Nama organisasi</Th><Td>{profile.organization_name}</Td></tr>
-              <tr><Th>Tipe organisasi</Th><Td>{ORGANIZATION_TYPE_LABEL[profile.organization_type]}</Td></tr>
-              <tr><Th>Kategori usia responden</Th><Td>{AGE_CATEGORY_LABEL[profile.respondent_age_category]}</Td></tr>
-              <tr><Th>Mode persetujuan</Th><Td>{CONSENT_MODE_LABEL[profile.consent_mode]}</Td></tr>
-              <tr><Th>Masa retensi</Th><Td>{profile.retention_days === null ? 'Mengikuti kebijakan pengendali' : `${profile.retention_days} hari`}</Td></tr>
-              <tr><Th>Kontak permintaan data</Th><Td>{profile.data_request_contact ?? 'Lihat pemberitahuan survei'}</Td></tr>
-              <tr><Th>Transfer data lintas negara</Th><Td>{profile.cross_border_transfer === null ? 'Belum ditinjau' : profile.cross_border_transfer ? 'Ya' : 'Tidak'}</Td></tr>
-              <tr><Th>Kebijakan dan ketentuan</Th><Td><PlainLink to={ROUTES.privacy} className="min-h-[44px]">Kebijakan privasi</PlainLink> · <PlainLink to={ROUTES.terms} className="min-h-[44px]">Ketentuan layanan</PlainLink></Td></tr>
-            </Table>
+            {profile ? (
+              <Table head={['Bagian', 'Nilai']}>
+                <tr><Th>Nama organisasi</Th><Td>{profile.organization_name}</Td></tr>
+                <tr><Th>Tipe organisasi</Th><Td>{ORGANIZATION_TYPE_LABEL[profile.organization_type]}</Td></tr>
+                <tr><Th>Kategori usia responden</Th><Td>{profile.respondent_age_category ? AGE_CATEGORY_LABEL[profile.respondent_age_category] : 'Belum ditetapkan'}</Td></tr>
+                <tr><Th>Mode persetujuan</Th><Td>{profile.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}</Td></tr>
+                <tr><Th>Masa retensi</Th><Td>{profile.retention_days === null ? 'Mengikuti kebijakan pengendali' : `${profile.retention_days} hari`}</Td></tr>
+                <tr><Th>Kontak permintaan data</Th><Td>{profile.data_request_contact ?? 'Lihat pemberitahuan survei'}</Td></tr>
+                <tr><Th>Transfer data lintas negara</Th><Td>{profile.cross_border_transfer === null ? 'Belum ditinjau' : profile.cross_border_transfer ? 'Ya' : 'Tidak'}</Td></tr>
+                <tr><Th>Kebijakan dan ketentuan</Th><Td><PlainLink to={ROUTES.privacy} className="min-h-[44px]">Kebijakan privasi</PlainLink> · <PlainLink to={ROUTES.terms} className="min-h-[44px]">Ketentuan layanan</PlainLink></Td></tr>
+              </Table>
+            ) : (
+              <p className="text-body-sm text-muted">Profil kebijakan survei ini belum tersedia.</p>
+            )}
             <Banner tone="info" title="Sumber konfigurasi">
-              Nilai di atas dibaca dari profil deployment yang aktif untuk survei ini.
+              {profile?.source === 'organization' ? 'Kebijakan organisasi' : 'Kebijakan platform'}
+              {' · '}
+              Nama, ketentuan, dan retensi dibaca dari profil kebijakan server untuk survei ini.
             </Banner>
           </Card>
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Pemberitahuan per survei</SectionTitle>
-            <p className="font-mono text-caption tracking-mono text-muted">Versi notice: {notice.version}</p>
-            <Table head={['Bagian', 'Isi']}>
-              <tr><Th>Tujuan</Th><Td>{notice.purpose}</Td></tr>
-              <tr><Th>Jenis data</Th><Td>{notice.data_categories}</Td></tr>
-              <tr><Th>Penggunaan Modul 15</Th><Td>{notice.module15_usage}</Td></tr>
-              <tr><Th>Retensi</Th><Td>{notice.retention_text}</Td></tr>
-              <tr><Th>Penerima</Th><Td>{notice.recipients}</Td></tr>
-              <tr><Th>Kontak</Th><Td>{notice.contact}</Td></tr>
-              <tr><Th>Hak peserta</Th><Td>{notice.rights}</Td></tr>
-              <tr><Th>Data anak</Th><Td>{notice.child_data_text}</Td></tr>
-            </Table>
+            {notice ? (
+              <>
+                <p className="font-mono text-caption tracking-mono text-muted">Versi notice: {notice.version}</p>
+                <Table head={['Bagian', 'Isi']}>
+                  <tr><Th>Tujuan</Th><Td>{notice.purpose}</Td></tr>
+                  <tr><Th>Jenis data</Th><Td>{notice.data_categories}</Td></tr>
+                  <tr><Th>Penggunaan Modul 15</Th><Td>{notice.module15_usage}</Td></tr>
+                  <tr><Th>Retensi</Th><Td>{notice.retention_text}</Td></tr>
+                  <tr><Th>Penerima</Th><Td>{notice.recipients}</Td></tr>
+                  <tr><Th>Kontak</Th><Td>{notice.contact}</Td></tr>
+                  <tr><Th>Hak peserta</Th><Td>{notice.rights}</Td></tr>
+                  <tr><Th>Data anak</Th><Td>{notice.child_data_text}</Td></tr>
+                </Table>
+              </>
+            ) : (
+              <p className="text-body-sm text-muted">Pemberitahuan untuk profil kebijakan survei ini belum tersedia.</p>
+            )}
             <p className="text-caption text-muted">Perubahan material membuat versi notice baru; persetujuan lama tetap merujuk versi yang disetujui.</p>
           </Card>
 

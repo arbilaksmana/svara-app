@@ -14,7 +14,7 @@ export const surveys: Survey[] = [
   {
     id: 's_demo1',
     owner_id: 'u_creator_a',
-    profile_id: 'p_smk',
+    profile_id: 'p_sekolah_placeholder',
     title: 'Pengalaman penggunaan alat bantu tugas',
     purpose: 'Mengumpulkan tanggapan atas penggunaan alat bantu tugas pada lingkungan belajar.',
     object_label: 'Alat bantu tugas desain',
