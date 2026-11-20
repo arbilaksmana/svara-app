@@ -22,19 +22,22 @@ after(async () => {
   await closeTestDatabase();
 });
 
+const VERSIONS = [
+  '001_initial.sql',
+  '002_operational_indexes.sql',
+  '003_public_link_uniqueness.sql',
+  '004_account_consent.sql',
+  '005_organizations.sql',
+  '006_organization_profile.sql',
+  '007_organization_invitations.sql',
+  '008_organization_invitation_lifecycle.sql',
+  '009_organization_invitation_expiry_backfill.sql',
+];
+
 test('migrasi membuat 24 tabel aplikasi dan mencatat versi', async () => {
   assert.equal(await tableCount(), 24);
   const versions = await appliedVersions();
-  assert.deepEqual(versions, [
-    '001_initial.sql',
-    '002_operational_indexes.sql',
-    '003_public_link_uniqueness.sql',
-    '004_account_consent.sql',
-    '005_organizations.sql',
-    '006_organization_profile.sql',
-    '007_organization_invitations.sql',
-    '008_organization_invitation_lifecycle.sql',
-  ]);
+  assert.deepEqual(versions, VERSIONS);
 });
 
 test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
@@ -42,16 +45,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
   const applied = await migrate();
   assert.deepEqual(applied, []);
   assert.equal(await tableCount(), 24);
-  assert.deepEqual(await appliedVersions(), [
-    '001_initial.sql',
-    '002_operational_indexes.sql',
-    '003_public_link_uniqueness.sql',
-    '004_account_consent.sql',
-    '005_organizations.sql',
-    '006_organization_profile.sql',
-    '007_organization_invitations.sql',
-    '008_organization_invitation_lifecycle.sql',
-  ]);
+  assert.deepEqual(await appliedVersions(), VERSIONS);
 });
 
 test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks operasional', async () => {
@@ -71,13 +65,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   }
 
   assert.deepEqual(await migrate(), [
-    '002_operational_indexes.sql',
-    '003_public_link_uniqueness.sql',
-    '004_account_consent.sql',
-    '005_organizations.sql',
-    '006_organization_profile.sql',
-    '007_organization_invitations.sql',
-    '008_organization_invitation_lifecycle.sql',
+    ...VERSIONS.slice(1),
   ]);
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
@@ -99,6 +87,54 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
       ['u_upgrade'],
     );
     assert.equal(tenancy.rows[0]?.organization_id, null, 'akun lama tetap valid tanpa organisasi');
+  } finally {
+    await verify.end();
+  }
+});
+
+test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari lalu mewajibkannya', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '008' });
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(
+      "INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES ('u_exp', 'exp@example.org', 'Exp', 'org_admin', 'active', 'scrypt$x$y', '2026-11-01T00:00:00.000Z')",
+    );
+    await client.query(
+      "INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, created_at) VALUES ('org_exp', 'Org', 'Sekolah', '/p', '/t', '2026-11-01T00:00:00.000Z')",
+    );
+    await client.query(
+      `INSERT INTO organization_invitations (id, organization_id, code, created_by, created_at, expires_at)
+       VALUES ('oi_legacy_null', 'org_exp', 'ORG-LAMA-TANPA-BATAS', 'u_exp', '2026-11-01T00:00:00.000Z', NULL),
+              ('oi_legacy_set', 'org_exp', 'ORG-LAMA-PUNYA-BATAS', 'u_exp', '2026-11-01T00:00:00.000Z', '2026-11-05T00:00:00.000Z')`,
+    );
+  } finally {
+    await client.end();
+  }
+
+  assert.deepEqual(await migrate(), ['009_organization_invitation_expiry_backfill.sql']);
+
+  const verify = new Client({ connectionString: databaseUrl });
+  await verify.connect();
+  try {
+    const rows = await verify.query<{ id: string; expires_at: string }>(
+      'SELECT id, expires_at FROM organization_invitations ORDER BY id',
+    );
+    assert.deepEqual(rows.rows, [
+      { id: 'oi_legacy_null', expires_at: '2026-11-15T00:00:00.000Z' },
+      { id: 'oi_legacy_set', expires_at: '2026-11-05T00:00:00.000Z' },
+    ]);
+    await assert.rejects(
+      verify.query(
+        `INSERT INTO organization_invitations (id, organization_id, code, created_by, created_at)
+         VALUES ('oi_new_null', 'org_exp', 'ORG-BARU-TANPA-BATAS', 'u_exp', '2026-11-01T00:00:00.000Z')`,
+      ),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23502',
+      'expires_at NOT NULL menolak undangan tanpa masa berlaku',
+    );
   } finally {
     await verify.end();
   }

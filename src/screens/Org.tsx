@@ -382,7 +382,7 @@ export function AdminOrgPage() {
                     <Td><Code>{row.code}</Code></Td>
                     <Td><Badge tone={INVITATION_STATUS_TONE[row.status]}>{INVITATION_STATUS_LABEL[row.status]}</Badge></Td>
                     <Td>{formatWIB(row.created_at)}</Td>
-                    <Td>{row.expires_at ? formatWIB(row.expires_at) : 'Tanpa batas'}</Td>
+                    <Td>{formatWIB(row.expires_at)}</Td>
                     <Td>
                       {row.status === 'active' ? (
                         <Button variant="ghost" disabled={invitationBusy} onClick={() => setRevokeTarget(row)}>Cabut</Button>
