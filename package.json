@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,web -c blue,green \"tsx watch server/index.ts\" \"next dev -p 3000\"",
+    "dev": "node scripts/dev.mjs --dev",
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "next dev -p 3000",
     "db:migrate": "tsx server/migrate.ts",
@@ -14,7 +14,7 @@
     "typegen": "next typegen",
     "typecheck": "next typegen && tsc --noEmit && tsc -p server/tsconfig.json --noEmit",
     "build": "pnpm typecheck && next build",
-    "start": "concurrently -k -n api,web -c blue,green \"tsx server/index.ts\" \"next start -p 3000\"",
+    "start": "node scripts/dev.mjs",
     "start:api": "tsx server/index.ts",
     "start:web": "next start -p 3000",
     "test": "pnpm typecheck && tsx server/test/migrations.test.ts && tsx server/test/api.test.ts && tsx server/test/export.test.ts && tsx server/test/report-versions.test.ts && tsx server/test/seed-policy.test.ts",
