@@ -223,6 +223,21 @@ export interface OrgProfile {
   notice_version: string;
 }
 
+/** Profil platform dipakai akun tanpa organisasi; diedit super_admin lewat /admin/platform. */
+export interface PlatformProfile {
+  id: string;
+  organization_name: string;
+  /** Seed menyimpan 'platform'; organisasi tetap memakai OrganizationType. */
+  organization_type: OrganizationType | 'platform';
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  notice_version: string;
+  updated_at: string;
+}
+
 export interface OrgMember {
   id: string;
   email: string;

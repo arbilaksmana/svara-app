@@ -116,7 +116,7 @@ scripts/         Smoke test web
 
 ## Rute
 
-`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]`, `/s/[token]/form`, `/s/[token]/review`, `/s/[token]/receipt`, `/admin`, `/admin/{accounts,audit,integration,requests,org}`, dan 404 untuk path lain.
+`/`, `/auth/login`, `/auth/register`, `/privacy`, `/terms`, `/creator`, `/creator/surveys/[id]/{edit,preview,publish,share,results,settings,history}`, `/s` (kode undangan), `/s/[token]`, `/s/[token]/form`, `/s/[token]/review`, `/s/[token]/receipt`, `/admin`, `/admin/{accounts,platform,audit,integration,requests,org}`, dan 404 untuk path lain.
 
 `/s` dan `/s/[token]/*` publik tanpa guard. `/creator` menolak `super_admin`, `/admin` hanya untuk `super_admin`, dan `/admin/org` hanya untuk `org_admin` yang terikat organisasi. Setiap route `/creator/surveys/[id]/*` memeriksa kepemilikan dan merender "Survei tidak ditemukan" untuk survei milik akun lain.
 
@@ -219,10 +219,20 @@ Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.
 
 Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah akunnya dan formulir pembuatan; setelah sukses daftar akun serta opsi organisasi ikut diperbarui lewat `refreshBootstrap`.
 
+### Profil platform
+
+`platform_profile` dipakai survei dan akun tanpa organisasi, dan `super_admin` mengubahnya lewat `/admin/platform` (`src/app/admin/platform/page.tsx`). Endpoint-nya ada di router admin sehingga otomatis hanya untuk `super_admin` (`server/routes/admin.ts:45`):
+
+| Endpoint | Perilaku |
+| --- | --- |
+| `GET /admin/platform-profile` | Membaca satu baris `id='platform'` dengan cache `no-store`; 404 `profile_missing` bila baris tidak ada |
+| `PUT /admin/platform-profile` | Field yang tidak dikirim mempertahankan nilai tersimpan; `organization_name`, `organization_type`, `policy_url`, `terms_url` wajib; `retention_days` bilangan bulat >= 0 atau null; `cross_border_transfer` hanya `boolean` (null "belum diputuskan" berasal dari seed dan tidak dapat dikembalikan lewat API); setiap perubahan diaudit `Ubah profil platform` |
+
+`notice_version` dan `updated_at` tidak dapat diubah dari sini: `notice_version` naik saat teks kebijakan berubah, `updated_at` diisi server. Profil ini tidak memiliki `respondent_age_category` maupun `consent_mode`, karena aturan persetujuan hanya didefinisikan per organisasi. Perubahan di sini tidak menyentuh baris `organizations`; `GET /org/profile` untuk akun berorganisasi tetap membaca organisasinya.
+
 ### Belum tersedia
 
 - `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).
-- Belum ada UI untuk `super_admin` mengubah `platform_profile`; `PUT /org/profile` hanya menulis `organizations` (`server/routes/org.ts:62-66`).
 - Belum ada endpoint untuk mencabut kode undangan organisasi yang belum terpakai, hanya satu kali pakai.
 
 ## Konfigurasi

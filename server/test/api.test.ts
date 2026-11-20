@@ -1319,6 +1319,134 @@ test('GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2',
   assert.equal(platformPut.status, 403);
 });
 
+test('Super admin mengubah profil platform tanpa menyentuh profil organisasi', async () => {
+  const admin = await session('admin@svara.local');
+
+  const creatorRead = await call('/admin/platform-profile', { cookie: await session('creator.a@svara.local') });
+  assert.equal(creatorRead.status, 403, 'creator tidak boleh membaca profil platform admin');
+  const orgAdminWrite = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: await session('orgadmin@svara.local'),
+    body: { organization_name: 'Penyusup' },
+  });
+  assert.equal(orgAdminWrite.status, 403, 'org_admin tidak boleh mengubah profil platform');
+
+  const read = await call('/admin/platform-profile', { cookie: admin });
+  assert.equal(read.status, 200, read.text);
+  const before = data<{
+    profile: {
+      id: string;
+      organization_name: string;
+      organization_type: string;
+      policy_url: string;
+      terms_url: string;
+      retention_days: number | null;
+      data_request_contact: string | null;
+      cross_border_transfer: number | null;
+      notice_version: string;
+    };
+  }>(read).profile;
+  assert.equal(before.id, 'platform');
+
+  const emptyName = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: { organization_name: '   ' },
+  });
+  assert.equal(emptyName.status, 422);
+  const negativeRetention = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: { retention_days: -1 },
+  });
+  assert.equal(negativeRetention.status, 422);
+  const wrongCrossBorder = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: { cross_border_transfer: 'ya' },
+  });
+  assert.equal(wrongCrossBorder.status, 422);
+  const nullCrossBorder = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: { cross_border_transfer: null },
+  });
+  assert.equal(nullCrossBorder.status, 422, 'null "belum diputuskan" tidak dapat dipilih lewat API');
+
+  const updated = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: {
+      organization_name: 'Svara Uji Platform',
+      organization_type: 'organization',
+      retention_days: 90,
+      data_request_contact: 'dpo@uji.test',
+      cross_border_transfer: true,
+    },
+  });
+  assert.equal(updated.status, 200, updated.text);
+  const changed = data<{
+    profile: {
+      organization_name: string;
+      organization_type: string;
+      retention_days: number;
+      data_request_contact: string;
+      cross_border_transfer: number;
+      notice_version: string;
+      policy_url: string;
+      terms_url: string;
+    };
+  }>(updated).profile;
+  assert.equal(changed.organization_name, 'Svara Uji Platform');
+  assert.equal(changed.organization_type, 'organization');
+  assert.equal(changed.retention_days, 90);
+  assert.equal(changed.data_request_contact, 'dpo@uji.test');
+  assert.equal(changed.cross_border_transfer, 1);
+  assert.equal(changed.notice_version, before.notice_version, 'notice_version tidak ikut berubah');
+
+  const platformAsAdmin = data<{ source: string; profile: { organization_name: string; policy_url: string } }>(
+    await call('/org/profile', { cookie: admin }),
+  );
+  assert.equal(platformAsAdmin.source, 'platform');
+  assert.equal(platformAsAdmin.profile.organization_name, 'Svara Uji Platform');
+  assert.equal(platformAsAdmin.profile.policy_url, changed.policy_url);
+
+  const orgUntouched = data<{ source: string; profile: { organization_name: string } }>(
+    await call('/org/profile', { cookie: await session('orgadmin@svara.local') }),
+  );
+  assert.equal(orgUntouched.source, 'organization');
+  assert.equal(orgUntouched.profile.organization_name, 'SMK Nusantara (sintetis)');
+
+  const stored = new Client({ connectionString: databaseUrl });
+  await stored.connect();
+  try {
+    const audit = await stored.query("SELECT metadata FROM audit_logs WHERE object = 'platform' ORDER BY at DESC LIMIT 1");
+    const metadata = JSON.parse(String(audit.rows[0]?.metadata ?? '{}')) as { organization_type?: string };
+    assert.equal(metadata.organization_type, 'organization');
+  } finally {
+    await stored.end();
+  }
+
+  const restored = await call('/admin/platform-profile', {
+    method: 'PUT',
+    cookie: admin,
+    body: {
+      organization_name: before.organization_name,
+      organization_type: before.organization_type,
+      policy_url: before.policy_url,
+      terms_url: before.terms_url,
+      retention_days: before.retention_days,
+      data_request_contact: before.data_request_contact,
+      cross_border_transfer: before.cross_border_transfer === null ? null : Boolean(before.cross_border_transfer),
+    },
+  });
+  assert.equal(restored.status, 200, restored.text);
+  assert.equal(
+    data<{ profile: { organization_name: string } }>(restored).profile.organization_name,
+    before.organization_name,
+  );
+});
+
 test('POST /surveys: owner_scope menentukan lingkup, visibilitas, dan sumber notice', async () => {
   const owner = await session('creator.a@svara.local');
   const orgAdmin = await session('orgadmin@svara.local');

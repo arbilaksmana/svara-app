@@ -249,6 +249,87 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
   }
 });
 
+const PLATFORM_COLUMNS = `id, organization_name, organization_type, policy_url, terms_url, retention_days,
+  data_request_contact, cross_border_transfer, notice_version, updated_at`;
+
+/** Profil platform dipakai akun tanpa organisasi; sebelumnya hanya bisa dibaca lewat /org/profile. */
+adminRouter.get('/admin/platform-profile', async (_req: AuthedRequest, res: Response) => {
+  try {
+    const profile = await get<Record<string, unknown>>(
+      `SELECT ${PLATFORM_COLUMNS} FROM platform_profile WHERE id = 'platform'`,
+    );
+    if (!profile) fail(404, 'profile_missing', 'Profil platform belum dikonfigurasi.');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { profile } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+adminRouter.put('/admin/platform-profile', async (req: AuthedRequest, res: Response) => {
+  try {
+    const current = await get<Record<string, unknown>>(
+      `SELECT ${PLATFORM_COLUMNS} FROM platform_profile WHERE id = 'platform'`,
+    );
+    if (!current) fail(404, 'profile_missing', 'Profil platform belum dikonfigurasi.');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    /** Field yang tidak dikirim mempertahankan nilai tersimpan. */
+    const merged = (key: string, stored: unknown, max: number): string =>
+      body[key] === undefined ? String(stored ?? '') : asString(body[key], key, max);
+    const required = (key: string, max: number): string => {
+      const value = merged(key, current[key], max);
+      if (!value) fail(422, 'validation_error', `${key} wajib diisi.`);
+      return value;
+    };
+
+    let retentionDays: number | null = current.retention_days as number | null;
+    if (body.retention_days !== undefined) {
+      const value = body.retention_days;
+      if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value < 0)) {
+        fail(422, 'validation_error', 'retention_days harus bilangan bulat >= 0.');
+      }
+      retentionDays = value as number | null;
+    }
+    let crossBorder: number | null = current.cross_border_transfer as number | null;
+    if (body.cross_border_transfer !== undefined) {
+      if (typeof body.cross_border_transfer !== 'boolean') {
+        fail(422, 'validation_error', 'cross_border_transfer harus boolean.');
+      }
+      crossBorder = body.cross_border_transfer ? 1 : 0;
+    }
+    const organizationName = required('organization_name', 200);
+    const organizationType = required('organization_type', 50);
+    const policyUrl = required('policy_url', 500);
+    const termsUrl = required('terms_url', 500);
+    await run(
+      `UPDATE platform_profile
+          SET organization_name = ?, organization_type = ?, policy_url = ?, terms_url = ?,
+              retention_days = ?, data_request_contact = ?, cross_border_transfer = ?, updated_at = ?
+        WHERE id = 'platform'`,
+      organizationName,
+      organizationType,
+      policyUrl,
+      termsUrl,
+      retentionDays,
+      merged('data_request_contact', current.data_request_contact, 200) || null,
+      crossBorder,
+      nowIso(),
+    );
+    await audit(req, 'Ubah profil platform', 'platform', 'berhasil', {
+      organization_type: organizationType,
+    });
+    res.json({
+      data: {
+        profile: await get<Record<string, unknown>>(
+          `SELECT ${PLATFORM_COLUMNS} FROM platform_profile WHERE id = 'platform'`,
+        ),
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 async function replaceGrants(accountId: string, grants: GrantInput[]): Promise<void> {
   const account = await get<{ id: string }>('SELECT id FROM accounts WHERE id = ?', accountId);
   if (!account) fail(404, 'account_not_found', 'Akun tidak ditemukan.');
