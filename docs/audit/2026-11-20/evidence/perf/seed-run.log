@@ -1,0 +1,8 @@
+2026-11-20T14:40:40.477Z db identity svara_audit_perf svara 172.26.0.2/32 PostgreSQL
+2026-11-20T14:40:40.486Z baseline rows {"responses":6,"answers":18,"surveys":4}
+2026-11-20T14:40:40.547Z ensuring survey s_perf_1k
+2026-11-20T14:40:42.083Z seeded 1k 1000/1000
+2026-11-20T14:40:42.084Z ensuring survey s_perf_10k
+2026-11-20T14:41:00.806Z seeded 10k 10000/10000
+2026-11-20T14:41:01.104Z dataset summary [{"version_id":"v_perf_10k","responses":200000,"answers":200000},{"version_id":"v_perf_1k","responses":20000,"answers":20000}]
+2026-11-20T14:41:01.109Z database size 69 MB

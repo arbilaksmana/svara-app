@@ -1,0 +1,72 @@
+PERF STATIC INDEX INVENTORY
+captured_at_utc: 2026-11-20T13:50:01Z
+commit: 95eafa3cb38aac4dd32963a1ec584a2ce6821f25
+database: svara_audit_perf @ 127.0.0.1:5432 (container svara-app-db-1)
+source: pg_indexes, schema public; read-only
+status: STATIC_ONLY_NO_LOAD
+
+RAW INDEX LIST (pg_indexes)
+access_grants | access_grants_pkey | CREATE UNIQUE INDEX access_grants_pkey ON public.access_grants USING btree (id)
+access_grants | ux_grants_account_survey | CREATE UNIQUE INDEX ux_grants_account_survey ON public.access_grants USING btree (account_id, survey_id)
+accounts | accounts_email_key | CREATE UNIQUE INDEX accounts_email_key ON public.accounts USING btree (email)
+accounts | accounts_pkey | CREATE UNIQUE INDEX accounts_pkey ON public.accounts USING btree (id)
+answers | answers_pkey | CREATE UNIQUE INDEX answers_pkey ON public.answers USING btree (id)
+answers | answers_response_id_question_code_key | CREATE UNIQUE INDEX answers_response_id_question_code_key ON public.answers USING btree (response_id, question_code)
+answers | ix_answers_response | CREATE INDEX ix_answers_response ON public.answers USING btree (response_id)
+assignments | assignments_pkey | CREATE UNIQUE INDEX assignments_pkey ON public.assignments USING btree (id)
+audit_logs | audit_logs_pkey | CREATE UNIQUE INDEX audit_logs_pkey ON public.audit_logs USING btree (id)
+audit_logs | ix_audit_actor_at | CREATE INDEX ix_audit_actor_at ON public.audit_logs USING btree (actor, at DESC)
+audit_logs | ix_audit_at | CREATE INDEX ix_audit_at ON public.audit_logs USING btree (at)
+consent_records | consent_records_pkey | CREATE UNIQUE INDEX consent_records_pkey ON public.consent_records USING btree (id)
+consent_records | ix_consent_survey_version | CREATE INDEX ix_consent_survey_version ON public.consent_records USING btree (survey_id, version_id)
+consent_records | ux_consent_response | CREATE UNIQUE INDEX ux_consent_response ON public.consent_records USING btree (response_id) WHERE (response_id IS NOT NULL)
+data_requests | data_requests_pkey | CREATE UNIQUE INDEX data_requests_pkey ON public.data_requests USING btree (id)
+integration_events | integration_events_event_id_key | CREATE UNIQUE INDEX integration_events_event_id_key ON public.integration_events USING btree (event_id)
+integration_events | integration_events_pkey | CREATE UNIQUE INDEX integration_events_pkey ON public.integration_events USING btree (id)
+invitations | invitations_code_key | CREATE UNIQUE INDEX invitations_code_key ON public.invitations USING btree (code)
+invitations | invitations_pkey | CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
+invitations | invitations_token_key | CREATE UNIQUE INDEX invitations_token_key ON public.invitations USING btree (token)
+invitations | ix_invitations_survey | CREATE INDEX ix_invitations_survey ON public.invitations USING btree (survey_id)
+notices | notices_pkey | CREATE UNIQUE INDEX notices_pkey ON public.notices USING btree (id)
+organization_invitations | organization_invitations_code_key | CREATE UNIQUE INDEX organization_invitations_code_key ON public.organization_invitations USING btree (code)
+organization_invitations | organization_invitations_pkey | CREATE UNIQUE INDEX organization_invitations_pkey ON public.organization_invitations USING btree (id)
+organizations | organizations_pkey | CREATE UNIQUE INDEX organizations_pkey ON public.organizations USING btree (id)
+platform_profile | platform_profile_pkey | CREATE UNIQUE INDEX platform_profile_pkey ON public.platform_profile USING btree (id)
+profiles | profiles_pkey | CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)
+public_links | ix_public_links_survey | CREATE INDEX ix_public_links_survey ON public.public_links USING btree (survey_id)
+public_links | public_links_pkey | CREATE UNIQUE INDEX public_links_pkey ON public.public_links USING btree (id)
+public_links | public_links_token_key | CREATE UNIQUE INDEX public_links_token_key ON public.public_links USING btree (token)
+public_links | ux_public_links_survey_version | CREATE UNIQUE INDEX ux_public_links_survey_version ON public.public_links USING btree (survey_id, version_id)
+question_options | question_options_pkey | CREATE UNIQUE INDEX question_options_pkey ON public.question_options USING btree (id)
+questions | ix_questions_version | CREATE INDEX ix_questions_version ON public.questions USING btree (version_id)
+questions | questions_pkey | CREATE UNIQUE INDEX questions_pkey ON public.questions USING btree (id)
+respondents | respondents_pkey | CREATE UNIQUE INDEX respondents_pkey ON public.respondents USING btree (id)
+responses | ix_responses_survey | CREATE INDEX ix_responses_survey ON public.responses USING btree (survey_id)
+responses | ix_responses_version | CREATE INDEX ix_responses_version ON public.responses USING btree (version_id)
+responses | responses_pkey | CREATE UNIQUE INDEX responses_pkey ON public.responses USING btree (id)
+responses | ux_responses_assignment | CREATE UNIQUE INDEX ux_responses_assignment ON public.responses USING btree (assignment_id) WHERE (assignment_id IS NOT NULL)
+schema_migrations | schema_migrations_pkey | CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)
+sessions | ix_sessions_expires | CREATE INDEX ix_sessions_expires ON public.sessions USING btree (expires_at)
+sessions | sessions_pkey | CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (token_hash)
+submission_attempts | submission_attempts_pkey | CREATE UNIQUE INDEX submission_attempts_pkey ON public.submission_attempts USING btree (id)
+submission_attempts | submission_attempts_scope_idempotency_key_key | CREATE UNIQUE INDEX submission_attempts_scope_idempotency_key_key ON public.submission_attempts USING btree (scope, idempotency_key)
+survey_settings | survey_settings_pkey | CREATE UNIQUE INDEX survey_settings_pkey ON public.survey_settings USING btree (survey_id)
+survey_versions | ix_versions_survey | CREATE INDEX ix_versions_survey ON public.survey_versions USING btree (survey_id)
+survey_versions | survey_versions_pkey | CREATE UNIQUE INDEX survey_versions_pkey ON public.survey_versions USING btree (id)
+survey_versions | survey_versions_survey_id_number_key | CREATE UNIQUE INDEX survey_versions_survey_id_number_key ON public.survey_versions USING btree (survey_id, number)
+surveys | surveys_pkey | CREATE UNIQUE INDEX surveys_pkey ON public.surveys USING btree (id)
+
+GAPS AGAINST ACTUAL ACCESS PATHS (static mapping; plans to be captured after gate)
+1. public_links.token_hash lookup: `SELECT * FROM public_links WHERE token_hash = ?` (server/routes/public.ts:216) has no token_hash index; the existing unique index is on raw `token`. Every public intro/consent/form/submit/receipt resolves this by sequential scan.
+2. invitations.token_hash lookup: `SELECT * FROM invitations WHERE token_hash = ?` (server/routes/public.ts:212) has no token_hash index; existing unique index is on raw `token`. Every invitation path pays a sequential scan.
+3. responses ordered pagination/export: `WHERE survey_id=? AND version_id=? ORDER BY submitted_at DESC LIMIT ? OFFSET ?` (server/routes/surveys.ts:795) and `ORDER BY submitted_at, id LIMIT ? OFFSET ?` (server/routes/integration.ts:81). Only single-column indexes on survey_id/version_id exist; no (version_id, submitted_at, id).
+4. answers by option/question for summary: summary option counts filter `answers.option_id` and `answers.response_id IN (responses of version)`; answered counts filter `answers.question_id` + responses.version_id. No index on answers(option_id) or answers(question_id); current indexes are (response_id) and (response_id, question_code).
+5. audit by organization: `WHERE organization_id=? ORDER BY at DESC, id DESC LIMIT ?` (server/routes/org.ts:298). ix_audit_at cannot filter organization; no (organization_id, at DESC).
+6. surveys listing/order: accessibleSurveys filters owner_id/organization_id and orders by updated_at; no index on surveys(owner_id), surveys(organization_id), surveys(updated_at).
+7. admin stats joins: perCreator joins accounts -> surveys on owner_id; perSurvey joins survey_versions and responses by survey_id; COUNT(DISTINCT) over the fan-out. No supporting index on surveys(owner_id).
+8. integration_events/data_requests admin lists order by at/created_at DESC LIMIT 250; no indexes on those sort columns; acceptable only while tables are small.
+9. question_options: no index on question_id (options are fetched by question_id per question in summary/public context); small table, low priority.
+10. sessions: expiry index exists but no sweep deletes expired sessions; lazy delete only on access of that token.
+
+NOT DONE IN THIS ARTIFACT
+- No EXPLAIN/ANALYZE, no dataset creation, no index changes, no load. All gated.

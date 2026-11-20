@@ -1,0 +1,3 @@
+[seed] demo nonaktif; gunakan SEED_DEMO=1 atau bootstrap admin untuk basis data kosong
+[api] Svara berjalan di http://127.0.0.1:4321
+[db] postgres 127.0.0.1:5432/svara_audit_ui

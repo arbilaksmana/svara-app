@@ -1,0 +1,78 @@
+{
+  "artifact": "dynamic-performance-preflight",
+  "schema": 1,
+  "captured_at_utc": "2026-11-20T14:46:04Z",
+  "gate": {
+    "status": "OPEN_EXCLUSIVE_WINDOW",
+    "source": "coordinator dispatch task_d891e6600c3f",
+    "window_limit": "2.5h",
+    "approved": ["AC13 30x20 at 1k", "AC13 30x20 at 10k", "EXPLAIN prepared queries", "mixed/ramp max 100 VUs", "one 200-request spike if RAM stable", "20-VU 30m soak"],
+    "blocked": ["100k seed (<3.5GB free RAM)", "CSV/response export (not approved)", "300 VUs", "container SIGTERM test (no isolated Linux image)"]
+  },
+  "target": {
+    "repo": "arbilaksmana/svara-app",
+    "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+    "build_id": "3RzZi-drCTjszTT7A99TF",
+    "db": "svara_audit_perf",
+    "db_size": "69 MB",
+    "api_ports": [4341, 4342],
+    "web_port": 4343,
+    "gateway_port": 4340,
+    "gateway_routes": "/api/* -> round-robin 4341/4342; other -> 4343",
+    "app_origin": "http://127.0.0.1:4340",
+    "api_internal_url": "http://127.0.0.1:4341"
+  },
+  "host": {
+    "os": "Microsoft Windows 11 Home Single Language 10.0.26200",
+    "node": "v24.15.0",
+    "pnpm": "11.5.2",
+    "cpu": "12th Gen Intel Core i7-12700H (20 logical processors, static inventory)",
+    "ram_total_mb": 14188,
+    "ram_free_mb_before_services": 3963,
+    "ram_free_mb_with_services": 2026,
+    "ram_free_mb_coordinator_after_seed": 1490,
+    "ram_free_mb_after_stop_observation": 1729,
+    "ram_free_mb_final_observation": 492,
+    "stale_ports_observed": [3001, 4320, 4322, 4331],
+    "disk_free_c": "77 GB"
+  },
+  "postgres": {
+    "version": "17.12 (Alpine, x86_64-pc-linux-musl)",
+    "max_connections": 100,
+    "shared_buffers": "128MB",
+    "timezone": "UTC",
+    "pool_max_per_api_process": 10
+  },
+  "data": {
+    "responses_total": 11006,
+    "answers_total": 220018,
+    "demo_responses_preserved": 6,
+    "profiles": {
+      "v_perf_1k": {"responses": 1000, "answers": 20000, "surveys": 1},
+      "v_perf_10k": {"responses": 10000, "answers": 200000, "surveys": 1}
+    },
+    "v_perf_100k": "NOT_SEEDED",
+    "seed_mode": "additive; no truncate/drop; existing rows preserved"
+  },
+  "harness_defect": {
+    "id": "seed-summary-response-count",
+    "observed": "seed summary printed responses=200000 for the 10k profile",
+    "cause": "summary query used count(*) over responses LEFT JOIN answers, so it counted joined response-answer rows (10000 x 20)",
+    "true_count": 10000,
+    "verification": "independent count(distinct r.id) and separate answers count",
+    "data_impact": "none; reporting metric only",
+    "action": "not repeated as a response count in this report"
+  },
+  "services": [
+    {"name": "perf-api-a", "addr": "127.0.0.1:4341", "health": "200", "sampler_pid": 1444},
+    {"name": "perf-api-b", "addr": "127.0.0.1:4342", "health": "200", "sampler_pid": 28780},
+    {"name": "perf-next", "addr": "127.0.0.1:4343", "health": "home 200"},
+    {"name": "perf-gateway", "addr": "127.0.0.1:4340", "health": "200; API alternation observed 4341/4342"}
+  ],
+  "warnings": [
+    "Next 16 prints a warning that next start does not match output:standalone; preview still served 200. Docker standalone behavior is NOT_VERIFIED by this run.",
+    "Windows timer resolution limits event-loop delay interpretation to p99/max and idle delta; p50 is not app latency.",
+    "Local synthetic data and loopback gateway do not represent production TLS/ingress or real traffic.",
+    "Host was not fully exclusive: ports 3001/4320/4322/4331 remained listening; 3001 had recent TIME_WAIT connections. No harness request targeted those ports, but contention cannot be excluded."
+  ]
+}

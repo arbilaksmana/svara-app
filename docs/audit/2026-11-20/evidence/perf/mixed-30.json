@@ -1,0 +1,176 @@
+{
+  "node": "v24.15.0",
+  "base": "http://127.0.0.1:4340",
+  "scenario": "mixed",
+  "label": "mixed-30-300s",
+  "started_at": "2026-11-20T14:49:38.779Z",
+  "host": "LAPTOP-N4GRDGAP",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "build_id": "3RzZi-drCTjszTT7A99TF",
+  "ip_mode": "distinct",
+  "finished_at": "2026-11-20T14:55:42.119Z",
+  "result": {
+    "scenario": "mixed",
+    "label": "mixed-30-300s",
+    "vus": 30,
+    "duration_ms": 300000,
+    "think_ms": 20,
+    "submit_per_min": 1,
+    "endpoints": {
+      "summary": 1755,
+      "list": 627,
+      "bootstrap": 2564,
+      "responses": 1255
+    },
+    "http": {
+      "n": 6201,
+      "wall_ms": 300000,
+      "throughput_rps": 20.67,
+      "p50_ms": 992.4,
+      "p95_ms": 4688.4,
+      "p99_ms": 6545.57,
+      "max_ms": 8794.91,
+      "mean_ms": 1418.61,
+      "statuses": {
+        "200": 3614,
+        "403": 2587
+      },
+      "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+    },
+    "by_endpoint": {
+      "summary": {
+        "n": 1755,
+        "wall_ms": 300000,
+        "throughput_rps": 5.85,
+        "p50_ms": 812.81,
+        "p95_ms": 2704.7,
+        "p99_ms": 3673.64,
+        "max_ms": 5396.11,
+        "mean_ms": 1017.18,
+        "statuses": {
+          "200": 241,
+          "403": 1514
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "list": {
+        "n": 627,
+        "wall_ms": 300000,
+        "throughput_rps": 2.09,
+        "p50_ms": 547.4,
+        "p95_ms": 1511.2,
+        "p99_ms": 2109.64,
+        "max_ms": 2443.14,
+        "mean_ms": 623.39,
+        "statuses": {
+          "200": 627
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "bootstrap": {
+        "n": 2564,
+        "wall_ms": 300000,
+        "throughput_rps": 8.547,
+        "p50_ms": 1424.32,
+        "p95_ms": 5975.35,
+        "p99_ms": 7200.74,
+        "max_ms": 8794.91,
+        "mean_ms": 2035.38,
+        "statuses": {
+          "200": 2564
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "responses": {
+        "n": 1255,
+        "wall_ms": 300000,
+        "throughput_rps": 4.183,
+        "p50_ms": 931.36,
+        "p95_ms": 2637.44,
+        "p99_ms": 3598.33,
+        "max_ms": 4333.69,
+        "mean_ms": 1117.2,
+        "statuses": {
+          "200": 182,
+          "403": 1073
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      }
+    },
+    "submits": {
+      "count": 5,
+      "http": {
+        "n": 5,
+        "wall_ms": 300000,
+        "throughput_rps": 0.017,
+        "p50_ms": 13681.96,
+        "p95_ms": 17485.44,
+        "p99_ms": 17485.44,
+        "max_ms": 17485.44,
+        "mean_ms": 12510.77,
+        "statuses": {
+          "201": 5
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "samples": [
+        {
+          "label": "submit-0",
+          "status": 201,
+          "ok": true,
+          "total_ms": 11396.14,
+          "ttfb_ms": 11396.01,
+          "bytes": 237,
+          "response_id": "r_7dffc71874ad5834",
+          "submitted_at": "2026-11-20T14:49:50.291Z",
+          "error": null
+        },
+        {
+          "label": "submit-1",
+          "status": 201,
+          "ok": true,
+          "total_ms": 13681.96,
+          "ttfb_ms": 13681.88,
+          "bytes": 237,
+          "response_id": "r_5ac8215364a50829",
+          "submitted_at": "2026-11-20T14:51:02.838Z",
+          "error": null
+        },
+        {
+          "label": "submit-2",
+          "status": 201,
+          "ok": true,
+          "total_ms": 14731.41,
+          "ttfb_ms": 14731.33,
+          "bytes": 237,
+          "response_id": "r_d5679cdb0c05be29",
+          "submitted_at": "2026-11-20T14:52:18.510Z",
+          "error": null
+        },
+        {
+          "label": "submit-3",
+          "status": 201,
+          "ok": true,
+          "total_ms": 17485.44,
+          "ttfb_ms": 17485.35,
+          "bytes": 237,
+          "response_id": "r_713a03f22020d0cb",
+          "submitted_at": "2026-11-20T14:53:36.069Z",
+          "error": null
+        },
+        {
+          "label": "submit-4",
+          "status": 201,
+          "ok": true,
+          "total_ms": 5258.91,
+          "ttfb_ms": 5258.85,
+          "bytes": 237,
+          "response_id": "r_525681144f77ec26",
+          "submitted_at": "2026-11-20T14:54:42.067Z",
+          "error": null
+        }
+      ]
+    },
+    "dataset": "v_perf_10k"
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "artifact": "performance-static-baseline",
+  "schema": 1,
+  "captured_at_utc": "2026-11-20T13:50:01Z",
+  "status": "STATIC_ONLY_NO_LOAD",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "worktree": "C:/Users/arbil/orca/workspaces/svara-app/audit-total",
+  "host": {
+    "os": "win32 10.0.26200",
+    "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "logical_cpus": 16,
+    "ram_total_mb": 14188,
+    "ram_free_mb_at_capture": 2389,
+    "note": "free RAM sampled while other audit probes were active"
+  },
+  "runtime": {
+    "node": "24.15.0",
+    "pnpm": "11.5.2",
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "postgres": "17.12 (x86_64-pc-linux-musl, container)"
+  },
+  "docker": {
+    "available": true,
+    "vm_mem_total_mb": 3916,
+    "vm_cpus": 16,
+    "db_container": "svara-app-db-1",
+    "db_container_mem_at_capture": "160.1MiB / 3.824GiB",
+    "db_container_memory_limit_bytes": 0,
+    "db_container_shm_bytes": 67108864
+  },
+  "database_identity": {
+    "name": "svara_audit_perf",
+    "host": "127.0.0.1:5432",
+    "owner": "svara",
+    "public_tables": 25,
+    "applied_migrations": 9,
+    "size_bytes": 9240576,
+    "baseline_rows_before_seed": {
+      "accounts": 6,
+      "surveys": 4,
+      "survey_versions": 4,
+      "responses": 6,
+      "answers": 18
+    },
+    "note": "DB was already demo-seeded by an earlier probe; performance dataset must be additive, not truncating"
+  },
+  "postgres_settings": {
+    "max_connections": 100,
+    "shared_buffers": "128MB",
+    "work_mem": "4MB",
+    "effective_cache_size": "4GB",
+    "fsync": "on",
+    "synchronous_commit": "on",
+    "jit": "on"
+  },
+  "app_pool": {
+    "PG_POOL_MAX_default": 10,
+    "PG_IDLE_TIMEOUT_MS_default": 10000,
+    "PG_CONNECTION_TIMEOUT_MS_default": 5000,
+    "statement_timeout": null,
+    "source": "server/db.ts"
+  },
+  "build_artifact": {
+    "build_id": "3RzZi-drCTjszTT7A99TF",
+    "built_at_local": "2026-11-20 20:42:14 +0700",
+    "api_rewrite_baked_or": "http://127.0.0.1:4321 (from .next/routes-manifest.json; not the perf gateway)",
+    "prerendered_routes": ["/_global-error"],
+    "note": "web build is reusable only if the audit gateway owns /api/*; direct Next /api requests must not be used for measurement"
+  },
+  "bundle_baseline": {
+    "metric": "Next diagnostics route-bundle-stats firstLoadUncompressedJsBytes; gzip-9/brotli recomputed from the listed chunks",
+    "creator_survey_results": {
+      "raw_bytes": 608274,
+      "gzip_bytes": 179741,
+      "brotli_bytes": 155826
+    },
+    "creator_survey_edit": {
+      "raw_bytes": 581089,
+      "gzip_bytes": 173085,
+      "brotli_bytes": 149849
+    },
+    "admin_dashboard": {
+      "raw_bytes": 581585,
+      "gzip_bytes": 171509,
+      "brotli_bytes": 148442
+    },
+    "public_form": {
+      "raw_bytes": 580929,
+      "gzip_bytes": 172226,
+      "brotli_bytes": 149120
+    },
+    "auth_login": {
+      "raw_bytes": 548650,
+      "gzip_bytes": 163671,
+      "brotli_bytes": 141353
+    },
+    "css_raw_bytes": 35150,
+    "font_files": 13,
+    "font_raw_bytes": 304756,
+    "note": "font files are unicode-range subsets; a Latin page usually downloads a subset, runtime transfer measured later"
+  },
+  "ports_at_capture": {
+    "in_use_by_other_probes": ["127.0.0.1:4311"],
+    "reserved_for_perf": ["4340 gateway", "4341 api-a", "4342 api-b", "4343 next-preview"],
+    "forbidden": ["3000", "3001", "4321", "5173"]
+  },
+  "loopback_source_capability": {
+    "verified": true,
+    "method": "throwaway HTTP server on 127.0.0.1:4399; requests bound to 127.0.0.1/127.0.0.2/127.0.0.3",
+    "observed_remote_addresses": ["127.0.0.1", "127.0.0.2", "127.0.0.3"],
+    "purpose": "isolate per-IP rate-limit buckets during direct-to-API load; gateway traffic still collapses to the gateway address because trust proxy is disabled"
+  },
+  "source_sha256": {
+    "server/security.ts": "ffa6f0727e614a416a00fd39a51be0cc2e43d24334b05a339e49156d1fce04cc",
+    "server/bootstrap.ts": "e6dbd18d3420f28bc6a8e6e127278da3c5e0054e026edc1304e5fdb41df9b6e0",
+    "server/summary.ts": "17247dfe148509785422c0b29dbbf9ae860c84036429dab5f57ebffaaab7706a",
+    "server/routes/public.ts": "1860704dd3d6522c6f64ab6c40854a6cdd24b6044538669ae30a5dbd0c9fc2b9",
+    "server/routes/surveys.ts": "6a01c60efc85dc7058971dcfe4fc9086cf5a6eaa45550f1a8d46fd229031c78a",
+    "server/db.ts": "ff1ba331847a56cf2b22d9dee5b73e33ee7494e61ac3928a988c4440c7075353",
+    "server/index.ts": "fa31beb092693fc69e25a16816b1f6e936a1c9e29c0ba327c4ca9c879cd07797",
+    "src/app/layout.tsx": "048222af753eb95f6f266ba4166f93f667c05892b4b379936e2efd707eff4423",
+    "next.config.ts": "1d43c6ea85fb9d4c3e1a5fa196b654a8afdf7bd01a859e82f50e49ac4f2dde5b",
+    "Dockerfile.api": "0498790fab8cf6c8cd0ed133014c3bb4d3cff430422d1bfba856dbb4024b7ef1",
+    "docker-compose.yml": "380dd954d96935cf9371f91599fc7924647c92069521d0ca33aefe94c1d0801d"
+  },
+  "dynamic_measurements": "none; all load/seeding gated by coordinator"
+}

@@ -1,0 +1,2 @@
+$ tsx server/migrate.ts
+[db] migrasi diterapkan: 001_initial.sql, 002_operational_indexes.sql, 003_public_link_uniqueness.sql, 004_account_consent.sql, 005_organizations.sql, 006_organization_profile.sql, 007_organization_invitations.sql, 008_organization_invitation_lifecycle.sql, 009_organization_invitation_expiry_backfill.sql

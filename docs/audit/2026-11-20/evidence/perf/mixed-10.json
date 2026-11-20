@@ -1,0 +1,140 @@
+{
+  "node": "v24.15.0",
+  "base": "http://127.0.0.1:4340",
+  "scenario": "mixed",
+  "label": "mixed-10-120s",
+  "started_at": "2026-11-20T14:56:30.695Z",
+  "host": "LAPTOP-N4GRDGAP",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "build_id": "3RzZi-drCTjszTT7A99TF",
+  "ip_mode": "distinct",
+  "finished_at": "2026-11-20T14:58:51.494Z",
+  "result": {
+    "scenario": "mixed",
+    "label": "mixed-10-120s",
+    "vus": 10,
+    "duration_ms": 120000,
+    "think_ms": 20,
+    "submit_per_min": 1,
+    "endpoints": {
+      "bootstrap": 195,
+      "summary": 143,
+      "responses": 87,
+      "list": 49
+    },
+    "http": {
+      "n": 474,
+      "wall_ms": 120000,
+      "throughput_rps": 3.95,
+      "p50_ms": 2385.89,
+      "p95_ms": 4762.94,
+      "p99_ms": 5571.58,
+      "max_ms": 6608.81,
+      "mean_ms": 2511.81,
+      "statuses": {
+        "200": 474
+      },
+      "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+    },
+    "by_endpoint": {
+      "bootstrap": {
+        "n": 195,
+        "wall_ms": 120000,
+        "throughput_rps": 1.625,
+        "p50_ms": 3480.78,
+        "p95_ms": 5273.6,
+        "p99_ms": 6512.51,
+        "max_ms": 6608.81,
+        "mean_ms": 3436.24,
+        "statuses": {
+          "200": 195
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "summary": {
+        "n": 143,
+        "wall_ms": 120000,
+        "throughput_rps": 1.192,
+        "p50_ms": 2054.17,
+        "p95_ms": 3276.81,
+        "p99_ms": 3731.75,
+        "max_ms": 3764.79,
+        "mean_ms": 2089.6,
+        "statuses": {
+          "200": 143
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "responses": {
+        "n": 87,
+        "wall_ms": 120000,
+        "throughput_rps": 0.725,
+        "p50_ms": 2136.22,
+        "p95_ms": 3394.7,
+        "p99_ms": 4900.66,
+        "max_ms": 4900.66,
+        "mean_ms": 2230.82,
+        "statuses": {
+          "200": 87
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "list": {
+        "n": 49,
+        "wall_ms": 120000,
+        "throughput_rps": 0.408,
+        "p50_ms": 559.43,
+        "p95_ms": 1423.72,
+        "p99_ms": 1589.84,
+        "max_ms": 1589.84,
+        "mean_ms": 564.03,
+        "statuses": {
+          "200": 49
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      }
+    },
+    "submits": {
+      "count": 2,
+      "http": {
+        "n": 2,
+        "wall_ms": 120000,
+        "throughput_rps": 0.017,
+        "p50_ms": 8532.36,
+        "p95_ms": 11927.79,
+        "p99_ms": 11927.79,
+        "max_ms": 11927.79,
+        "mean_ms": 10230.08,
+        "statuses": {
+          "201": 2
+        },
+        "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+      },
+      "samples": [
+        {
+          "label": "submit-0",
+          "status": 201,
+          "ok": true,
+          "total_ms": 11927.79,
+          "ttfb_ms": 11927.59,
+          "bytes": 237,
+          "response_id": "r_353add6ed30aac11",
+          "submitted_at": "2026-11-20T14:56:42.676Z",
+          "error": null
+        },
+        {
+          "label": "submit-1",
+          "status": 201,
+          "ok": true,
+          "total_ms": 8532.36,
+          "ttfb_ms": 8532.27,
+          "bytes": 237,
+          "response_id": "r_a20b9b5f5f0eb31e",
+          "submitted_at": "2026-11-20T14:57:50.197Z",
+          "error": null
+        }
+      ]
+    },
+    "dataset": "v_perf_10k"
+  }
+}

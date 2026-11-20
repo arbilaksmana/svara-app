@@ -1,0 +1,241 @@
+{
+  "label": "AUDIT BIZ — sintetis, read-only source; mutation hanya pada svara_audit_docs",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "generated_at": "2026-11-20T13:43:58.464Z",
+  "api": "http://127.0.0.1:4311",
+  "database": "svara_audit_docs",
+  "credentials_in_evidence": false,
+  "probes": [
+    {
+      "id": "BIZ-01-profile-source",
+      "requirement": "PRD §1.2 / README: public survey policy and notice come from the survey scope (organizations or platform_profile), no SMK fallback",
+      "actor": "Responden umum; creator individual",
+      "method": "API",
+      "expected": "detail.profile.source=platform; public profile/notice equals platform_profile; guardian not forced by legacy profiles row",
+      "actual": {
+        "detail_profile": {
+          "source": "platform",
+          "id": "platform",
+          "organization_name": "Svara (sintetis)",
+          "consent_mode": null
+        },
+        "public_profile": {
+          "id": "p_smk",
+          "organization_name": "SMK Nusantara (sintetis)",
+          "consent_mode": "guardian",
+          "respondent_age_category": "minor",
+          "notice_version": "1.0"
+        },
+        "public_notice_version_rendered": "1.0",
+        "version_notice_version": "2.0",
+        "guardian_required": true,
+        "can_submit": true
+      },
+      "verdict": "FAIL",
+      "evidence": "runtime API + server/routes/public.ts:199-208,233-234,262-263,281"
+    },
+    {
+      "id": "BIZ-02-org-profile-divergence",
+      "requirement": "PRD §1.2: organization-scope survey uses organizations row; notice_version reflects the same source",
+      "actor": "Responden umum; creator organisasi",
+      "method": "API",
+      "expected": "public profile is org_perpus (adult/self), notice matches org source/version",
+      "actual": {
+        "detail_profile": {
+          "source": "organization",
+          "id": "org_perpus",
+          "organization_name": "Perpustakaan Kota (sintetis)",
+          "consent_mode": "self"
+        },
+        "public_profile": {
+          "id": "p_smk",
+          "organization_name": "SMK Nusantara (sintetis)",
+          "consent_mode": "guardian",
+          "respondent_age_category": "minor",
+          "notice_version": "1.0"
+        },
+        "public_notice_version_rendered": "1.0",
+        "version_notice_version": "1.2",
+        "guardian_required": true
+      },
+      "verdict": "FAIL",
+      "evidence": "runtime API; surveys.profile_id remains legacy p_smk while organization_id=org_perpus",
+      "survey_id": "s_e3bc22d45abcf737"
+    },
+    {
+      "id": "BIZ-03-close-latest-version",
+      "requirement": "PRD §5.3/AC04/R8: close stops new submissions for the survey version; latest published version is the active form",
+      "actor": "Creator organisasi; responden umum",
+      "method": "API + DB",
+      "expected": "after publishing v2 then closing, no published version remains, link v2 closed, submit 409",
+      "actual": {
+        "first_version": {
+          "id": "v_7f07c9f995c9a671",
+          "number": 1,
+          "status_after_second_publish": "published"
+        },
+        "second_version": {
+          "id": "v_7a422484f7c51bc4",
+          "number": 2,
+          "status_after_close": "published"
+        },
+        "published_after_second_publish": [
+          {
+            "number": 1,
+            "status": "published"
+          },
+          {
+            "number": 2,
+            "status": "published"
+          }
+        ],
+        "new_invitation_version_id": "v_7f07c9f995c9a671",
+        "old_version_id": "v_7f07c9f995c9a671",
+        "invitation_targets_oldest": true,
+        "survey_status_after_close": "closed",
+        "v2_public_state_after_close": "active",
+        "v2_can_submit_after_close": true,
+        "v2_consent_status": 201,
+        "v2_submit_status": 201,
+        "v2_submit_created_response": true,
+        "invitation_after_close_status": 201
+      },
+      "verdict": "FAIL",
+      "evidence": "server/routes/surveys.ts:480-483 (publish does not close old), 518-529 (close only first published), 558-563 (invitations pick first published), public.ts:219-224 (survey status closed ignored)",
+      "probe_survey": "s_e3bc22d45abcf737"
+    },
+    {
+      "id": "BIZ-04-consent-cross-context",
+      "requirement": "PRD §6/§9.1, invariant 5/13, AC12: consent belongs to its context; another context cannot reuse it",
+      "actor": "Responden umum vs responden undangan",
+      "method": "API",
+      "expected": "invitation submission rejects consent recorded for the public link",
+      "actual": {
+        "public_consent_status": 201,
+        "public_guardian_status": "verified",
+        "invitation_context_kind": "invitation",
+        "invitation_submit_status": 201,
+        "invitation_submit_created": true,
+        "public_submit_with_same_consent_status": 201,
+        "public_submit_created_response": true,
+        "consent_reused_after_first_accepted_submit": true,
+        "guardian_evidence_status_was_self_asserted": "verified"
+      },
+      "verdict": "FAIL",
+      "evidence": "server/routes/public.ts:385-398 (checks survey+version only), consent insert line 470 stores invitation_id but requireConsent ignores it"
+    },
+    {
+      "id": "BIZ-05-receipt-context",
+      "requirement": "Invariant 5: another context cannot retrieve the receipt",
+      "actor": "Responden umum",
+      "method": "API",
+      "expected": "404 when retrieving an invitation response receipt through the public link context",
+      "actual": {
+        "status": 404,
+        "code": "receipt_not_found"
+      },
+      "verdict": "PASS",
+      "evidence": "server/routes/public.ts:660-675 scope=invitation vs public"
+    },
+    {
+      "id": "BIZ-06-grantee-bootstrap",
+      "requirement": "PRD §9.1 / README: petugas ber-grant can open assigned survey and results; UI and API enforce the same permission",
+      "actor": "Petugas ber-grant (u_petugas)",
+      "method": "API + static UI",
+      "expected": "granted survey appears in bootstrap so UI can render it; summary allowed by grant 111",
+      "actual": {
+        "bootstrap_surveys": [],
+        "s_demo1_in_bootstrap": false,
+        "list_surveys": [],
+        "detail_status": 200,
+        "summary_status": 200,
+        "summary_total": 5
+      },
+      "verdict": "FAIL",
+      "evidence": "server/http.ts:122-144 excludes grant-only surveys for role creator; src/screens/CreatorData.tsx uses findSurvey from hydrated bootstrap"
+    },
+    {
+      "id": "BIZ-07-orgadmin-share",
+      "requirement": "PRD §1.2/§9, README: org_admin manages org surveys and may read full results for them",
+      "actor": "Org admin org_smk",
+      "method": "API + static UI",
+      "expected": "org_admin gets org survey, share data, and full results; UI exposes management",
+      "actual": {
+        "s_demo1_in_bootstrap": true,
+        "invitations_for_s_demo1": 0,
+        "public_links_for_s_demo1": 0,
+        "assignments_for_s_demo1": 0,
+        "responses_status": 200,
+        "responses_count": 5
+      },
+      "verdict": "FAIL",
+      "evidence": "bootstrap manageableSurveyIds owner-only; src/screens/CreatorData.tsx:64,90 isOwner; CreatorCore.tsx:61,230,401 owner-only"
+    },
+    {
+      "id": "BIZ-08-export-settings-bypass",
+      "requirement": "PRD §9.1/README: individual, export, free-text are separate permissions; survey_settings gate grant reads",
+      "actor": "Petugas dengan grant ekspor saja",
+      "method": "API",
+      "expected": "policy must state whether export ignores allow_individual/allow_results; current doc is silent/ambiguous",
+      "actual": {
+        "grant_write_status": 200,
+        "settings": {
+          "allowResults": false,
+          "allowIndividual": false
+        },
+        "summary_status": 403,
+        "individual_responses_status": 403,
+        "export_status": 200,
+        "export_rows": 0,
+        "export_header_has_respondent_id": true
+      },
+      "verdict": "PARTIAL",
+      "evidence": "server/http.ts:176-179 canExport ignores settings; README gate claim covers only can_read_individual/aggregate"
+    },
+    {
+      "id": "BIZ-09-public-policy-source",
+      "requirement": "PRD §9.2/AC12: privacy/notice/contact come from deployment profile (organization/platform), synthetic status clear",
+      "actor": "Pemohon data tanpa login",
+      "method": "API + static UI",
+      "expected": "policy endpoint reflects organizations/platform_profile and scope; no legacy profiles-only source",
+      "actual": {
+        "profile_ids": [
+          "p_perpus",
+          "p_smk"
+        ],
+        "notice_profile_ids": [
+          "p_perpus",
+          "p_smk"
+        ],
+        "data_request_contact": "privasi@organisasi.contoh",
+        "effective_date": "2026-11-17",
+        "synthetic_placeholder": true
+      },
+      "verdict": "PARTIAL",
+      "evidence": "server/routes/public.ts:681-697 selects profiles/notices only; src/app/privacy/page.tsx uses static sections"
+    },
+    {
+      "id": "BIZ-10-data-request-workflow",
+      "requirement": "PRD §9.2/AC12: withdrawal/deletion request recorded and fulfilled under verified identity",
+      "actor": "Pemohon data; super admin",
+      "method": "API + DB",
+      "expected": "request references a subject/response/consent and enforcement is traceable, or explicitly documented as manual",
+      "actual": {
+        "create_status": 201,
+        "request_fields": [
+          "created_at",
+          "id",
+          "message",
+          "status",
+          "type"
+        ],
+        "handle_status": 200,
+        "handled_status_value": "handled",
+        "automatic_consent_withdrawal": false,
+        "automatic_response_deletion": false
+      },
+      "verdict": "PARTIAL",
+      "evidence": "001_initial.sql data_requests has no survey/response/consent subject key; admin PATCH only updates status/note"
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "label": "AUDIT BIZ — database checks on svara_audit_docs after targeted synthetic probes",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "generated_at": "2026-11-20T13:45:49.016Z",
+  "database": "svara_audit_docs",
+  "sql": {
+    "surveys": "survey scope vs legacy profiles row",
+    "consent": "consent reuse/overwrite and guardian status",
+    "links": "public link status after close",
+    "responses": "responses per version"
+  },
+  "surveys": [
+    {
+      "id": "s_4393d4efb70c04e5",
+      "title": "AUDIT BIZ — lingkup individu",
+      "profile_id": "p_smk",
+      "organization_id": null,
+      "status": "published",
+      "legacy_profile_name": "SMK Nusantara (sintetis)",
+      "legacy_consent_mode": "guardian",
+      "legacy_notice_version": "1.0",
+      "scope_org_name": null,
+      "scope_org_consent_mode": null,
+      "scope_org_notice_version": null,
+      "scope_platform_name": "Svara (sintetis)",
+      "scope_platform_notice_version": "2.0"
+    },
+    {
+      "id": "s_e3bc22d45abcf737",
+      "title": "AUDIT BIZ — lingkup organisasi (v2)",
+      "profile_id": "p_smk",
+      "organization_id": "org_perpus",
+      "status": "closed",
+      "legacy_profile_name": "SMK Nusantara (sintetis)",
+      "legacy_consent_mode": "guardian",
+      "legacy_notice_version": "1.0",
+      "scope_org_name": "Perpustakaan Kota (sintetis)",
+      "scope_org_consent_mode": "self",
+      "scope_org_notice_version": "1.2",
+      "scope_platform_name": "Svara (sintetis)",
+      "scope_platform_notice_version": "2.0"
+    }
+  ],
+  "versions": [
+    {
+      "id": "v_7f07c9f995c9a671",
+      "number": 1,
+      "status": "closed",
+      "notice_version": "1.2",
+      "published_at": "2026-11-20T13:43:59.004Z",
+      "closed_at": "2026-11-20T13:43:59.172Z"
+    },
+    {
+      "id": "v_7a422484f7c51bc4",
+      "number": 2,
+      "status": "published",
+      "notice_version": "1.2",
+      "published_at": "2026-11-20T13:43:59.099Z",
+      "closed_at": null
+    }
+  ],
+  "links": [
+    {
+      "version_id": "v_7f07c9f995c9a671",
+      "status": "closed"
+    },
+    {
+      "version_id": "v_7a422484f7c51bc4",
+      "status": "active"
+    }
+  ],
+  "responses": [
+    {
+      "version_id": "v_7a422484f7c51bc4",
+      "count": 2
+    }
+  ],
+  "consent": [
+    {
+      "total": 1,
+      "granted": 1,
+      "with_response_id": 1,
+      "distinct_response_ids": 1,
+      "with_invitation_id": 0,
+      "verified_guardian": 1
+    }
+  ],
+  "consent_responses": {
+    "responses": 2,
+    "responses_with_consent": 1
+  },
+  "consent_rows": [
+    {
+      "basis": "Persetujuan wali",
+      "status": "granted",
+      "guardian_evidence_status": "verified",
+      "notice_version": "1.2",
+      "invitation_null": true,
+      "response_null": false
+    }
+  ],
+  "invitations": [
+    {
+      "version_id": "v_7a422484f7c51bc4",
+      "status": "used",
+      "count": 1
+    },
+    {
+      "version_id": "v_7f07c9f995c9a671",
+      "status": "active",
+      "count": 1
+    }
+  ],
+  "settings": [
+    {
+      "survey_id": "s_e3bc22d45abcf737",
+      "allow_results": 0,
+      "allow_individual": 0
+    }
+  ],
+  "export_audit": [
+    {
+      "action": "Ekspor CSV",
+      "object": "s_e3bc22d45abcf737 · v2",
+      "outcome": "berhasil",
+      "metadata": "{\"rows\":2,\"includeText\":false}"
+    },
+    {
+      "action": "Ekspor CSV",
+      "object": "s_4393d4efb70c04e5 · v1",
+      "outcome": "berhasil",
+      "metadata": "{\"rows\":0,\"includeText\":false}"
+    }
+  ],
+  "officer_grants": [
+    {
+      "account_id": "u_petugas",
+      "survey_id": "s_demo1",
+      "can_read_individual": 1,
+      "can_export": 1,
+      "can_read_free_text": 1
+    },
+    {
+      "account_id": "u_petugas",
+      "survey_id": "s_e3bc22d45abcf737",
+      "can_read_individual": 0,
+      "can_export": 1,
+      "can_read_free_text": 0
+    }
+  ],
+  "data_request_columns": [
+    "id",
+    "type",
+    "contact",
+    "note",
+    "status",
+    "created_at",
+    "updated_at",
+    "handled_by",
+    "outcome_note"
+  ],
+  "data_requests": [
+    {
+      "type": "withdrawal",
+      "status": "handled",
+      "note": "Permintaan sintetis audit.",
+      "outcome_note": "Sintetis; tidak ada tindakan data otomatis."
+    },
+    {
+      "type": "access",
+      "status": "pending",
+      "note": "Permintaan akses data sintetis untuk demonstrasi.",
+      "outcome_note": null
+    }
+  ]
+}

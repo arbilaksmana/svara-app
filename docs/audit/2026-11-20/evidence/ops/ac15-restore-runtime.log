@@ -1,0 +1,6 @@
+baseline responses|answers|audit_logs=6|18|8
+selected synthetic response=r_demo01
+backup bytes=55644
+after delete target rows=0 counts=5|15|8
+after restore target rows=1 counts=6|18|8
+post-restore deletion audit rows=1

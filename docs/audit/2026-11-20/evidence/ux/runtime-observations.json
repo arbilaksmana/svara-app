@@ -1,0 +1,91 @@
+{
+  "audit": "UI/UX and accessibility",
+  "date": "2026-11-20",
+  "target": {
+    "web": "http://127.0.0.1:4322",
+    "api": "http://127.0.0.1:4321",
+    "api_health": "200 {ok:true}",
+    "runtime": "production build",
+    "browser": "isolated Chromium profile; desktop/mobile emulation"
+  },
+  "role_probes": {
+    "grant_based_officer": {
+      "creator_list": "Belum memiliki survei",
+      "direct_results_url": "Survei tidak ditemukan",
+      "api_summary_status": 200
+    },
+    "owner_creator": {
+      "results_individual_banner": "Izin baca individual diperlukan",
+      "individual_button_disabled": true,
+      "csv_button_disabled": false,
+      "api_responses_status": 200
+    },
+    "org_admin": {
+      "creator_list_actions": ["Lihat hasil"],
+      "direct_edit_url": "Survei tidak ditemukan",
+      "api_summary_status": 200,
+      "individual_allowed": false,
+      "export_allowed": false
+    },
+    "super_admin": {
+      "audit_back_link": "/creator/surveys/s_demo1/results -> Akses ditolak",
+      "integration_summary_link": "/creator/surveys/s_demo1/results -> Akses ditolak"
+    }
+  },
+  "state_probes": {
+    "public_load_failure": {
+      "network": "public survey request aborted by test harness",
+      "ui": "Tautan gagal dimuat; only Kembali ke beranda",
+      "console_errors": 0
+    },
+    "receipt_lost_storage": {
+      "setup": "completed response, then cleared sessionStorage",
+      "ui": "Belum ada bukti; Pulihkan bukti disabled; no response/key entry"
+    },
+    "results_zero_versions": {
+      "survey": "s_demo3",
+      "version_select_options": 0,
+      "total": 0,
+      "banner": "Ekspor diizinkan",
+      "csv_disabled": true,
+      "codebook_disabled": true
+    },
+    "landing_anonymous": {
+      "demo_table_rows": 0,
+      "demo_badge": "Terbit",
+      "demo_copy": "0 item pada versi aktif"
+    },
+    "admin_stats_failure": {
+      "setup": "bootstrap and admin/stats requests aborted by test harness",
+      "header": "guest Masuk",
+      "kpis": {"surveys": 4, "responses": 0, "accounts": 5, "pendingRequests": 0},
+      "alert_or_retry": false
+    }
+  },
+  "layout": {
+    "admin_header": {
+      "viewport_640": {"scroll_width": 722, "client_width": 640, "clipped": "Keluar"},
+      "viewport_768": {"scroll_width": 788, "client_width": 768, "clipped": "Keluar"}
+    },
+    "text_resize_200_percent": {
+      "viewport_width": 320,
+      "document_scroll_width": 475,
+      "h1_scroll_width": 459,
+      "h1_client_width": 288
+    },
+    "no_overflow_320": ["/", "/privacy", "/auth/login"]
+  },
+  "contrast": {
+    "control_border_n200_on_white": 1.37,
+    "landing_n400_on_white": 2.12,
+    "control_border_token_on_white": 3.15
+  },
+  "accessibility": {
+    "register_h1_count": 0,
+    "mobile_header_home_link_name": "",
+    "mobile_menu_escape_active_element": "BODY",
+    "mobile_header_home_link_aria": "link (unnamed)",
+    "missing_survey_h1_count": 2,
+    "not_found_title": "Svara · Pembuat Survei"
+  }
+}

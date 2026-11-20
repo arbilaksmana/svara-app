@@ -1,0 +1,8 @@
+{"at":"2026-11-20T14:47:44.191Z","free_mb":1578,"pg":{"conns":1,"active":1,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2858","blks_hit":"4978615","blks_read":"47"}}
+{"at":"2026-11-20T14:47:44.377Z","free_mb":1577,"pg":{"conns":1,"active":1,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2858","blks_hit":"4978615","blks_read":"47"}}
+{"at":"2026-11-20T14:47:44.588Z","free_mb":1557,"pg":{"conns":1,"active":1,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2858","blks_hit":"4978615","blks_read":"47"}}
+{"at":"2026-11-20T14:47:44.794Z","free_mb":1561,"pg":{"conns":2,"active":2,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2861","blks_hit":"4978857","blks_read":"47"}}
+{"at":"2026-11-20T14:47:45.004Z","free_mb":1551,"pg":{"conns":21,"active":14,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2880","blks_hit":"4979465","blks_read":"47"}}
+{"at":"2026-11-20T14:47:45.206Z","free_mb":1557,"pg":{"conns":21,"active":2,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72267443","xact_commit":"2880","blks_hit":"4979465","blks_read":"47"}}
+{"at":"2026-11-20T14:47:45.412Z","free_mb":1551,"pg":{"conns":21,"active":3,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72824499","xact_commit":"2886","blks_hit":"4979990","blks_read":"47"}}
+{"at":"2026-11-20T14:47:45.612Z","free_mb":1616,"pg":{"conns":21,"active":1,"lock_waiters":0,"ungranted_locks":0,"db_bytes":"72988339","xact_commit":"2899","blks_hit":"4982811","blks_read":"47"}}

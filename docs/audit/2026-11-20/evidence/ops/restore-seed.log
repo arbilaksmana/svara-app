@@ -1,0 +1,2 @@
+$ tsx server/seed.ts
+[db] data sintetis dimuat

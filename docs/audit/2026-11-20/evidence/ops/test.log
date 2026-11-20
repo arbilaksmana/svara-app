@@ -1,0 +1,83 @@
+$ pnpm typecheck && tsx server/test/migrations.test.ts && tsx server/test/api.test.ts && tsx server/test/export.test.ts && tsx server/test/report-versions.test.ts && tsx server/test/seed-policy.test.ts
+$ next typegen && tsc --noEmit && tsc -p server/tsconfig.json --noEmit
+Generating route types...
+✓ Types generated successfully
+✔ migrasi membuat 24 tabel aplikasi dan mencatat versi (445.4279ms)
+✔ migrasi kedua idempoten dan tidak menerapkan ulang (56.2584ms)
+✔ upgrade path 001 → terbaru mempertahankan data dan menambah indeks operasional (416.986ms)
+✔ upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari lalu mewajibkannya (357.0549ms)
+✔ foreign key dan unique constraint ditegakkan Postgres (43.1334ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1338.6765
+✔ AC01/AC10: peran, kepemilikan, dan isolasi data creator (2254.11ms)
+✔ Mutasi menerima origin web lokal dan menolak origin asing (10.9872ms)
+✔ Security headers: CSP dan hardening aktif pada API dan 404 (4.6187ms)
+✔ AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi tanpa respons (248.6897ms)
+✔ AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melayani versi lama (105.1994ms)
+✔ AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons, retry bukti sama (378.8321ms)
+✔ AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan (117.4853ms)
+✔ AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses (255.8439ms)
+✔ AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai tersimpan (98.322ms)
+✔ AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutnya (187.8391ms)
+✔ Super admin menetapkan organisasi akun dan lingkupnya berlaku pada permintaan berikutnya (148.2517ms)
+✔ Super admin membuat organisasi baru sekaligus admin pertamanya (204.9713ms)
+✔ Postgres: statistik admin mengagregasi kreator dan survei (14.2363ms)
+✔ AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas (68.6702ms)
+✔ AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons (379.5785ms)
+✔ Permintaan data publik dapat ditindaklanjuti admin tanpa memuat jawaban (19.4602ms)
+✔ Registrasi publik membuat creator baru dan langsung memberi sesi (143.8923ms)
+✔ PUT /admin/grants hanya mengganti izin akun yang disebut pada payload (147.8159ms)
+✔ Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi (354.6394ms)
+✔ GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2 (75.9006ms)
+✔ Super admin mengubah profil platform tanpa menyentuh profil organisasi (89.5505ms)
+✔ POST /surveys: owner_scope menentukan lingkup, visibilitas, dan sumber notice (177.1415ms)
+✔ Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback SMK (200.1341ms)
+✔ Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organisasi (319.3171ms)
+✔ Kode undangan organisasi: masa berlaku, pencabutan, dan penolakan pemakaian (152.997ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6197.5057
+✔ Ekspor CSV dan codebook hanya memuat isi versi yang diminta (1994.0526ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2017.7465
+✔ Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain (2063.0251ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2086.762
+✔ seed demo hanya aktif dengan SEED_DEMO=1 dan ditolak di production (396.4997ms)
+✔ CLI seed menolak berjalan tanpa SEED_DEMO=1 (629.9385ms)
+✔ CLI seed memuat data demo saat diaktifkan eksplisit (1219.0955ms)
+✔ server start tanpa SEED_DEMO tidak membuat akun demo (1133.0464ms)
+✔ server menolak SEED_DEMO=1 di production (946.7546ms)
+✔ bootstrap admin membuat super_admin sekali tanpa menimpa akun (1073.0166ms)
+✔ bootstrap admin menolak kata sandi lemah (558.7861ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5969.9427

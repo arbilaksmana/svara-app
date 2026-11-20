@@ -1,0 +1,390 @@
+{
+  "node": "v24.15.0",
+  "base": "http://127.0.0.1:4340",
+  "scenario": "ac13",
+  "label": "ac13-1k",
+  "started_at": "2026-11-20T14:47:14.708Z",
+  "host": "LAPTOP-N4GRDGAP",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "build_id": "3RzZi-drCTjszTT7A99TF",
+  "ip_mode": "gateway",
+  "finished_at": "2026-11-20T14:47:15.926Z",
+  "result": {
+    "scenario": "ac13",
+    "label": "ac13-1k",
+    "token_label": "sha256:eb843fe9",
+    "dataset": {
+      "version_id": "v_perf_1k",
+      "items": 20
+    },
+    "concurrency": 30,
+    "consent_mode": "api",
+    "ip_mode": "gateway",
+    "http": {
+      "n": 30,
+      "wall_ms": 506,
+      "throughput_rps": 59.289,
+      "p50_ms": 389.37,
+      "p95_ms": 498.14,
+      "p99_ms": 500.59,
+      "max_ms": 500.59,
+      "mean_ms": 420.24,
+      "statuses": {
+        "201": 30
+      },
+      "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+    },
+    "samples": [
+      {
+        "label": "vu-0",
+        "status": 201,
+        "ok": true,
+        "total_ms": 491.86,
+        "ttfb_ms": 491.71,
+        "bytes": 234,
+        "response_id": "r_0cf322b7cf367a74",
+        "submitted_at": "2026-11-20T14:47:15.647Z",
+        "error": null
+      },
+      {
+        "label": "vu-1",
+        "status": 201,
+        "ok": true,
+        "total_ms": 391.06,
+        "ttfb_ms": 390.82,
+        "bytes": 234,
+        "response_id": "r_69957891645ad66e",
+        "submitted_at": "2026-11-20T14:47:15.543Z",
+        "error": null
+      },
+      {
+        "label": "vu-2",
+        "status": 201,
+        "ok": true,
+        "total_ms": 488.12,
+        "ttfb_ms": 487.81,
+        "bytes": 234,
+        "response_id": "r_dce2cf508d73fdb3",
+        "submitted_at": "2026-11-20T14:47:15.649Z",
+        "error": null
+      },
+      {
+        "label": "vu-3",
+        "status": 201,
+        "ok": true,
+        "total_ms": 385.91,
+        "ttfb_ms": 385.81,
+        "bytes": 234,
+        "response_id": "r_3dc165f34c23c1bb",
+        "submitted_at": "2026-11-20T14:47:15.543Z",
+        "error": null
+      },
+      {
+        "label": "vu-4",
+        "status": 201,
+        "ok": true,
+        "total_ms": 384.94,
+        "ttfb_ms": 384.74,
+        "bytes": 234,
+        "response_id": "r_de3ffee7a99d08b8",
+        "submitted_at": "2026-11-20T14:47:15.538Z",
+        "error": null
+      },
+      {
+        "label": "vu-5",
+        "status": 201,
+        "ok": true,
+        "total_ms": 389.51,
+        "ttfb_ms": 389.38,
+        "bytes": 234,
+        "response_id": "r_8900f04f0acd74e1",
+        "submitted_at": "2026-11-20T14:47:15.544Z",
+        "error": null
+      },
+      {
+        "label": "vu-6",
+        "status": 201,
+        "ok": true,
+        "total_ms": 385.67,
+        "ttfb_ms": 385.58,
+        "bytes": 234,
+        "response_id": "r_25834d6205357eb5",
+        "submitted_at": "2026-11-20T14:47:15.539Z",
+        "error": null
+      },
+      {
+        "label": "vu-7",
+        "status": 201,
+        "ok": true,
+        "total_ms": 378.75,
+        "ttfb_ms": 378.54,
+        "bytes": 234,
+        "response_id": "r_c66275f5c14e1b47",
+        "submitted_at": "2026-11-20T14:47:15.538Z",
+        "error": null
+      },
+      {
+        "label": "vu-8",
+        "status": 201,
+        "ok": true,
+        "total_ms": 390.6,
+        "ttfb_ms": 390.41,
+        "bytes": 234,
+        "response_id": "r_3ec13c791d9c0a54",
+        "submitted_at": "2026-11-20T14:47:15.548Z",
+        "error": null
+      },
+      {
+        "label": "vu-9",
+        "status": 201,
+        "ok": true,
+        "total_ms": 386.38,
+        "ttfb_ms": 386.27,
+        "bytes": 234,
+        "response_id": "r_c8d6e1c7e8650d7f",
+        "submitted_at": "2026-11-20T14:47:15.536Z",
+        "error": null
+      },
+      {
+        "label": "vu-10",
+        "status": 201,
+        "ok": true,
+        "total_ms": 387.9,
+        "ttfb_ms": 387.7,
+        "bytes": 235,
+        "response_id": "r_823be7a6d9cb1516",
+        "submitted_at": "2026-11-20T14:47:15.540Z",
+        "error": null
+      },
+      {
+        "label": "vu-11",
+        "status": 201,
+        "ok": true,
+        "total_ms": 488.64,
+        "ttfb_ms": 488.5,
+        "bytes": 235,
+        "response_id": "r_6de43d5b2078ef4f",
+        "submitted_at": "2026-11-20T14:47:15.661Z",
+        "error": null
+      },
+      {
+        "label": "vu-12",
+        "status": 201,
+        "ok": true,
+        "total_ms": 379.8,
+        "ttfb_ms": 379.72,
+        "bytes": 235,
+        "response_id": "r_83884e425c00dd61",
+        "submitted_at": "2026-11-20T14:47:15.538Z",
+        "error": null
+      },
+      {
+        "label": "vu-13",
+        "status": 201,
+        "ok": true,
+        "total_ms": 379.29,
+        "ttfb_ms": 379.18,
+        "bytes": 235,
+        "response_id": "r_32bb035f6cff1770",
+        "submitted_at": "2026-11-20T14:47:15.536Z",
+        "error": null
+      },
+      {
+        "label": "vu-14",
+        "status": 201,
+        "ok": true,
+        "total_ms": 374.34,
+        "ttfb_ms": 373.62,
+        "bytes": 235,
+        "response_id": "r_6602edc803bcd4da",
+        "submitted_at": "2026-11-20T14:47:15.540Z",
+        "error": null
+      },
+      {
+        "label": "vu-15",
+        "status": 201,
+        "ok": true,
+        "total_ms": 390.66,
+        "ttfb_ms": 390.59,
+        "bytes": 235,
+        "response_id": "r_81a67a74401ee27d",
+        "submitted_at": "2026-11-20T14:47:15.544Z",
+        "error": null
+      },
+      {
+        "label": "vu-16",
+        "status": 201,
+        "ok": true,
+        "total_ms": 372.05,
+        "ttfb_ms": 371.34,
+        "bytes": 235,
+        "response_id": "r_fca0b5a1f67942a4",
+        "submitted_at": "2026-11-20T14:47:15.535Z",
+        "error": null
+      },
+      {
+        "label": "vu-17",
+        "status": 201,
+        "ok": true,
+        "total_ms": 489.44,
+        "ttfb_ms": 489.34,
+        "bytes": 235,
+        "response_id": "r_b82f518986a9ac90",
+        "submitted_at": "2026-11-20T14:47:15.651Z",
+        "error": null
+      },
+      {
+        "label": "vu-18",
+        "status": 201,
+        "ok": true,
+        "total_ms": 489.68,
+        "ttfb_ms": 489.6,
+        "bytes": 235,
+        "response_id": "r_f7b6b5e40bc924f6",
+        "submitted_at": "2026-11-20T14:47:15.651Z",
+        "error": null
+      },
+      {
+        "label": "vu-19",
+        "status": 201,
+        "ok": true,
+        "total_ms": 384.28,
+        "ttfb_ms": 384.2,
+        "bytes": 235,
+        "response_id": "r_1a605e97c97b23a2",
+        "submitted_at": "2026-11-20T14:47:15.543Z",
+        "error": null
+      },
+      {
+        "label": "vu-20",
+        "status": 201,
+        "ok": true,
+        "total_ms": 490.02,
+        "ttfb_ms": 489.92,
+        "bytes": 235,
+        "response_id": "r_0071a02ede857d79",
+        "submitted_at": "2026-11-20T14:47:15.651Z",
+        "error": null
+      },
+      {
+        "label": "vu-21",
+        "status": 201,
+        "ok": true,
+        "total_ms": 389.37,
+        "ttfb_ms": 388.96,
+        "bytes": 235,
+        "response_id": "r_2f2dfbdf24c439f8",
+        "submitted_at": "2026-11-20T14:47:15.544Z",
+        "error": null
+      },
+      {
+        "label": "vu-22",
+        "status": 201,
+        "ok": true,
+        "total_ms": 377.41,
+        "ttfb_ms": 377.24,
+        "bytes": 235,
+        "response_id": "r_16e460e59d71e86d",
+        "submitted_at": "2026-11-20T14:47:15.537Z",
+        "error": null
+      },
+      {
+        "label": "vu-23",
+        "status": 201,
+        "ok": true,
+        "total_ms": 494.94,
+        "ttfb_ms": 494.76,
+        "bytes": 235,
+        "response_id": "r_a4cbd7aeef185d82",
+        "submitted_at": "2026-11-20T14:47:15.654Z",
+        "error": null
+      },
+      {
+        "label": "vu-24",
+        "status": 201,
+        "ok": true,
+        "total_ms": 498.14,
+        "ttfb_ms": 497.99,
+        "bytes": 235,
+        "response_id": "r_72342b0d444698bf",
+        "submitted_at": "2026-11-20T14:47:15.669Z",
+        "error": null
+      },
+      {
+        "label": "vu-25",
+        "status": 201,
+        "ok": true,
+        "total_ms": 495.23,
+        "ttfb_ms": 495.14,
+        "bytes": 235,
+        "response_id": "r_57a122d6e4425c20",
+        "submitted_at": "2026-11-20T14:47:15.669Z",
+        "error": null
+      },
+      {
+        "label": "vu-26",
+        "status": 201,
+        "ok": true,
+        "total_ms": 389.55,
+        "ttfb_ms": 389.45,
+        "bytes": 235,
+        "response_id": "r_7f93f517dd81ea9b",
+        "submitted_at": "2026-11-20T14:47:15.547Z",
+        "error": null
+      },
+      {
+        "label": "vu-27",
+        "status": 201,
+        "ok": true,
+        "total_ms": 500.59,
+        "ttfb_ms": 500.46,
+        "bytes": 235,
+        "response_id": "r_c8ad702a69205c71",
+        "submitted_at": "2026-11-20T14:47:15.672Z",
+        "error": null
+      },
+      {
+        "label": "vu-28",
+        "status": 201,
+        "ok": true,
+        "total_ms": 375.49,
+        "ttfb_ms": 375.27,
+        "bytes": 235,
+        "response_id": "r_02645511b2a8d47e",
+        "submitted_at": "2026-11-20T14:47:15.536Z",
+        "error": null
+      },
+      {
+        "label": "vu-29",
+        "status": 201,
+        "ok": true,
+        "total_ms": 387.47,
+        "ttfb_ms": 387.39,
+        "bytes": 235,
+        "response_id": "r_d787b9dfd7e7ea18",
+        "submitted_at": "2026-11-20T14:47:15.548Z",
+        "error": null
+      }
+    ],
+    "reconcile": {
+      "status": "PASS",
+      "expected": {
+        "successes": 30,
+        "answers": 600
+      },
+      "unique_response_ids": 30,
+      "expected_successes": 30,
+      "responses_for_run": 30,
+      "answers_for_run": 600,
+      "responses_with_exact_answers": 30,
+      "attempts": 30,
+      "consents_linked": 30,
+      "integration_events": 30,
+      "audits": 30,
+      "version_totals": {
+        "responses": 1030,
+        "answers": 20600
+      }
+    }
+  }
+}

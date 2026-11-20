@@ -1,0 +1,39 @@
+{
+  "label": "AUDIT BIZ — export permission vs survey_settings; synthetic svara_audit_docs",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "generated_at": "2026-11-20T13:45:22.305Z",
+  "api": "http://127.0.0.1:4311",
+  "database": "svara_audit_docs",
+  "credentials_in_evidence": false,
+  "probe": {
+    "id": "BIZ-08b-export-settings-bypass",
+    "survey_id": "s_e3bc22d45abcf737",
+    "settings_write_status": 200,
+    "settings": {
+      "allowResults": false,
+      "allowIndividual": false
+    },
+    "grant_write_status": 200,
+    "summary_status": 403,
+    "individual_responses_status": 403,
+    "export_status": 200,
+    "export_content_type": "text/csv; charset=utf-8",
+    "export_rows": 2,
+    "export_header_columns": [
+      "response_id",
+      "respondent_id",
+      "survey_id",
+      "survey_version",
+      "assignment_id",
+      "collection_mode",
+      "identity_source",
+      "submitted_at",
+      "A1"
+    ],
+    "export_has_per_response_ids": true,
+    "export_first_row_response_id_prefix": "r_"
+  },
+  "verdict": "FAIL",
+  "expected": "If allow_individual=false hides individual answers, an export grant must not silently export per-response rows without an explicit policy decision; current docs are ambiguous.",
+  "evidence": "server/http.ts:176-179 canExport ignores survey_settings; server/routes/surveys.ts:734-773 exports per-response rows and audits rows/includeText only"
+}

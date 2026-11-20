@@ -1,0 +1,1 @@
+{"request_a":{"status":201,"id_returned":true,"contact_returned":false,"note_returned":false},"request_b":{"status":201},"public_policy":{"synthetic_placeholder":true,"profiles_returned":2,"contact_fallback":"privasi@organisasi.contoh"},"note":"raw request IDs omitted; both requests use synthetic contacts only"}

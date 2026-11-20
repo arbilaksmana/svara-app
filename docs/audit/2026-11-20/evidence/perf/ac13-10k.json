@@ -1,0 +1,390 @@
+{
+  "node": "v24.15.0",
+  "base": "http://127.0.0.1:4340",
+  "scenario": "ac13",
+  "label": "ac13-10k",
+  "started_at": "2026-11-20T14:47:44.749Z",
+  "host": "LAPTOP-N4GRDGAP",
+  "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+  "build_id": "3RzZi-drCTjszTT7A99TF",
+  "ip_mode": "gateway",
+  "finished_at": "2026-11-20T14:47:45.604Z",
+  "result": {
+    "scenario": "ac13",
+    "label": "ac13-10k",
+    "token_label": "sha256:5c651cf3",
+    "dataset": {
+      "version_id": "v_perf_10k",
+      "items": 20
+    },
+    "concurrency": 30,
+    "consent_mode": "api",
+    "ip_mode": "gateway",
+    "http": {
+      "n": 30,
+      "wall_ms": 390,
+      "throughput_rps": 76.923,
+      "p50_ms": 323.48,
+      "p95_ms": 381.12,
+      "p99_ms": 387.94,
+      "max_ms": 387.94,
+      "mean_ms": 334.46,
+      "statuses": {
+        "201": 30
+      },
+      "method": "nearest-rank; p95 with n=30 is order statistic 29; p99 with n=30 is max"
+    },
+    "samples": [
+      {
+        "label": "vu-0",
+        "status": 201,
+        "ok": true,
+        "total_ms": 296.89,
+        "ttfb_ms": 296.42,
+        "bytes": 237,
+        "response_id": "r_55225c5d94f5583c",
+        "submitted_at": "2026-11-20T14:47:45.235Z",
+        "error": null
+      },
+      {
+        "label": "vu-1",
+        "status": 201,
+        "ok": true,
+        "total_ms": 305.8,
+        "ttfb_ms": 305.68,
+        "bytes": 237,
+        "response_id": "r_9e316cee00fdcc93",
+        "submitted_at": "2026-11-20T14:47:45.230Z",
+        "error": null
+      },
+      {
+        "label": "vu-2",
+        "status": 201,
+        "ok": true,
+        "total_ms": 299.03,
+        "ttfb_ms": 298.83,
+        "bytes": 237,
+        "response_id": "r_e9f3d6d20151dd2c",
+        "submitted_at": "2026-11-20T14:47:45.239Z",
+        "error": null
+      },
+      {
+        "label": "vu-3",
+        "status": 201,
+        "ok": true,
+        "total_ms": 321.24,
+        "ttfb_ms": 320.89,
+        "bytes": 237,
+        "response_id": "r_0647ea70b98f23c5",
+        "submitted_at": "2026-11-20T14:47:45.237Z",
+        "error": null
+      },
+      {
+        "label": "vu-4",
+        "status": 201,
+        "ok": true,
+        "total_ms": 299.46,
+        "ttfb_ms": 299.31,
+        "bytes": 237,
+        "response_id": "r_c0d7d00357c2c37c",
+        "submitted_at": "2026-11-20T14:47:45.235Z",
+        "error": null
+      },
+      {
+        "label": "vu-5",
+        "status": 201,
+        "ok": true,
+        "total_ms": 327.25,
+        "ttfb_ms": 326.29,
+        "bytes": 237,
+        "response_id": "r_adf6f332ad30540b",
+        "submitted_at": "2026-11-20T14:47:45.246Z",
+        "error": null
+      },
+      {
+        "label": "vu-6",
+        "status": 201,
+        "ok": true,
+        "total_ms": 304.07,
+        "ttfb_ms": 303.57,
+        "bytes": 237,
+        "response_id": "r_5bfe3294bf1d7dd0",
+        "submitted_at": "2026-11-20T14:47:45.236Z",
+        "error": null
+      },
+      {
+        "label": "vu-7",
+        "status": 201,
+        "ok": true,
+        "total_ms": 328.29,
+        "ttfb_ms": 328.2,
+        "bytes": 237,
+        "response_id": "r_4cffc1f49db083e4",
+        "submitted_at": "2026-11-20T14:47:45.255Z",
+        "error": null
+      },
+      {
+        "label": "vu-8",
+        "status": 201,
+        "ok": true,
+        "total_ms": 323.48,
+        "ttfb_ms": 323.31,
+        "bytes": 237,
+        "response_id": "r_73ae55805416e068",
+        "submitted_at": "2026-11-20T14:47:45.255Z",
+        "error": null
+      },
+      {
+        "label": "vu-9",
+        "status": 201,
+        "ok": true,
+        "total_ms": 318.21,
+        "ttfb_ms": 318.01,
+        "bytes": 237,
+        "response_id": "r_a4feb7db39ecde13",
+        "submitted_at": "2026-11-20T14:47:45.236Z",
+        "error": null
+      },
+      {
+        "label": "vu-10",
+        "status": 201,
+        "ok": true,
+        "total_ms": 304.49,
+        "ttfb_ms": 304.37,
+        "bytes": 238,
+        "response_id": "r_f18963978deb2643",
+        "submitted_at": "2026-11-20T14:47:45.248Z",
+        "error": null
+      },
+      {
+        "label": "vu-11",
+        "status": 201,
+        "ok": true,
+        "total_ms": 322.33,
+        "ttfb_ms": 322.18,
+        "bytes": 238,
+        "response_id": "r_646d07e583d91d8b",
+        "submitted_at": "2026-11-20T14:47:45.252Z",
+        "error": null
+      },
+      {
+        "label": "vu-12",
+        "status": 201,
+        "ok": true,
+        "total_ms": 308.1,
+        "ttfb_ms": 307.71,
+        "bytes": 238,
+        "response_id": "r_4ec5de89b1fd858b",
+        "submitted_at": "2026-11-20T14:47:45.249Z",
+        "error": null
+      },
+      {
+        "label": "vu-13",
+        "status": 201,
+        "ok": true,
+        "total_ms": 326.97,
+        "ttfb_ms": 326.89,
+        "bytes": 238,
+        "response_id": "r_571532adc3bdf525",
+        "submitted_at": "2026-11-20T14:47:45.259Z",
+        "error": null
+      },
+      {
+        "label": "vu-14",
+        "status": 201,
+        "ok": true,
+        "total_ms": 371.65,
+        "ttfb_ms": 371.53,
+        "bytes": 238,
+        "response_id": "r_3ab3989a13b25ab7",
+        "submitted_at": "2026-11-20T14:47:45.340Z",
+        "error": null
+      },
+      {
+        "label": "vu-15",
+        "status": 201,
+        "ok": true,
+        "total_ms": 324.14,
+        "ttfb_ms": 323.99,
+        "bytes": 238,
+        "response_id": "r_b84cd580698de560",
+        "submitted_at": "2026-11-20T14:47:45.243Z",
+        "error": null
+      },
+      {
+        "label": "vu-16",
+        "status": 201,
+        "ok": true,
+        "total_ms": 366.93,
+        "ttfb_ms": 366.65,
+        "bytes": 238,
+        "response_id": "r_3f2f52e29728c13a",
+        "submitted_at": "2026-11-20T14:47:45.337Z",
+        "error": null
+      },
+      {
+        "label": "vu-17",
+        "status": 201,
+        "ok": true,
+        "total_ms": 312.98,
+        "ttfb_ms": 312.73,
+        "bytes": 238,
+        "response_id": "r_5d1b5241aeed424b",
+        "submitted_at": "2026-11-20T14:47:45.244Z",
+        "error": null
+      },
+      {
+        "label": "vu-18",
+        "status": 201,
+        "ok": true,
+        "total_ms": 300.85,
+        "ttfb_ms": 300.43,
+        "bytes": 238,
+        "response_id": "r_5172f23bd2df26a6",
+        "submitted_at": "2026-11-20T14:47:45.249Z",
+        "error": null
+      },
+      {
+        "label": "vu-19",
+        "status": 201,
+        "ok": true,
+        "total_ms": 380.77,
+        "ttfb_ms": 380.63,
+        "bytes": 238,
+        "response_id": "r_13e86328e9715c0e",
+        "submitted_at": "2026-11-20T14:47:45.350Z",
+        "error": null
+      },
+      {
+        "label": "vu-20",
+        "status": 201,
+        "ok": true,
+        "total_ms": 313.36,
+        "ttfb_ms": 313.26,
+        "bytes": 238,
+        "response_id": "r_4a5efdcee3c7934e",
+        "submitted_at": "2026-11-20T14:47:45.256Z",
+        "error": null
+      },
+      {
+        "label": "vu-21",
+        "status": 201,
+        "ok": true,
+        "total_ms": 379.94,
+        "ttfb_ms": 379.77,
+        "bytes": 238,
+        "response_id": "r_e5ac69cf7c83b010",
+        "submitted_at": "2026-11-20T14:47:45.347Z",
+        "error": null
+      },
+      {
+        "label": "vu-22",
+        "status": 201,
+        "ok": true,
+        "total_ms": 305.09,
+        "ttfb_ms": 304.91,
+        "bytes": 238,
+        "response_id": "r_70403547fdda73af",
+        "submitted_at": "2026-11-20T14:47:45.252Z",
+        "error": null
+      },
+      {
+        "label": "vu-23",
+        "status": 201,
+        "ok": true,
+        "total_ms": 330.02,
+        "ttfb_ms": 329.89,
+        "bytes": 238,
+        "response_id": "r_7fd3c58e11cf2231",
+        "submitted_at": "2026-11-20T14:47:45.253Z",
+        "error": null
+      },
+      {
+        "label": "vu-24",
+        "status": 201,
+        "ok": true,
+        "total_ms": 371.6,
+        "ttfb_ms": 371.51,
+        "bytes": 238,
+        "response_id": "r_74cc35c477dd9f42",
+        "submitted_at": "2026-11-20T14:47:45.341Z",
+        "error": null
+      },
+      {
+        "label": "vu-25",
+        "status": 201,
+        "ok": true,
+        "total_ms": 380.83,
+        "ttfb_ms": 380.76,
+        "bytes": 238,
+        "response_id": "r_e647bcd7bd3b9429",
+        "submitted_at": "2026-11-20T14:47:45.354Z",
+        "error": null
+      },
+      {
+        "label": "vu-26",
+        "status": 201,
+        "ok": true,
+        "total_ms": 367.12,
+        "ttfb_ms": 367.03,
+        "bytes": 238,
+        "response_id": "r_6216444182d7abd8",
+        "submitted_at": "2026-11-20T14:47:45.342Z",
+        "error": null
+      },
+      {
+        "label": "vu-27",
+        "status": 201,
+        "ok": true,
+        "total_ms": 387.94,
+        "ttfb_ms": 387.83,
+        "bytes": 238,
+        "response_id": "r_76e683acc97faa63",
+        "submitted_at": "2026-11-20T14:47:45.368Z",
+        "error": null
+      },
+      {
+        "label": "vu-28",
+        "status": 201,
+        "ok": true,
+        "total_ms": 373.8,
+        "ttfb_ms": 373.67,
+        "bytes": 238,
+        "response_id": "r_0fb7f47516f6e72c",
+        "submitted_at": "2026-11-20T14:47:45.340Z",
+        "error": null
+      },
+      {
+        "label": "vu-29",
+        "status": 201,
+        "ok": true,
+        "total_ms": 381.12,
+        "ttfb_ms": 381.05,
+        "bytes": 238,
+        "response_id": "r_66a2a80d93463b95",
+        "submitted_at": "2026-11-20T14:47:45.346Z",
+        "error": null
+      }
+    ],
+    "reconcile": {
+      "status": "PASS",
+      "expected": {
+        "successes": 30,
+        "answers": 600
+      },
+      "unique_response_ids": 30,
+      "expected_successes": 30,
+      "responses_for_run": 30,
+      "answers_for_run": 600,
+      "responses_with_exact_answers": 30,
+      "attempts": 30,
+      "consents_linked": 30,
+      "integration_events": 30,
+      "audits": 30,
+      "version_totals": {
+        "responses": 10030,
+        "answers": 200600
+      }
+    }
+  }
+}

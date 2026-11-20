@@ -1,0 +1,8 @@
+ok   web root (200)
+ok   login page (200)
+ok   nonce CSP (14 script)
+ok   api rewrite health (200)
+ok   login via rewrite (super_admin)
+ok   authenticated bootstrap (super_admin)
+
+Semua smoke check lulus

@@ -1,0 +1,54 @@
+{
+  "artifact": "performance-gate-status",
+  "schema": 1,
+  "captured_at_utc": "2026-11-20T14:01:34Z",
+  "status": "SUPERSEDED",
+  "gate": "opened",
+  "source": {
+    "kind": "coordinator_message",
+    "id": "msg_0af235fb21ac",
+    "received_at_utc": "2026-11-20T13:59:40Z"
+  },
+  "dynamic_gate": {
+    "task_id": "task_d891e6600c3f",
+    "opened_at_utc": "2026-11-20T14:44:00Z",
+    "scope": "AC13 1k/10k, EXPLAIN, mixed/ramp max 30/100, one 200 spike, 20-VU 30m soak, <=2.5h",
+    "result": "AC13 PASS; mixed 10 VU valid; mixed 30 VU invalid (403); 100k/export/100VU/spike/soak BLOCKED"
+  },
+  "reason": "DocsBusiness/UI/security probes still active (4311/4321 plus UI preview); host is not exclusive even though 4340-4343 are free",
+  "build_provenance": {
+    "confirmed": true,
+    "commit": "95eafa3cb38aac4dd32963a1ec584a2ce6821f25",
+    "build_id": "3RzZi-drCTjszTT7A99TF",
+    "built_at_local": "2026-11-20 20:42 +0700",
+    "confirmed_by": "coordinator; pnpm build in this audit checkout"
+  },
+  "seed_policy": {
+    "mode": "additive_only",
+    "preserve_rows": { "responses": 6, "answers": 18 },
+    "truncate_allowed": false
+  },
+  "dataset_cap": {
+    "approved_now": "10k maximum after a fresh resource check",
+    "100k": "NOT_APPROVED",
+    "large_export": "NOT_APPROVED",
+    "reason": "observed free RAM 1.17 GB is below the 3.5 GB threshold"
+  },
+  "gateway": {
+    "listen": "127.0.0.1:4340",
+    "api": ["127.0.0.1:4341", "127.0.0.1:4342"],
+    "web": "127.0.0.1:4343",
+    "api_internal_url": "a perf API (not UI 4320/4321)",
+    "forbidden": ["4320", "4321", "3000", "3001", "5173"]
+  },
+  "time_ceiling": "2.5 hours",
+  "shutdown_test": "NOT_VERIFIED; no isolated Linux API image without resource contention",
+  "harness": {
+    "location": "%TEMP%/svara-audit-perf",
+    "prepared": ["seed-perf.cjs", "perf-runner.cjs", "gateway.cjs", "preload.cjs", "plans.cjs"],
+    "self_test": "mock server only; 3/3 AC13 submits 201; no target traffic or audit DB writes",
+    "seed_schema_validation": "PASS: 18 tables, 0 missing/required-column problems (read-only information_schema check)",
+    "status": "RUN_COMPLETE"
+  },
+  "next_action": "dynamic evidence complete; see perf-manifest.json and report section 6"
+}
