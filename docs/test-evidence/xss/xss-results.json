@@ -1,0 +1,67 @@
+{
+  "test": "Simulasi stored XSS pada formulir survei",
+  "executedAt": "2026-11-20T15:06:51.963Z",
+  "environment": {
+    "app": "Svara (Next.js 16.4.6 + Express 5 + PostgreSQL 17)",
+    "baseUrl": "http://127.0.0.1:3100",
+    "mode": "next build + next start (production), data seed sintetis",
+    "publicLink": "link-umum-demo",
+    "surveyVersion": "v_demo1_1",
+    "question": "K02 (short_text, opsional)",
+    "viewerAccount": "creator.a@svara.local (owner + grant baca individual/teks untuk pengujian)"
+  },
+  "payload": "<script>window.__xss_s=1</script><img src=x id=xss-i onerror=\"window.__xss_i=1\"><svg id=xss-v onload=\"window.__xss_v=1\"></svg>",
+  "submission": {
+    "responseId": "r_dc7ef6cb2027d97d",
+    "submittedAt": "2026-11-20T15:06:51.963Z",
+    "storedRawInDatabase": true,
+    "storedLength": 126,
+    "storedText": "<script>window.__xss_s=1</script><img src=x id=xss-i onerror=\"window.__xss_i=1\"><svg id=xss-v onload=\"window.__xss_v=1\"></svg>"
+  },
+  "reviewPage": {
+    "payloadRenderedAsText": true,
+    "markers": { "xss_s": null, "xss_i": null, "xss_v": null },
+    "probeElements": { "img": false, "svg": false },
+    "injectedScriptNodes": 0,
+    "renderedNode": {
+      "tag": "SPAN",
+      "textContent": "<script>window.__xss_s=1</script><img src=x id=xss-i onerror=\"window.__xss_i=1\"><svg id=xss-v onload=\"window.__xss_v=1\"></svg>",
+      "innerHTML": "&lt;script&gt;window.__xss_s=1&lt;/script&gt;&lt;img src=x id=xss-i onerror=\"window.__xss_i=1\"&gt;&lt;svg id=xss-v onload=\"window.__xss_v=1\"&gt;&lt;/svg&gt;"
+    },
+    "escaped": true
+  },
+  "creatorResultsPage": {
+    "payloadRenderedAsText": true,
+    "markers": { "xss_s": null, "xss_i": null, "xss_v": null },
+    "probeElements": { "img": false, "svg": false },
+    "injectedScriptNodes": 0,
+    "occurrences": 1,
+    "renderedNode": {
+      "tag": "SPAN",
+      "textContent": "<script>window.__xss_s=1</script><img src=x id=xss-i onerror=\"window.__xss_i=1\"><svg id=xss-v onload=\"window.__xss_v=1\"></svg>",
+      "innerHTML": "&lt;script&gt;window.__xss_s=1&lt;/script&gt;&lt;img src=x id=xss-i onerror=\"window.__xss_i=1\"&gt;&lt;svg id=xss-v onload=\"window.__xss_v=1\"&gt;&lt;/svg&gt;"
+    },
+    "escaped": true
+  },
+  "responseHeaders": {
+    "content-security-policy": "default-src 'self'; script-src 'self' 'nonce-…' 'strict-dynamic'; style-src 'self' 'nonce-…'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()"
+  },
+  "sourceScan": {
+    "dangerousHtmlSinksInSrcAndServer": 0,
+    "patterns": ["dangerouslySetInnerHTML", "innerHTML", "insertAdjacentHTML", "srcdoc"]
+  },
+  "verdict": "PASS — payload tersimpan mentah tetapi selalu di-encode sebagai teks pada halaman review dan hasil; tidak ada eksekusi script atau pembuatan elemen probe.",
+  "screenshots": [
+    "01-form-payload.png",
+    "01-form-payload-full.png",
+    "02-review-payload.png",
+    "02-review-payload-full.png",
+    "03-receipt.png",
+    "04-results-payload.png",
+    "04-results-payload-full.png"
+  ]
+}
