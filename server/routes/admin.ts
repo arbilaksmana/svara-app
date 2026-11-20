@@ -20,6 +20,7 @@ interface AccountRow {
   display_name: string;
   role: string;
   status: string;
+  organization_id: string | null;
 }
 
 interface GrantInput {
@@ -81,12 +82,38 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
     if (!['active', 'suspended'].includes(status)) {
       fail(422, 'validation_error', 'Status akun tidak dikenal.');
     }
+    // Lingkup akun menentukan organisasi survei yang dibuatnya dan akses /org/*.
+    let organizationId = account.organization_id;
+    if (req.body?.organization_id !== undefined) {
+      const raw = req.body.organization_id;
+      if (raw === null || raw === '') {
+        organizationId = null;
+      } else if (typeof raw !== 'string') {
+        fail(422, 'validation_error', 'organization_id harus berupa id organisasi atau null.');
+      } else {
+        const organization = await get<{ id: string }>('SELECT id FROM organizations WHERE id = ?', raw);
+        if (!organization) fail(422, 'unknown_organization', 'Organisasi tidak dikenal.');
+        organizationId = organization.id;
+      }
+    }
+    if (role === 'org_admin' && !organizationId) {
+      fail(422, 'organization_required', 'Akun org_admin harus terikat organisasi.');
+    }
+    if (role === 'super_admin' && organizationId) {
+      fail(422, 'super_admin_scope', 'Lepas organisasi akun sebelum menjadikannya super_admin.');
+    }
     if (account.role === 'super_admin' && (role !== 'super_admin' || status !== 'active') && (await activeSuperAdmins()) <= 1) {
       fail(409, 'last_super_admin', 'Tidak dapat menonaktifkan super admin terakhir.');
     }
-    await run('UPDATE accounts SET role = ?, status = ? WHERE id = ?', role, status, account.id);
-    await audit(req, 'Ubah akun', account.id, 'berhasil', { role, status });
-    res.json({ data: { ...account, role, status } });
+    await run(
+      'UPDATE accounts SET role = ?, status = ?, organization_id = ? WHERE id = ?',
+      role,
+      status,
+      organizationId,
+      account.id,
+    );
+    await audit(req, 'Ubah akun', account.id, 'berhasil', { role, status, organization_id: organizationId });
+    res.json({ data: { ...account, role, status, organization_id: organizationId } });
   } catch (error) {
     sendError(res, error);
   }

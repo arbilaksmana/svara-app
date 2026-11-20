@@ -5,6 +5,7 @@ import type {
   Account,
   AccessGrant,
   IntegrationEvent,
+  OrganizationSummary,
 } from '../types';
 
 /**
@@ -96,6 +97,9 @@ export const auditLogs: AuditLog[] = [
   { id: 'log_07', actor: 'admin-utama', action: 'Ubah peran akun', object: 'akun creator-b', outcome: 'berhasil', at: '2026-11-12T04:00:00Z' },
   { id: 'log_08', actor: 'creator-a', action: 'Ekspor CSV', object: 's_demo1 · v1', outcome: 'berhasil', at: '2026-11-12T07:30:00Z' },
 ];
+
+/** Daftar organisasi hanya diisi dari bootstrap super_admin. */
+export const organizations: OrganizationSummary[] = [];
 
 export const accounts: Account[] = [
   { id: 'u_admin', display_name: 'Rani Wijaya', role: 'super_admin', status: 'active' },

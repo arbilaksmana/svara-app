@@ -24,7 +24,7 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { accounts, accessGrants, auditLogs, integrationEvents } from '../lib/fixtures/records';
+import { accounts, accessGrants, auditLogs, integrationEvents, organizations } from '../lib/fixtures/records';
 import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
@@ -152,7 +152,7 @@ export function AdminAccountsPage() {
   }, [revision, storedGrants]);
 
   const changeRole = (accountId: string, displayName: string, chosen: string) => {
-    const role = chosen === 'admin' ? 'super_admin' : 'creator';
+    const role = chosen === 'admin' ? 'super_admin' : chosen;
     setAccountBusy(accountId);
     void adminSaveAccount(accountId, { role })
       .then(() => {
@@ -160,6 +160,17 @@ export function AdminAccountsPage() {
         return refreshBootstrap();
       })
       .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Peran gagal diubah.', 'danger'))
+      .finally(() => setAccountBusy(null));
+  };
+
+  const changeOrganization = (accountId: string, displayName: string, chosen: string) => {
+    setAccountBusy(accountId);
+    void adminSaveAccount(accountId, { organization_id: chosen === '' ? null : chosen })
+      .then(() => {
+        notify(`Organisasi ${displayName} diperbarui.`);
+        return refreshBootstrap();
+      })
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Organisasi gagal diubah.', 'danger'))
       .finally(() => setAccountBusy(null));
   };
 
@@ -192,20 +203,35 @@ export function AdminAccountsPage() {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Daftar akun</SectionTitle>
             <div className="hidden lg:block">
-            <Table head={['Akun', 'Peran', 'Status', 'Cakupan', 'Aksi']}>
+            <Table head={['Akun', 'Peran', 'Organisasi', 'Status', 'Cakupan', 'Aksi']}>
               {accounts.map((a) => (
                 <tr key={a.id}>
                   <Th>{a.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{a.id}</Code></span></Th>
                   <Td>
                     <select
                       aria-label={`Peran ${a.display_name}`}
-                      value={a.role === 'super_admin' ? 'admin' : 'creator'}
+                      value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
                     >
                       <option value="creator">creator</option>
+                      <option value="org_admin">org_admin</option>
                       <option value="admin">admin</option>
+                    </select>
+                  </Td>
+                  <Td>
+                    <select
+                      aria-label={`Organisasi ${a.display_name}`}
+                      value={a.organization_id ?? ''}
+                      disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
+                      onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
+                      className="min-h-[44px] max-w-[12rem] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                    >
+                      <option value="">Tanpa organisasi</option>
+                      {organizations.map((organization) => (
+                        <option key={organization.id} value={organization.id}>{organization.name}</option>
+                      ))}
                     </select>
                   </Td>
                   <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge></Td>
@@ -239,13 +265,29 @@ export function AdminAccountsPage() {
                     Peran
                     <select
                       aria-label={`Peran ${a.display_name}`}
-                      value={a.role === 'super_admin' ? 'admin' : 'creator'}
+                      value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
                       <option value="creator">creator</option>
+                      <option value="org_admin">org_admin</option>
                       <option value="admin">admin</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-caption font-bold text-muted">
+                    Organisasi
+                    <select
+                      aria-label={`Organisasi ${a.display_name}`}
+                      value={a.organization_id ?? ''}
+                      disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
+                      onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
+                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    >
+                      <option value="">Tanpa organisasi</option>
+                      {organizations.map((organization) => (
+                        <option key={organization.id} value={organization.id}>{organization.name}</option>
+                      ))}
                     </select>
                   </label>
                   <p className="text-body-sm text-muted">{accessGrants.filter((g) => g.account_id === a.id).length} grant</p>

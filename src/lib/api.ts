@@ -6,6 +6,7 @@ import type {
   OrgInvitation,
   OrgMember,
   OrgProfile,
+  OrganizationSummary,
   AuditLog,
   DeploymentProfile,
   IntegrationEvent,
@@ -91,6 +92,7 @@ export interface BootstrapData {
   settings: Record<string, { allowResults: boolean; allowIndividual: boolean }>;
   grants: AccessGrant[];
   accounts: Account[];
+  organizations: OrganizationSummary[];
   auditLogs: AuditLog[];
   integrationEvents: IntegrationEvent[];
   dataRequests: Array<Record<string, unknown>>;
@@ -460,7 +462,10 @@ export async function resolveInvitationCode(code: string): Promise<{ token: stri
   });
 }
 
-export async function adminSaveAccount(id: string, patch: { role?: string; status?: string }): Promise<void> {
+export async function adminSaveAccount(
+  id: string,
+  patch: { role?: string; status?: string; organization_id?: string | null },
+): Promise<void> {
   await call(`/admin/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }
 

@@ -113,6 +113,13 @@ interface AccountAdminRow {
   display_name: string;
   role: string;
   status: string;
+  organization_id: string | null;
+}
+
+interface OrganizationRow {
+  id: string;
+  name: string;
+  organization_type: string;
 }
 
 interface AuditRow {
@@ -177,6 +184,7 @@ export interface BootstrapPayload {
   settings: Record<string, { allowResults: boolean; allowIndividual: boolean }>;
   grants: unknown[];
   accounts: unknown[];
+  organizations: Array<{ id: string; name: string; organization_type: string }>;
   auditLogs: unknown[];
   integrationEvents: unknown[];
   dataRequests: unknown[];
@@ -211,6 +219,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       settings: {},
       grants: [],
       accounts: [],
+      organizations: [],
       auditLogs: [],
       integrationEvents: [],
       dataRequests: [],
@@ -303,7 +312,14 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       : await all<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? ORDER BY survey_id', account.id);
   const accounts =
     account.role === 'super_admin'
-      ? await all<AccountAdminRow>('SELECT id, email, display_name, role, status FROM accounts ORDER BY display_name')
+      ? await all<AccountAdminRow>(
+          'SELECT id, email, display_name, role, status, organization_id FROM accounts ORDER BY display_name',
+        )
+      : [];
+  // Daftar organisasi hanya untuk super_admin: dipakai layar akun untuk menetapkan lingkup akun.
+  const organizations =
+    account.role === 'super_admin'
+      ? await all<OrganizationRow>('SELECT id, name, organization_type FROM organizations ORDER BY name')
       : [];
   const auditLogs =
     account.role === 'super_admin'
@@ -368,6 +384,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       can_read_free_text: boolean(row.can_read_free_text),
     })),
     accounts: accounts.map((row) => ({ ...row, active: row.status === 'active' })),
+    organizations,
     auditLogs,
     integrationEvents: integrationEvents.map((row) => ({ ...row, simulated: boolean(row.simulated) })),
     dataRequests,
