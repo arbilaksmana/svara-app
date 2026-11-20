@@ -7,6 +7,7 @@ import { publicRouter } from './routes/public.ts';
 import { surveysRouter } from './routes/surveys.ts';
 import { adminRouter } from './routes/admin.ts';
 import { integrationRouter } from './routes/integration.ts';
+import { orgRouter } from './routes/org.ts';
 import { get } from './db.ts';
 import { sendError } from './http.ts';
 
@@ -55,6 +56,7 @@ app.get('/api/v1/health', async (_req: Request, res: Response) => {
 app.use('/api/v1', authRouter);
 app.use('/api/v1', publicRouter);
 app.use('/api/v1', integrationRouter);
+app.use('/api/v1', requireAuth, orgRouter);
 app.use('/api/v1', requireAuth, surveysRouter);
 app.use('/api/v1', requireAuth, adminRouter);
 

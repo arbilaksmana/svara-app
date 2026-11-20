@@ -21,6 +21,21 @@ export interface DeploymentProfile {
   synthetic_placeholder: boolean;
 }
 
+/** Profil kebijakan efektif survei: milik organisasi pemilik lingkup atau profil platform. */
+export interface SurveyProfile {
+  id: string;
+  organization_name: string;
+  organization_type: OrganizationType;
+  respondent_age_category: AgeCategory | null;
+  consent_mode: ConsentMode | null;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: boolean | null;
+  source: 'organization' | 'platform';
+}
+
 export type SurveyStatus = 'draft' | 'published' | 'closed' | 'archived';
 
 export interface Survey {
@@ -173,7 +188,7 @@ export interface AuditLog {
   metadata?: string | null;
 }
 
-export type Role = 'super_admin' | 'creator' | 'authorized_officer';
+export type Role = 'super_admin' | 'org_admin' | 'creator';
 export type AccountStatus = 'active' | 'suspended';
 
 export interface Account {
@@ -182,6 +197,47 @@ export interface Account {
   role: Role;
   status: AccountStatus;
   email?: string;
+  organization_id?: string | null;
+}
+
+/** Profil organisasi seperti dikembalikan GET/PUT /org/profile. */
+export interface OrgProfile {
+  id: string;
+  organization_name: string;
+  organization_type: OrganizationType;
+  respondent_age_category: AgeCategory;
+  consent_mode: ConsentMode;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  notice_version: string;
+}
+
+export interface OrgMember {
+  id: string;
+  email: string;
+  display_name: string;
+  role: Role;
+  status: AccountStatus;
+  created_at: string;
+}
+
+export interface OrgInvitation {
+  id: string;
+  organization_id: string;
+  code: string;
+  created_at: string;
+}
+
+export interface OrgAuditRow {
+  id: string;
+  at: string;
+  actor: string;
+  action: string;
+  object: string;
+  outcome: string;
 }
 
 export interface AccessGrant {

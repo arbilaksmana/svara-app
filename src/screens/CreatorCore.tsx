@@ -31,12 +31,11 @@ import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
-import { profileForSurvey } from '../lib/fixtures/profiles';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
 import { ApiError } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
-import { createSurvey, duplicateVersion, publishVersion, saveDraft, useStore } from '../lib/store';
+import { createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -323,6 +322,7 @@ function blankQuestion(): EditableQuestion {
 export function EditorPage({ id }: { id: string }) {
   const notify = useToast();
   const { drafts, revision, session } = useStore();
+  const profile = surveyProfileOf(id);
   void revision;
   const survey = findSurvey(id);
   const isOwner = Boolean(survey && session && survey.owner_id === session.id);
@@ -688,9 +688,16 @@ export function EditorPage({ id }: { id: string }) {
             <div className="flex flex-col gap-4 lg:sticky lg:top-24 lg:self-start">
               <Panel className="h-fit">
                 <SectionTitle>Profil deployment</SectionTitle>
-                <p className="mt-2 text-body-sm text-ink">{profileForSurvey(id).organization_name}</p>
+                <p className="mt-2 text-body-sm text-ink">{profile?.organization_name ?? 'Belum dimuat'}</p>
                 <p className="mt-2 text-caption text-muted">
-                  Mode persetujuan: {CONSENT_MODE_LABEL[profileForSurvey(id).consent_mode]}
+                  Mode persetujuan: {profile?.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}
+                </p>
+                <p className="mt-1 text-annotation text-muted">
+                  {profile?.source === 'organization'
+                    ? 'Kebijakan organisasi'
+                    : profile?.source === 'platform'
+                      ? 'Kebijakan platform'
+                      : 'Sumber kebijakan belum tersedia'}
                 </p>
               </Panel>
               <Panel className="h-fit">

@@ -1,6 +1,6 @@
 import { all, get, nowIso } from './db.ts';
 import type { AccountRow } from './security.ts';
-import { canReadAggregate, type SurveyRow } from './http.ts';
+import { accessibleSurveys, canReadAggregate, surveyProfileFor, type SurveyProfile } from './http.ts';
 import { summaryFor, type VersionSummary } from './summary.ts';
 
 interface ProfileRow {
@@ -162,27 +162,12 @@ function optionalBoolean(value: number | null): boolean | null {
   return value === null ? null : boolean(value);
 }
 
-async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[]> {
-  if (account.role === 'super_admin') {
-    return all<SurveyRow>('SELECT * FROM surveys ORDER BY updated_at DESC, id');
-  }
-  if (account.role === 'creator') {
-    return all<SurveyRow>('SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC, id', account.id);
-  }
-  return all<SurveyRow>(
-    `SELECT DISTINCT s.*
-       FROM surveys s JOIN access_grants g ON g.survey_id = s.id
-      WHERE g.account_id = ?
-      ORDER BY s.updated_at DESC, s.id`,
-    account.id,
-  );
-}
-
 export interface BootstrapPayload {
   account: (AccountRow & { email: string }) | null;
   profiles: unknown[];
   notices: unknown[];
   surveys: unknown[];
+  surveyProfiles: Record<string, SurveyProfile>;
   versions: unknown[];
   questions: unknown[];
   options: unknown[];
@@ -216,6 +201,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       profiles,
       notices,
       surveys: [],
+      surveyProfiles: {},
       versions: [],
       questions: [],
       options: [],
@@ -353,10 +339,15 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
     }
   }
 
+  // UI tidak menyusun profil dari fixture: payload membawa profil kebijakan tiap survei.
+  const surveyProfiles: Record<string, SurveyProfile> = {};
+  for (const survey of surveys) surveyProfiles[survey.id] = await surveyProfileFor(survey);
+
   return {
     account: { ...account, email: account.email },
     profiles,
     notices,
+    surveyProfiles,
     surveys: surveys.map((row) => ({ ...row })),
     versions: versions.map((row) => ({ ...row, question_ids: versionQuestionIds.get(row.id) ?? [] })),
     questions: questions.map((row) => ({

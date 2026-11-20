@@ -28,6 +28,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +100,7 @@ export function RegisterPage() {
                     email: email.trim().toLowerCase(),
                     password,
                     acceptTerms: acceptedTerms,
+                    invite_code: inviteCode.trim() || undefined,
                   })
                     .then(() => {
                       notify('Akun dibuat. Selamat datang di Svara.');
@@ -167,6 +169,22 @@ export function RegisterPage() {
                       value={confirmation}
                       onChange={(event) => setConfirmation(event.target.value)}
                       placeholder="••••••••"
+                    />
+                  )}
+                </Field>
+
+                <Field
+                  id="register-invite"
+                  label="Kode undangan organisasi"
+                  hint="Opsional. Isi bila admin organisasi memberi kode agar akun Anda masuk ke organisasi tersebut."
+                >
+                  {(aria) => (
+                    <TextInput
+                      {...aria}
+                      autoComplete="off"
+                      value={inviteCode}
+                      onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+                      placeholder="ORG-XXXX"
                     />
                   )}
                 </Field>

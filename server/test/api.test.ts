@@ -65,6 +65,18 @@ function data<T = Record<string, unknown>>(result: Result): T {
   return (result.json as { data: T }).data;
 }
 
+/** Sesi dipakai ulang: login dibatasi 8 percobaan per email per alamat IP. */
+const sessions = new Map<string, Promise<string>>();
+
+function session(email: string): Promise<string> {
+  let cached = sessions.get(email);
+  if (!cached) {
+    cached = login(email);
+    sessions.set(email, cached);
+  }
+  return cached;
+}
+
 async function waitForServer(child: ChildProcess): Promise<void> {
   let ready!: () => void;
   const signal = new Promise<void>((resolveSignal) => {
@@ -118,7 +130,7 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   });
   assert.equal(suspended.status, 401);
 
-  const creatorA = await login('creator.a@svara.local');
+  const creatorA = await session('creator.a@svara.local');
   const bootstrapA = data<{
     surveys: Array<{ id: string }>;
     summaries: Record<string, unknown>;
@@ -131,7 +143,7 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   const foreignSummary = await call('/surveys/s_demo3/summary', { cookie: creatorA });
   assert.ok([403, 404].includes(foreignSummary.status), 'survei creator B tidak boleh dibaca');
 
-  const admin = await login('admin@svara.local');
+  const admin = await session('admin@svara.local');
   const bootstrapAdmin = data<{
     surveys: Array<unknown>;
     summaries: Record<string, unknown>;
@@ -139,7 +151,7 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
     auditLogs: Array<unknown>;
   }>(await call('/bootstrap', { cookie: admin }));
   assert.equal(bootstrapAdmin.surveys.length, 4);
-  assert.equal(bootstrapAdmin.accounts.length, 5);
+  assert.equal(bootstrapAdmin.accounts.length, 6, 'termasuk akun org_admin sintetis');
   assert.ok(bootstrapAdmin.auditLogs.length > 0);
   const adminSummary = await call('/surveys/s_demo1/summary', { cookie: admin });
   assert.equal(adminSummary.status, 403, 'administrator tanpa grant tidak membaca jawaban');
@@ -187,7 +199,7 @@ test('Security headers: CSP dan hardening aktif pada API dan 404', async () => {
 });
 
 test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi tanpa respons', async () => {
-  const cookie = await login('creator.a@svara.local');
+  const cookie = await session('creator.a@svara.local');
   const created = data<{ survey: { id: string } }>(
     await call('/surveys', { method: 'POST', cookie, body: { title: 'Uji dua skala' } }),
   );
@@ -277,7 +289,7 @@ test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi ta
 });
 
 test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melayani versi lama', async () => {
-  const cookie = await login('creator.a@svara.local');
+  const cookie = await session('creator.a@svara.local');
   const detail = data<{
     survey: { id: string; current_version_id: string };
     versions: Array<{ id: string; number: number; status: string }>;
@@ -334,7 +346,7 @@ test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melaya
 });
 
 test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons, retry bukti sama', async () => {
-  const creator = await login('creator.a@svara.local');
+  const creator = await session('creator.a@svara.local');
   const fresh = data<{ token: string }>(
     await call('/surveys/s_demo1/invitations', {
       method: 'POST',
@@ -406,7 +418,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   const receipt = data<{ response_id: string }>(created);
 
   const auditRows = data<Array<{ action: string; actor: string; metadata: string | null }>>(
-    await call('/admin/audit?limit=500', { cookie: await login('admin@svara.local') }),
+    await call('/admin/audit?limit=500', { cookie: await session('admin@svara.local') }),
   );
   const responseAudit = auditRows.find(
     (row) => row.action === 'Kirim respons' && row.metadata?.includes(receipt.response_id),
@@ -450,7 +462,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 });
 
 test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () => {
-  const cookie = await login('creator.a@svara.local');
+  const cookie = await session('creator.a@svara.local');
   const resolve = await call('/public/invitations/resolve', { method: 'POST', body: { code: 'UND-01-AKTIF' } });
   assert.equal(resolve.status, 200);
   assert.equal((resolve.json as { data: { token: string } }).data.token, 'undangan-demo');
@@ -485,9 +497,9 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
 });
 
 test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () => {
-  const creator = await login('creator.a@svara.local');
-  const officer = await login('officer@svara.local');
-  const creatorB = await login('creator.b@svara.local');
+  const creator = await session('creator.a@svara.local');
+  const officer = await session('officer@svara.local');
+  const creatorB = await session('creator.b@svara.local');
 
   const summary = data<{
     total: number;
@@ -514,9 +526,11 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.ok(!header.toLowerCase().includes('name'));
   assert.ok(officerCsv.text.includes('Perlu panduan singkat.'), 'teks bebas tampil untuk penerima berizin');
 
-  const creatorCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: creator });
-  assert.equal(creatorCsv.status, 200);
-  assert.ok(!creatorCsv.text.includes('Perlu panduan singkat.'), 'teks bebas disamarkan tanpa izin');
+  // Pemilik kini berhak penuh (keputusan user): teks bebas ikut untuk pemilik.
+  const creatorCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', {
+    cookie: await session('creator.b@svara.local'),
+  });
+  assert.equal(creatorCsv.status, 403, 'creator bukan pemilik tanpa grant tidak boleh ekspor');
 
   const ownerCsv = await call('/surveys/s_demo4/export?version=v_demo4_1&format=csv', { cookie: creator });
   assert.equal(ownerCsv.status, 200, 'pemilik survei otomatis boleh ekspor tanpa grant');
@@ -528,10 +542,15 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.equal(codebook.status, 200);
   assert.ok(codebook.text.includes('K02'));
   assert.ok(codebook.text.includes('Sangat tidak setuju'));
-  const creatorCodebook = await call('/surveys/s_demo1/export?version=v_demo1_1&format=codebook', { cookie: creator });
-  assert.ok(!creatorCodebook.text.includes('Ceritakan kendala'), 'item teks bebas tidak masuk codebook tanpa izin');
+  const otherCodebook = await call('/surveys/s_demo1/export?version=v_demo1_1&format=codebook', {
+    cookie: await session('creator.b@svara.local'),
+  });
+  assert.equal(otherCodebook.status, 403, 'creator tanpa grant tidak boleh codebook');
 
-  const individualDenied = await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: creator });
+  // Pemilik kini membaca individual tanpa grant; penolakan berlaku untuk akun tanpa hak.
+  const individualDenied = await call('/surveys/s_demo1/responses?version=v_demo1_1', {
+    cookie: await session('creator.b@svara.local'),
+  });
   assert.equal(individualDenied.status, 403);
   const individual = data<Array<{ answers: Array<{ question_code: string; text: string | null }> }>>(
     await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: officer }),
@@ -542,7 +561,7 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.ok(individual.length >= 5);
 
   const audit = data<Array<{ action: string; outcome: string }>>(
-    await call('/admin/audit', { cookie: await login('admin@svara.local') }),
+    await call('/admin/audit', { cookie: await session('admin@svara.local') }),
   );
   assert.ok(audit.some((log) => log.action === 'Ekspor hasil' && log.outcome === 'ditolak'));
   assert.ok(audit.some((log) => log.action === 'Baca jawaban individual' && log.outcome === 'berhasil'));
@@ -589,7 +608,7 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
   });
   assert.equal(created.status, 201);
 
-  const cookie = await login('officer@svara.local');
+  const cookie = await session('officer@svara.local');
   const csv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie });
   assert.equal(csv.status, 200);
   assert.ok(!csv.text.includes('\n=SUM'), 'formula diberi awalan kutip');
@@ -599,7 +618,7 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
 });
 
 test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutnya', async () => {
-  const admin = await login('admin@svara.local');
+  const admin = await session('admin@svara.local');
   const accounts = data<{ accounts: Array<{ id: string; role: string; status: string }> }>(
     await call('/admin/accounts', { cookie: admin }),
   );
@@ -638,7 +657,47 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
     },
   });
   assert.equal(setGrants.status, 200);
-  const officer = await login('officer@svara.local');
+  const officer = await session('officer@svara.local');
+
+  const officerAccount = accounts.accounts.find((row) => row.id === 'u_petugas');
+  assert.equal(officerAccount?.role, 'creator', 'akun penerima izin kini berperan creator');
+
+  const legacyRole = await call('/admin/accounts/u_petugas', {
+    method: 'PATCH',
+    cookie: admin,
+    body: { role: 'authorized_officer' },
+  });
+  assert.equal(legacyRole.status, 422, 'peran authorized_officer sudah dihapus');
+  assert.equal((legacyRole.json as { code?: string }).code, 'validation_error');
+
+  for (const [label, cookie] of [['pemilik', await session('creator.a@svara.local')], ['penerima izin', officer]] as const) {
+    for (const [method, path] of [
+      ['GET', '/admin/accounts'],
+      ['PATCH', '/admin/accounts/u_petugas'],
+      ['PUT', '/admin/grants/u_petugas'],
+      ['GET', '/admin/audit'],
+    ] as const) {
+      const body = method === 'PATCH' ? { role: 'super_admin' } : method === 'PUT' ? { grants: [] } : undefined;
+      const denied = await call(path, { method, cookie, body });
+      assert.equal(denied.status, 403, `${method} ${path} harus menolak creator (${label})`);
+    }
+  }
+
+  // Dicabut pada akhir: test lain bergantung pada grant teks penuh milik u_petugas.
+  await call('/admin/grants/u_petugas', {
+    method: 'PUT',
+    cookie: admin,
+    body: {
+      grants: [
+        {
+          survey_id: 's_demo1',
+          can_read_individual: true,
+          can_export: true,
+          can_read_free_text: false,
+        },
+      ],
+    },
+  });
   const withoutText = data<Array<{ answers: Array<{ question_code: string; text: string | null }> }>>(
     await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: officer }),
   );
@@ -649,7 +708,7 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
 });
 
 test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
-  const admin = await login('admin@svara.local');
+  const admin = await session('admin@svara.local');
   const stats = data<{
     perCreator: Array<{ id: string; surveys: number; responses: number }>;
     perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
@@ -660,7 +719,7 @@ test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
 });
 
 test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas', async () => {
-  const admin = await login('admin@svara.local');
+  const admin = await session('admin@svara.local');
   const events = data<Array<{ event_id: string; status: string; response_id: string | null }>>(
     await call('/admin/integration', { cookie: admin }),
   );
@@ -745,9 +804,8 @@ test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan 
   );
   assert.equal(ids.size, 30, 'tidak ada respons tergabung atau hilang');
 
-  const creator = await login('creator.a@svara.local');
   const summary = data<{ total: number }>(
-    await call('/surveys/s_demo2/summary?version=v_demo2_1', { cookie: creator }),
+    await call('/surveys/s_demo2/summary?version=v_demo2_1', { cookie: await session('creator.a@svara.local') }),
   );
   assert.ok(summary.total >= 30);
 });
@@ -759,7 +817,7 @@ test('Permintaan data publik dapat ditindaklanjuti admin tanpa memuat jawaban', 
   });
   assert.equal(created.status, 201);
   const id = (created.json as { data: { id: string } }).data.id;
-  const admin = await login('admin@svara.local');
+  const admin = await session('admin@svara.local');
   const patched = await call(`/admin/data-requests/${id}`, {
     method: 'PATCH',
     cookie: admin,
@@ -840,4 +898,527 @@ test('Registrasi publik membuat creator baru dan langsung memberi sesi', async (
 
   const login = await call('/auth/login', { method: 'POST', body: { email, password } });
   assert.equal(login.status, 200, login.text);
+});
+
+test('PUT /admin/grants hanya mengganti izin akun yang disebut pada payload', async () => {
+  const admin = await session('admin@svara.local');
+  const grantsOf = async (accountId: string) => {
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const result = await client.query<{ survey_id: string | null; can_export: number }>(
+        'SELECT survey_id, can_export FROM access_grants WHERE account_id = $1 ORDER BY survey_id NULLS FIRST',
+        [accountId],
+      );
+      return result.rows;
+    } finally {
+      await client.end();
+    }
+  };
+
+  const officerBefore = await grantsOf('u_petugas');
+  const creatorBefore = await grantsOf('u_creator_a');
+  assert.ok(officerBefore.length > 0, 'seed harus memberi izin pada u_petugas');
+
+  const updated = await call('/admin/grants', {
+    method: 'PUT',
+    cookie: admin,
+    body: { grants: [{ account_id: 'u_creator_a', survey_id: 's_demo3', can_export: true }] },
+  });
+  assert.equal(updated.status, 200, updated.text);
+
+  assert.deepEqual(await grantsOf('u_petugas'), officerBefore, 'izin u_petugas tidak boleh terhapus');
+  assert.deepEqual(await grantsOf('u_creator_a'), [{ survey_id: 's_demo3', can_export: 1 }]);
+
+  await call('/admin/grants', {
+    method: 'PUT',
+    cookie: admin,
+    body: {
+      grants: creatorBefore.map((grant) => ({
+        account_id: 'u_creator_a',
+        survey_id: grant.survey_id,
+        can_export: grant.can_export === 1,
+      })),
+    },
+  });
+
+  const unknown = await call('/admin/grants', {
+    method: 'PUT',
+    cookie: admin,
+    body: { grants: [{ account_id: 'u_tidak_ada', survey_id: 's_demo1', can_export: true }] },
+  });
+  assert.equal(unknown.status, 422);
+  assert.deepEqual(await grantsOf('u_petugas'), officerBefore, 'payload ditolak tidak boleh menghapus izin');
+});
+
+test('Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi', async () => {
+  const orgAdmin = await session('orgadmin@svara.local');
+  const otherOrgAdmin = await session('creator.b@svara.local');
+
+  const accounts = data<{ accounts: Array<{ id: string; role: string }> }>(
+    await call('/admin/accounts', { cookie: await session('admin@svara.local') }),
+  );
+  assert.equal(accounts.accounts.find((row) => row.id === 'u_orgadmin')?.role, 'org_admin');
+
+  // Pemilik membaca penuh tanpa grant, termasuk teks bebas.
+  const ownerResponses = data<Array<{ answers: Array<{ question_code: string; text: string | null }> }>>(
+    await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: await session('creator.a@svara.local') }),
+  );
+  assert.ok(ownerResponses.length >= 5);
+  assert.ok(
+    ownerResponses.some((response) =>
+      response.answers.some((answer) => answer.question_code === 'K02' && answer.text !== null),
+    ),
+    'pemilik membaca teks bebas tanpa grant',
+  );
+  const ownerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', {
+    cookie: await session('creator.a@svara.local'),
+  });
+  assert.equal(ownerCsv.status, 200);
+  assert.ok(ownerCsv.text.includes('Perlu panduan singkat.'), 'ekspor pemilik menyertakan teks bebas');
+
+  // org_admin organisasi sama: detail, pengaturan, jawaban individual, ekspor.
+  const adminDetail = await call('/surveys/s_demo1', { cookie: orgAdmin });
+  assert.equal(adminDetail.status, 200, adminDetail.text);
+  const adminSettings = await call('/surveys/s_demo1/settings', { cookie: orgAdmin });
+  assert.equal(adminSettings.status, 200);
+  const adminResponses = await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: orgAdmin });
+  assert.equal(adminResponses.status, 200, adminResponses.text);
+  assert.ok(adminResponses.text.includes('Perlu panduan singkat.'), 'org_admin membaca teks bebas survei organisasinya');
+  const adminExport = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: orgAdmin });
+  assert.equal(adminExport.status, 200);
+
+  // Organisasi lain (org_perpus via creator.b), creator org_smk lain tanpa grant, akun tanpa organisasi.
+  // Tidak ada akun seed bersih di org_smk tanpa grant, jadi baris uji dibuat di sini.
+  const outsiderEmail = 'luar.org@contoh.test';
+  const registered = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Creator Luar Org', email: outsiderEmail, password: 'SandiOrg123!', acceptTerms: true },
+  });
+  assert.equal(registered.status, 201, registered.text);
+  const outsiderCookie = (registered.headers.get('set-cookie') ?? '').split(';')[0]!;
+  const outsider = new Client({ connectionString: databaseUrl });
+  await outsider.connect();
+  try {
+    await outsider.query("UPDATE accounts SET organization_id = 'org_smk' WHERE email = $1", [outsiderEmail]);
+  } finally {
+    await outsider.end();
+  }
+  for (const [label, cookie] of [
+    ['org_perpus', otherOrgAdmin],
+    ['creator org_smk tanpa grant', outsiderCookie],
+
+  ] as const) {
+    for (const [method, path, body] of [
+      ['GET', '/surveys/s_demo1', undefined],
+      ['PUT', '/surveys/s_demo1/settings', { allowResults: true, allowIndividual: true }],
+      ['GET', '/surveys/s_demo1/responses?version=v_demo1_1', undefined],
+      ['GET', '/surveys/s_demo1/export?version=v_demo1_1&format=csv', undefined],
+    ] as const) {
+      const denied = await call(path, { method, cookie, body });
+      assert.equal(denied.status, 403, `${label}: ${method} ${path} harus 403`);
+    }
+  }
+
+  // super_admin tidak otomatis membaca jawaban individual.
+  const superAdmin = await session('admin@svara.local');
+  const superResponses = await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: superAdmin });
+  assert.equal(superResponses.status, 403, 'super_admin tanpa grant tetap ditolak');
+
+  // Audit: baris pemilik dan org_admin menyimpan account_id serta organization_id.
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const rows = await client.query<{ actor: string; account_id: string | null; organization_id: string | null }>(
+      `SELECT actor, account_id, organization_id FROM audit_logs
+        WHERE action = 'Baca jawaban individual' AND outcome = 'berhasil'`,
+    );
+    const byActor = new Map(rows.rows.map((row) => [row.actor, row]));
+    for (const actor of ['u_creator_a', 'u_orgadmin']) {
+      const row = byActor.get(actor);
+      assert.ok(row, `audit baca individual untuk ${actor} harus tercatat`);
+      assert.equal(row.account_id, actor);
+      assert.equal(row.organization_id, 'org_smk');
+    }
+    const exports = await client.query<{ organization_id: string | null }>(
+      "SELECT organization_id FROM audit_logs WHERE action = 'Ekspor CSV' AND actor = 'u_orgadmin'",
+    );
+    assert.equal(exports.rows[0]?.organization_id, 'org_smk', 'audit ekspor org_admin membawa organisasi');
+    const denied = await client.query<{ organization_id: string | null }>(
+      "SELECT organization_id FROM audit_logs WHERE action = 'Baca jawaban individual' AND outcome = 'ditolak' AND actor = 'u_admin'",
+    );
+    assert.equal(denied.rows.at(-1)?.organization_id, null, 'super_admin tanpa organisasi menulis organization_id NULL');
+  } finally {
+    await client.end();
+  }
+});
+
+test('GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2', async () => {
+  const orgAdmin = await session('orgadmin@svara.local');
+
+  const own = data<{ source: string; profile: { id: string; consent_mode: string | null } }>(
+    await call('/org/profile', { cookie: orgAdmin }),
+  );
+  assert.equal(own.source, 'organization');
+  assert.equal(own.profile.id, 'org_smk');
+  assert.equal(own.profile.consent_mode, 'guardian');
+
+  const othersProfile = data<{ source: string; profile: { id: string; consent_mode: string | null } }>(
+    await call('/org/profile', { cookie: await session('creator.a@svara.local') }),
+  );
+  assert.equal(othersProfile.profile.id, 'org_smk', 'creator membaca profil organisasinya');
+
+  const mismatch = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { respondent_age_category: 'minor', consent_mode: 'self' },
+  });
+  assert.equal(mismatch.status, 422);
+  assert.equal((mismatch.json as { code?: string }).code, 'consent_mode_mismatch');
+
+  const invalidMode = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { consent_mode: 'tidak-ada' },
+  });
+  assert.equal(invalidMode.status, 422);
+
+  // Hanya sebagian field: nilai lain dipertahankan, aturan gabungan tetap divalidasi.
+  const senderOnly = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { respondent_age_category: 'minor' },
+  });
+  assert.equal(senderOnly.status, 200, senderOnly.text);
+  const partial = (senderOnly.json as { data: { profile: { respondent_age_category: string; consent_mode: string } } })
+    .data.profile;
+  assert.equal(partial.respondent_age_category, 'minor');
+  assert.equal(partial.consent_mode, 'guardian');
+
+  const adultSelf = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { respondent_age_category: 'adult', consent_mode: 'self' },
+  });
+  assert.equal(adultSelf.status, 200, adultSelf.text);
+  assert.equal(
+    (adultSelf.json as { data: { profile: { consent_mode: string } } }).data.profile.consent_mode,
+    'self',
+    'kombinasi adult/self sah dan tersimpan pada organisasi',
+  );
+
+  const updated = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { data_request_contact: 'privasi.smk@contoh.test', retention_days: 180 },
+  });
+  assert.equal(updated.status, 200, updated.text);
+  const updatedProfile = (updated.json as { data: { profile: { id: string; data_request_contact: string; retention_days: number } } })
+    .data.profile;
+  assert.equal(updatedProfile.id, 'org_smk');
+  assert.equal(updatedProfile.data_request_contact, 'privasi.smk@contoh.test');
+  assert.equal(updatedProfile.retention_days, 180);
+
+  const outsider = await call('/org/profile', {
+    method: 'PUT',
+    cookie: await session('creator.a@svara.local'),
+    body: { organization_name: 'Penyusup' },
+  });
+  assert.equal(outsider.status, 403, 'creator tidak boleh mengubah profil organisasi');
+
+  const superAdmin = await session('admin@svara.local');
+  const platform = data<{ source: string; profile: { id: string } }>(
+    await call('/org/profile', { cookie: superAdmin }),
+  );
+  assert.equal(platform.source, 'platform', 'akun tanpa organisasi mendapat platform_profile');
+  assert.equal(platform.profile.id, 'platform');
+  const platformPut = await call('/org/profile', {
+    method: 'PUT',
+    cookie: superAdmin,
+    body: { organization_name: 'Bukan' },
+  });
+  assert.equal(platformPut.status, 403);
+});
+
+test('POST /surveys: owner_scope menentukan lingkup, visibilitas, dan sumber notice', async () => {
+  const owner = await session('creator.a@svara.local');
+  const orgAdmin = await session('orgadmin@svara.local');
+  const peer = await session('officer@svara.local');
+
+  const orgCreated = await call('/surveys', {
+    method: 'POST',
+    cookie: owner,
+    body: { title: 'Survei lingkup organisasi', owner_scope: 'organization' },
+  });
+  assert.equal(orgCreated.status, 201, orgCreated.text);
+  const orgSurvey = (orgCreated.json as { data: { survey: { id: string; organization_id: string | null; profile_id: string } } })
+    .data.survey;
+  assert.equal(orgSurvey.organization_id, 'org_smk');
+  assert.ok(orgSurvey.profile_id, 'profile_id tetap wajib dan terisi');
+
+  const individualCreated = await call('/surveys', {
+    method: 'POST',
+    cookie: owner,
+    body: { title: 'Survei lingkup pribadi', owner_scope: 'individual' },
+  });
+  assert.equal(individualCreated.status, 201, individualCreated.text);
+  const individualSurvey = (individualCreated.json as {
+    data: { survey: { id: string; organization_id: string | null } };
+  }).data.survey;
+  assert.equal(individualSurvey.organization_id, null);
+
+  const defaulted = await call('/surveys', { method: 'POST', cookie: owner, body: { title: 'Tanpa scope' } });
+  assert.equal(defaulted.status, 201);
+  assert.equal(
+    (defaulted.json as { data: { survey: { organization_id: string | null } } }).data.survey.organization_id,
+    null,
+    'owner_scope default individual',
+  );
+
+  const listed = async (cookie: string) =>
+    data<Array<{ id: string }>>(await call('/surveys', { cookie })).map((row) => row.id);
+  assert.ok((await listed(orgAdmin)).includes(orgSurvey.id), 'org_admin melihat survei organisasinya');
+  assert.ok(!(await listed(orgAdmin)).includes(individualSurvey.id), 'org_admin tidak melihat survei individual');
+  assert.ok((await listed(owner)).includes(individualSurvey.id), 'pemilik melihat survei individualnya');
+  assert.ok(!(await listed(peer)).includes(orgSurvey.id), 'creator satu organisasi tidak melihat survei rekan');
+  assert.ok(!(await listed(peer)).includes(individualSurvey.id));
+
+  const peerDetail = await call(`/surveys/${orgSurvey.id}`, { cookie: peer });
+  assert.equal(peerDetail.status, 403, 'rekan satu organisasi tidak bisa membuka detail');
+  const orgAdminIndividual = await call(`/surveys/${individualSurvey.id}`, { cookie: orgAdmin });
+  assert.equal(orgAdminIndividual.status, 403, 'org_admin tidak bisa membuka survei individual anggota');
+
+  // Sumber notice dibuktikan dari nilai yang berbeda antar sumber (org 1.2, platform 2.0).
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    const versions = await db.query<{ survey_id: string; notice_version: string | null }>(
+      'SELECT survey_id, notice_version FROM survey_versions WHERE survey_id = ANY($1::text[]) ORDER BY survey_id',
+      [[orgSurvey.id, individualSurvey.id]],
+    );
+    const byId = new Map(versions.rows.map((row) => [row.survey_id, row.notice_version]));
+    const sources = await db.query<{ platform: string | null; org: string | null }>(
+      `SELECT (SELECT notice_version FROM platform_profile WHERE id = 'platform') AS platform,
+              (SELECT notice_version FROM organizations WHERE id = 'org_smk') AS org`,
+    );
+    const { platform, org } = sources.rows[0]!;
+    assert.notEqual(platform, org, 'seed harus membedakan kedua sumber notice');
+    assert.equal(byId.get(orgSurvey.id), org, 'survei organisasi memakai organizations.notice_version');
+    assert.equal(byId.get(individualSurvey.id), platform, 'survei individual memakai platform_profile.notice_version');
+  } finally {
+    await db.end();
+  }
+
+  // PUT menyimpan draf tanpa notice: versi baru memakai sumber yang sama dengan scope survei.
+  const edited = await call(`/surveys/${individualSurvey.id}`, {
+    method: 'PUT',
+    cookie: owner,
+    body: { title: 'Survei lingkup pribadi (uji)', purpose: 'Tujuan.', object_label: 'Objek', instructions: '', questions: [] },
+  });
+  assert.equal(edited.status, 200, edited.text);
+
+  // Lingkup tidak sah dan akun tanpa organisasi.
+  const nonsense = await call('/surveys', { method: 'POST', cookie: owner, body: { owner_scope: 'ngawur' } });
+  assert.equal(nonsense.status, 422);
+  assert.equal((nonsense.json as { code?: string }).code, 'validation_error');
+});
+
+test('Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback SMK', async () => {
+  const owner = await session('creator.a@svara.local');
+
+  const create = async (scope: 'organization' | 'individual') => {
+    const created = await call('/surveys', { method: 'POST', cookie: owner, body: { title: `Profil ${scope}`, owner_scope: scope } });
+    assert.equal(created.status, 201, created.text);
+    return (created.json as { data: { survey: { id: string } } }).data.survey.id;
+  };
+  const orgId = await create('organization');
+  const individualId = await create('individual');
+
+  interface DetailProfile {
+    source: string;
+    id: string;
+    organization_name: string;
+    organization_type: string;
+    consent_mode: string | null;
+    respondent_age_category: string | null;
+  }
+  const detail = async (id: string) =>
+    (await call(`/surveys/${id}`, { cookie: owner })).json as { data: { profile: DetailProfile } };
+
+  const individual = (await detail(individualId)).data.profile;
+  assert.equal(individual.source, 'platform', 'survei individual memakai profil platform');
+  assert.equal(individual.id, 'platform');
+
+  const org = (await detail(orgId)).data.profile;
+  assert.equal(org.source, 'organization', 'survei organisasi memakai profil organisasi');
+  assert.equal(org.id, 'org_smk');
+  assert.equal(org.organization_type, 'school');
+
+  // Nilai pembanding dibaca dari basis data, bukan dari fixture.
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    const sources = await db.query<{ platform_name: string; org_consent: string; org_name: string }>(
+      `SELECT (SELECT organization_name FROM platform_profile WHERE id = 'platform') AS platform_name,
+              (SELECT consent_mode FROM organizations WHERE id = 'org_smk') AS org_consent,
+              (SELECT name FROM organizations WHERE id = 'org_smk') AS org_name`,
+    );
+    const expected = sources.rows[0]!;
+    assert.equal(individual.organization_name, expected.platform_name);
+    assert.equal(individual.consent_mode, null, 'profil platform tidak memuat kolom persetujuan organisasi');
+    assert.equal(org.consent_mode, expected.org_consent);
+    assert.equal(org.organization_name, expected.org_name);
+    assert.ok(!/SMK Nusantara/i.test(individual.organization_name), 'regresi: nama organisasi bocor ke survei individual');
+  } finally {
+    await db.end();
+  }
+
+  // Bootstrap membawa profil yang sama agar panel UI tidak menyusunnya sendiri.
+  const bootstrap = data<{ surveyProfiles: Record<string, { source: string }> }>(await call('/bootstrap', { cookie: owner }));
+  assert.equal(bootstrap.surveyProfiles[orgId]?.source, 'organization');
+  assert.equal(bootstrap.surveyProfiles[individualId]?.source, 'platform');
+});
+
+test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organisasi', async () => {
+  const orgAdmin = await session('orgadmin@svara.local');
+  const creator = await session('creator.a@svara.local');
+  const members = data<{ members: Array<{ id: string; role: string; email: string }> }>(
+    await call('/org/members', { cookie: orgAdmin }),
+  );
+  assert.ok(members.members.some((row) => row.id === 'u_creator_a'));
+  assert.ok(members.members.every((row) => row.id !== 'u_creator_b'), 'org_perpus tidak boleh terlihat');
+
+  // Database: akun org_perpus (creator.b) sebagai organisasi B untuk uji silang.
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  const orgBCreatorId = 'u_creator_b';
+  try {
+    // org_admin A mencoba mengubah anggota organisasi B: tidak ditemukan, tidak berubah.
+    const crossPatch = await call(`/org/members/${orgBCreatorId}`, {
+      method: 'PATCH',
+      cookie: orgAdmin,
+      body: { status: 'suspended' },
+    });
+    assert.equal(crossPatch.status, 404, 'anggota organisasi lain tidak terlihat');
+    const untouched = await db.query<{ status: string }>('SELECT status FROM accounts WHERE id = $1', [orgBCreatorId]);
+    assert.equal(untouched.rows[0]?.status, 'active', 'status organisasi lain tidak berubah');
+    // Peran tidak dapat diubah lewat endpoint ini, bahkan untuk anggota sendiri.
+    const roleChange = await call('/org/members/u_creator_a', {
+      method: 'PATCH',
+      cookie: orgAdmin,
+      body: { status: 'active', role: 'super_admin' },
+    });
+    assert.equal(roleChange.status, 200);
+    const roleRow = await db.query<{ role: string }>('SELECT role FROM accounts WHERE id = $1', ['u_creator_a']);
+    assert.equal(roleRow.rows[0]?.role, 'creator', 'role hanya bisa dibaca, tidak diubah');
+  } finally {
+    await db.end();
+  }
+
+  // Aksi status untuk anggota sendiri.
+  const suspended = await call('/org/members/u_creator_a', {
+    method: 'PATCH',
+    cookie: orgAdmin,
+    body: { status: 'suspended' },
+  });
+  assert.equal(suspended.status, 200, suspended.text);
+  const blocked = await call('/auth/login', { method: 'POST', body: { email: 'creator.a@svara.local', password: 'SvaraDemo123!' } });
+  assert.equal(blocked.status, 401, 'akun suspended tidak bisa masuk');
+  const reactivated = await call('/org/members/u_creator_a', {
+    method: 'PATCH',
+    cookie: orgAdmin,
+    body: { status: 'active' },
+  });
+  assert.equal(reactivated.status, 200);
+
+  // org_admin lain (org_perpus) membuat undangan; kode itu mengikat ke org_perpus, bukan org_smk.
+  const orgBCode = await call('/org/invitations', { method: 'POST', cookie: await session('creator.b@svara.local') });
+  assert.equal(orgBCode.status, 403, 'creator bukan org_admin tidak boleh membuat undangan');
+
+  const invitation = data<{ invitation: { id: string; code: string; organization_id: string } }>(
+    await call('/org/invitations', { method: 'POST', cookie: orgAdmin }),
+  );
+  assert.equal(invitation.invitation.organization_id, 'org_smk');
+  assert.match(invitation.invitation.code, /^ORG-[A-Z0-9_-]{6,}$/);
+
+  const invitedEmail = 'anggota.baru@contoh.test';
+  const registered = await call('/auth/register', {
+    method: 'POST',
+    body: {
+      name: 'Anggota Baru',
+      email: invitedEmail,
+      password: 'SandiAnggota123!',
+      acceptTerms: true,
+      invite_code: invitation.invitation.code,
+    },
+  });
+  assert.equal(registered.status, 201, registered.text);
+  const newAccountId = (registered.json as { data: { account: { id: string } } }).data.account.id;
+  const verify = new Client({ connectionString: databaseUrl });
+  await verify.connect();
+  try {
+    const row = await verify.query<{ organization_id: string | null }>(
+      'SELECT organization_id FROM accounts WHERE id = $1',
+      [newAccountId],
+    );
+    assert.equal(row.rows[0]?.organization_id, 'org_smk', 'invite_code mengikat akun ke organisasi pengundang');
+    const used = await verify.query<{ used_by: string | null }>(
+      'SELECT used_by FROM organization_invitations WHERE id = $1',
+      [invitation.invitation.id],
+    );
+    assert.equal(used.rows[0]?.used_by, newAccountId, 'kode ditandai terpakai');
+  } finally {
+    await verify.end();
+  }
+
+  // Kode yang sudah dipakai ditolak: dibuktikan lewat used_at di DB agar tidak menghabiskan
+  // jatah rate limit register (limit 5 per IP). Satu percobaan register tersisa untuk kode asing.
+  const spent = new Client({ connectionString: databaseUrl });
+  await spent.connect();
+  try {
+    const row = await spent.query<{ used_at: string | null; used_by: string | null }>(
+      'SELECT used_at, used_by FROM organization_invitations WHERE id = $1',
+      [invitation.invitation.id],
+    );
+    assert.ok(row.rows[0]?.used_at, 'kode yang sudah dipakai tidak lagi eligible untuk register');
+  } finally {
+    await spent.end();
+  }
+
+  const bogus = await call('/auth/register', {
+    method: 'POST',
+    body: { name: 'Anggota Ketiga', email: 'anggota.ketiga@contoh.test', password: 'SandiAnggota123!', acceptTerms: true, invite_code: 'ORG-TIDAKADA' },
+  });
+  assert.equal(bogus.status, 422, bogus.text);
+  assert.equal((bogus.json as { code?: string }).code, 'invalid_invite_code');
+
+  // Audit hanya baris organisasi sendiri, tanpa metadata mentah.
+  const audit = data<{ rows: Array<Record<string, unknown>> }>(await call('/org/audit', { cookie: orgAdmin }));
+  assert.ok(audit.rows.length > 0);
+  assert.ok(audit.rows.every((row) => !('metadata' in row) && !('organization_id' in row)), 'tanpa metadata mentah');
+  const auditDb = new Client({ connectionString: databaseUrl });
+  await auditDb.connect();
+  try {
+    const returnedIds = new Set(audit.rows.map((row) => row.id as string));
+    const foreignIds = await auditDb.query<{ id: string }>(
+      "SELECT id FROM audit_logs WHERE organization_id = 'org_perpus'",
+    );
+    assert.ok(foreignIds.rows.length > 0, 'org_perpus punya baris audit pembanding');
+    assert.ok(foreignIds.rows.every((row) => !returnedIds.has(row.id)), 'baris organisasi lain tidak pernah tampil');
+  } finally {
+    await auditDb.end();
+  }
+
+  // Creator dan org_perpus ditolak di ketiga endpoint.
+  for (const [label, cookie] of [['creator', creator], ['org lain', await session('creator.b@svara.local')]] as const) {
+    for (const [method, path, body] of [
+      ['GET', '/org/members', undefined],
+      ['PATCH', '/org/members/u_creator_a', { status: 'active' }],
+      ['POST', '/org/invitations', undefined],
+      ['GET', '/org/audit', undefined],
+    ] as const) {
+      const denied = await call(path, { method, cookie, body });
+      assert.equal(denied.status, 403, `${label}: ${method} ${path} harus 403`);
+    }
+  }
 });

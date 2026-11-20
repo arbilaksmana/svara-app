@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
 import type { AuthedRequest } from '../security.ts';
 import {
+  accessibleSurveys,
   asBoolean,
   asString,
   audit,
@@ -15,6 +16,7 @@ import {
   csvDocument,
   fail,
   newId,
+  noticeVersionFor,
   parseLimit,
   requireManageSurvey,
   requirePublishedVersion,
@@ -22,6 +24,7 @@ import {
   requireVersion,
   sendError,
   sha256Hex,
+  surveyProfileFor,
 } from '../http.ts';
 import { summaryFor } from '../summary.ts';
 
@@ -152,7 +155,7 @@ async function detailFor(surveyId: string) {
     versionDetails.push({ ...version, question_ids: rows.map((question) => question.id) });
     for (const row of rows) questions.push(await serializeQuestion(row));
   }
-  return { survey, versions: versionDetails, questions };
+  return { survey, versions: versionDetails, questions, profile: await surveyProfileFor(survey) };
 }
 
 function parseQuestions(raw: unknown): QuestionInput[] {
@@ -291,19 +294,8 @@ async function currentOrDraft(
 surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const rows =
-      req.account.role === 'creator'
-        ? await all<Record<string, unknown>>(
-            'SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC',
-            req.account.id,
-          )
-        : req.account.role === 'super_admin'
-          ? await all<Record<string, unknown>>('SELECT * FROM surveys ORDER BY updated_at DESC')
-          : await all<Record<string, unknown>>(
-              'SELECT DISTINCT s.* FROM surveys s JOIN access_grants g ON g.survey_id = s.id WHERE g.account_id = ? ORDER BY s.updated_at DESC',
-              req.account.id,
-            );
-    res.json({ data: rows });
+    // Satu sumber lingkup: creator hanya miliknya, org_admin organisasinya; tidak ada filter ganda.
+    res.json({ data: await accessibleSurveys(req.account) });
   } catch (error) {
     sendError(res, error);
   }
@@ -314,38 +306,46 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     if (req.account.role !== 'creator') fail(403, 'forbidden_role', 'Hanya pembuat survei yang dapat membuat survei.');
     const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : 'Survei baru';
+    // owner_scope menentukan siapa pemilik lingkup survei, bukan sekadar label.
+    const rawScope = req.body?.owner_scope;
+    if (rawScope !== undefined && rawScope !== 'individual' && rawScope !== 'organization') {
+      fail(422, 'validation_error', "owner_scope harus 'individual' atau 'organization'.");
+    }
+    const ownerScope: 'individual' | 'organization' = rawScope === 'organization' ? 'organization' : 'individual';
+    if (ownerScope === 'organization' && !req.account.organization_id) {
+      fail(403, 'forbidden_scope', 'Akun ini tidak terikat organisasi.');
+    }
+    const organizationId = ownerScope === 'organization' ? req.account.organization_id : null;
     const requestedProfileId = typeof req.body?.profile_id === 'string' && req.body.profile_id
       ? req.body.profile_id
       : null;
-    let profile = await get<{ id: string; notice_version: string }>(
-      'SELECT id, notice_version FROM profiles WHERE id = ?',
+    const profile = await get<{ id: string }>(
+      'SELECT id FROM profiles WHERE id = ?',
       requestedProfileId ?? 'p_smk',
-    );
-    if (!profile && !requestedProfileId) {
-      profile = await get<{ id: string; notice_version: string }>(
-        'SELECT id, notice_version FROM profiles ORDER BY id LIMIT 1',
-      );
-    }
+    ) ?? (requestedProfileId ? undefined : await get<{ id: string }>('SELECT id FROM profiles ORDER BY id LIMIT 1'));
     if (!profile) {
       fail(409, 'profile_missing', 'Profil deployment belum dikonfigurasi. Seed data profil terlebih dahulu.');
     }
+    // notice_version tidak diambil dari profiles: sumbernya mengikuti owner_scope.
+    const notice = await noticeVersionFor(organizationId);
     const id = newId('s');
     const now = nowIso();
     await withTx(async () => {
       await run(
-        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
-         VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL)`,
+        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id)
+         VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL, ?)`,
         id,
         req.account!.id,
         profile.id,
         title,
         now,
         now,
+        organizationId,
       );
       await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
-      await createDraft(id, profile.notice_version);
+      await createDraft(id, notice.notice_version);
     });
-    await audit(req, 'Buat survei', id, 'berhasil');
+    await audit(req, 'Buat survei', id, 'berhasil', { owner_scope: ownerScope, notice_source: notice.source });
     res.status(201).json({ data: await detailFor(id) });
   } catch (error) {
     sendError(res, error);
@@ -374,10 +374,10 @@ surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
     const objectLabel = asString(req.body?.object_label ?? '', 'object_label', 200);
     const instructions = asString(req.body?.instructions ?? '', 'instructions', 2000);
     const questions = parseQuestions(req.body?.questions ?? []);
-    const profile = await get<{ notice_version: string }>('SELECT notice_version FROM profiles WHERE id = ?', survey.profile_id);
+    const notice = await noticeVersionFor(survey.organization_id);
     await withTx(async () => {
       const { draft } = await currentOrDraft(survey.id);
-      const target = draft ?? (await createDraft(survey.id, profile?.notice_version ?? '1.0'));
+      const target = draft ?? (await createDraft(survey.id, notice.notice_version));
       await writeDraftQuestions(target.id, questions);
       const status = survey.status === 'archived' ? 'draft' : survey.status === 'published' ? 'published' : 'draft';
       await run(
@@ -411,8 +411,8 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
     const now = nowIso();
     await withTx(async () => {
       await run(
-        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, NULL)`,
+        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, NULL, ?)`,
         id,
         req.account!.id,
         source.profile_id,
@@ -422,6 +422,7 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
         source.instructions,
         now,
         now,
+        source.organization_id,
       );
       await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
       const draft = await createDraft(id, sourceVersion.notice_version);

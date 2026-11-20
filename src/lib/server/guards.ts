@@ -9,8 +9,9 @@ export interface ServerAccount {
   id: string;
   email: string;
   display_name: string;
-  role: 'super_admin' | 'creator' | 'authorized_officer';
+  role: 'super_admin' | 'org_admin' | 'creator';
   status: string;
+  organization_id?: string | null;
 }
 
 const API_INTERNAL_URL = (process.env.API_INTERNAL_URL ?? 'http://127.0.0.1:3001').replace(/\/+$/, '');
@@ -45,6 +46,14 @@ export async function requireCreator(): Promise<ServerAccount | null> {
   const account = await fetchAccount();
   if (!account) redirect('/auth/login');
   if (account.role === 'super_admin') return null;
+  return account;
+}
+
+/** Halaman organisasi: hanya org_admin yang terikat organisasi. */
+export async function requireOrgAdmin(): Promise<ServerAccount | null> {
+  const account = await fetchAccount();
+  if (!account) redirect('/auth/login');
+  if (account.role !== 'org_admin' || !account.organization_id) return null;
   return account;
 }
 

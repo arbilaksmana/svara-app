@@ -260,7 +260,7 @@ Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. S
 | --- | --- | --- |
 | `creator.a@svara.local` | creator | Pemilik `s_demo1`, `s_demo2`, `s_demo4` |
 | `creator.b@svara.local` | creator | Pemilik `s_demo3` |
-| `officer@svara.local` | authorized_officer | Grant baca/ekspor/teks pada `s_demo1` |
+| `officer@svara.local` | creator | Bukan pemilik `s_demo1`, tetapi memegang grant baca individual/ekspor/teks pada `s_demo1` |
 | `admin@svara.local` | super_admin | Operasional; tidak otomatis boleh membaca jawaban |
 | `suspended@svara.local` | creator (suspended) | Ditolak saat masuk |
 

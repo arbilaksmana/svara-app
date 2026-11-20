@@ -1,6 +1,11 @@
 import type {
   AccessGrant,
   Account,
+  AccountStatus,
+  OrgAuditRow,
+  OrgInvitation,
+  OrgMember,
+  OrgProfile,
   AuditLog,
   DeploymentProfile,
   IntegrationEvent,
@@ -10,6 +15,7 @@ import type {
   Question,
   QuestionOption,
   Survey,
+  SurveyProfile,
   SurveyVersion,
 } from './types';
 
@@ -75,6 +81,7 @@ export interface BootstrapData {
   profiles: DeploymentProfile[];
   notices: Notice[];
   surveys: Survey[];
+  surveyProfiles: Record<string, SurveyProfile>;
   versions: SurveyVersion[];
   questions: Array<Question & { ord?: number }>;
   options: QuestionOption[];
@@ -107,6 +114,7 @@ export interface RegisterInput {
   email: string;
   password: string;
   acceptTerms: boolean;
+  invite_code?: string;
 }
 
 export async function register(input: RegisterInput): Promise<{ account: Account & { email: string } }> {
@@ -124,6 +132,7 @@ export interface SurveyDetail {
   survey: Survey;
   versions: SurveyVersion[];
   questions: Array<Question & { options: QuestionOption[] }>;
+  profile: SurveyProfile;
 }
 
 export async function getSurvey(id: string): Promise<SurveyDetail> {
@@ -451,4 +460,46 @@ export async function resolveInvitationCode(code: string): Promise<{ token: stri
 
 export async function adminSaveAccount(id: string, patch: { role?: string; status?: string }): Promise<void> {
   await call(`/admin/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
+}
+
+/** Halaman organisasi: organisasi selalu ditentukan sesi server, bukan parameter klien. */
+export async function getOrgProfile(): Promise<{ source: string; profile: OrgProfile }> {
+  return call<{ source: string; profile: OrgProfile }>('/org/profile');
+}
+
+export type OrgProfileInput = Partial<
+  Pick<
+    OrgProfile,
+    | 'organization_name'
+    | 'organization_type'
+    | 'policy_url'
+    | 'terms_url'
+    | 'retention_days'
+    | 'data_request_contact'
+    | 'respondent_age_category'
+    | 'consent_mode'
+  >
+> & { cross_border_transfer?: boolean | null };
+
+export async function saveOrgProfile(input: OrgProfileInput): Promise<{ source: string; profile: OrgProfile }> {
+  return call<{ source: string; profile: OrgProfile }>('/org/profile', { method: 'PUT', body: input });
+}
+
+export async function getOrgMembers(): Promise<OrgMember[]> {
+  return (await call<{ members: OrgMember[] }>('/org/members')).members;
+}
+
+export async function setOrgMemberStatus(id: string, status: AccountStatus): Promise<OrgMember> {
+  return (await call<{ member: OrgMember }>(`/org/members/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: { status },
+  })).member;
+}
+
+export async function inviteOrgMember(): Promise<OrgInvitation> {
+  return (await call<{ invitation: OrgInvitation }>('/org/invitations', { method: 'POST' })).invitation;
+}
+
+export async function getOrgAudit(limit = 100): Promise<OrgAuditRow[]> {
+  return (await call<{ rows: OrgAuditRow[] }>(`/org/audit?limit=${limit}`)).rows;
 }

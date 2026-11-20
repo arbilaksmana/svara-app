@@ -152,7 +152,7 @@ export function AdminAccountsPage() {
   }, [revision, storedGrants]);
 
   const changeRole = (accountId: string, displayName: string, chosen: string) => {
-    const role = chosen === 'admin' ? 'super_admin' : chosen === 'officer' ? 'authorized_officer' : chosen;
+    const role = chosen === 'admin' ? 'super_admin' : 'creator';
     setAccountBusy(accountId);
     void adminSaveAccount(accountId, { role })
       .then(() => {
@@ -199,13 +199,12 @@ export function AdminAccountsPage() {
                   <Td>
                     <select
                       aria-label={`Peran ${a.display_name}`}
-                      value={a.role === 'super_admin' ? 'admin' : a.role === 'authorized_officer' ? 'officer' : a.role}
+                      value={a.role === 'super_admin' ? 'admin' : 'creator'}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
                     >
                       <option value="creator">creator</option>
-                      <option value="officer">officer</option>
                       <option value="admin">admin</option>
                     </select>
                   </Td>
@@ -240,13 +239,12 @@ export function AdminAccountsPage() {
                     Peran
                     <select
                       aria-label={`Peran ${a.display_name}`}
-                      value={a.role === 'super_admin' ? 'admin' : a.role === 'authorized_officer' ? 'officer' : a.role}
+                      value={a.role === 'super_admin' ? 'admin' : 'creator'}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
                       <option value="creator">creator</option>
-                      <option value="officer">officer</option>
                       <option value="admin">admin</option>
                     </select>
                   </label>

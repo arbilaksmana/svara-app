@@ -44,13 +44,14 @@ async function main(): Promise<void> {
       nowIso(),
     );
     await run(
-      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       newId('log'),
       'system',
       'Bootstrap admin',
       email,
       'berhasil',
       nowIso(),
+      null,
       null,
     );
   });

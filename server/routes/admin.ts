@@ -75,7 +75,7 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
     if (!account) fail(404, 'account_not_found', 'Akun tidak ditemukan.');
     const role = typeof req.body?.role === 'string' ? req.body.role : account.role;
     const status = typeof req.body?.status === 'string' ? req.body.status : account.status;
-    if (!['super_admin', 'creator', 'authorized_officer'].includes(role)) {
+    if (!['super_admin', 'org_admin', 'creator'].includes(role)) {
       fail(422, 'validation_error', 'Peran akun tidak dikenal.');
     }
     if (!['active', 'suspended'].includes(status)) {
@@ -154,11 +154,24 @@ adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
       list.push(parseGrant(item));
       byAccount.set(accountId, list);
     }
+    const accountIds = [...byAccount.keys()];
     await withTx(async () => {
-      await run('DELETE FROM access_grants');
+      // Hanya akun yang disebut pada payload yang izinnya diganti; izin akun lain tetap utuh.
+      if (accountIds.length > 0) {
+        const list = await all<{ id: string }>(
+          `SELECT id FROM accounts WHERE id IN (${accountIds.map(() => '?').join(',')})`,
+          ...accountIds,
+        );
+        if (list.length !== accountIds.length) {
+          const known = new Set(list.map((row) => row.id));
+          fail(422, 'account_not_found', `Akun ${accountIds.find((id) => !known.has(id))} tidak ditemukan.`);
+        }
+        await run(
+          `DELETE FROM access_grants WHERE account_id IN (${accountIds.map(() => '?').join(',')})`,
+          ...accountIds,
+        );
+      }
       for (const [accountId, grants] of byAccount) {
-        const account = await get<{ id: string }>('SELECT id FROM accounts WHERE id = ?', accountId);
-        if (!account) fail(422, 'account_not_found', `Akun ${accountId} tidak ditemukan.`);
         for (const grant of grants) {
           if (grant.survey_id && !(await get<{ id: string }>('SELECT id FROM surveys WHERE id = ?', grant.survey_id))) {
             fail(422, 'survey_not_found', `Survei ${grant.survey_id} tidak ditemukan.`);
@@ -176,7 +189,7 @@ adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
         }
       }
     });
-    await audit(req, 'Ubah izin akses', 'semua akun', 'berhasil', { rows: raw.length });
+    await audit(req, 'Ubah izin akses', accountIds.join(', ') || 'tidak ada akun', 'berhasil', { rows: raw.length });
     res.json({ data: { ok: true } });
   } catch (error) {
     sendError(res, error);

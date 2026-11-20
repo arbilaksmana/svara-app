@@ -22,14 +22,17 @@ after(async () => {
   await closeTestDatabase();
 });
 
-test('migrasi membuat 21 tabel aplikasi dan mencatat versi', async () => {
-  assert.equal(await tableCount(), 21);
+test('migrasi membuat 24 tabel aplikasi dan mencatat versi', async () => {
+  assert.equal(await tableCount(), 24);
   const versions = await appliedVersions();
   assert.deepEqual(versions, [
     '001_initial.sql',
     '002_operational_indexes.sql',
     '003_public_link_uniqueness.sql',
     '004_account_consent.sql',
+    '005_organizations.sql',
+    '006_organization_profile.sql',
+    '007_organization_invitations.sql',
   ]);
 });
 
@@ -37,12 +40,15 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
   const { migrate } = await import('../migrate.ts');
   const applied = await migrate();
   assert.deepEqual(applied, []);
-  assert.equal(await tableCount(), 21);
+  assert.equal(await tableCount(), 24);
   assert.deepEqual(await appliedVersions(), [
     '001_initial.sql',
     '002_operational_indexes.sql',
     '003_public_link_uniqueness.sql',
     '004_account_consent.sql',
+    '005_organizations.sql',
+    '006_organization_profile.sql',
+    '007_organization_invitations.sql',
   ]);
 });
 
@@ -66,6 +72,9 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
     '002_operational_indexes.sql',
     '003_public_link_uniqueness.sql',
     '004_account_consent.sql',
+    '005_organizations.sql',
+    '006_organization_profile.sql',
+    '007_organization_invitations.sql',
   ]);
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
@@ -81,6 +90,12 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
     assert.equal(row.rows[0]?.email, 'upgrade@example.org', 'data lama tetap ada setelah upgrade');
     assert.equal(row.rows[0]?.consent_version, null, 'akun lama tidak memiliki bukti persetujuan versi baru');
     assert.equal(row.rows[0]?.consent_accepted_at, null);
+
+    const tenancy = await verify.query<{ organization_id: string | null }>(
+      'SELECT organization_id FROM accounts WHERE id = $1',
+      ['u_upgrade'],
+    );
+    assert.equal(tenancy.rows[0]?.organization_id, null, 'akun lama tetap valid tanpa organisasi');
   } finally {
     await verify.end();
   }

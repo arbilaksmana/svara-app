@@ -13,8 +13,9 @@ export interface AccountRow {
   id: string;
   email: string;
   display_name: string;
-  role: 'super_admin' | 'creator' | 'authorized_officer';
+  role: 'super_admin' | 'org_admin' | 'creator';
   status: 'active' | 'suspended';
+  organization_id: string | null;
 }
 
 export interface AuthedRequest extends Request<Record<string, string>> {
@@ -101,7 +102,7 @@ export async function attachSession(req: AuthedRequest, _res: Response, next: Ne
   const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
   if (!token) return next();
   const row = await get<AccountRow & { expires_at: string }>(
-    `SELECT a.id, a.email, a.display_name, a.role, a.status, s.expires_at
+    `SELECT a.id, a.email, a.display_name, a.role, a.status, a.organization_id, s.expires_at
        FROM sessions s JOIN accounts a ON a.id = s.account_id
       WHERE s.token_hash = ?`,
     sha256(token),
@@ -112,7 +113,14 @@ export async function attachSession(req: AuthedRequest, _res: Response, next: Ne
     return next();
   }
   if (row.status !== 'active') return next();
-  req.account = { id: row.id, email: row.email, display_name: row.display_name, role: row.role, status: row.status };
+  req.account = {
+    id: row.id,
+    email: row.email,
+    display_name: row.display_name,
+    role: row.role,
+    status: row.status,
+    organization_id: row.organization_id,
+  };
   req.actorId = row.id;
   next();
 }
