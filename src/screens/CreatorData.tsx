@@ -44,21 +44,14 @@ import {
   useStore,
 } from '../lib/store';
 import { MissingSurvey, SurveyNav } from './CreatorCore';
-import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, ORGANIZATION_TYPE_LABEL, STATUS_LABEL } from '../lib/labels';
-
-const INVITE_TONE = {
-  active: 'success',
-  used: 'info',
-  revoked: 'danger',
-  expired: 'warning',
-} as const;
-
-const INVITE_LABEL = {
-  active: 'Aktif',
-  used: 'Terpakai',
-  revoked: 'Dicabut',
-  expired: 'Kedaluwarsa',
-} as const;
+import {
+  AGE_CATEGORY_LABEL,
+  CONSENT_MODE_LABEL,
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+  ORGANIZATION_TYPE_LABEL,
+  STATUS_LABEL,
+} from '../lib/labels';
 
 /* ---------------- Bagikan ---------------- */
 
@@ -198,7 +191,7 @@ export function SharePage({ id }: { id: string }) {
                     {assignments.find((a) => a.id === i.assignment_id)?.label ?? 'Tanpa label'}
                     <span className="mt-1 block font-mono text-caption text-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
                   </Td>
-                  <Td><Badge tone={INVITE_TONE[i.status]}>{INVITE_LABEL[i.status]}</Badge></Td>
+                  <Td><Badge tone={INVITATION_STATUS_TONE[i.status]}>{INVITATION_STATUS_LABEL[i.status]}</Badge></Td>
                   <Td>{i.expires_at ? i.expires_at.slice(0, 10) : 'Belum ada'}</Td>
                   <Td>{i.used_at ? i.used_at.slice(0, 10) : 'Belum ada'}</Td>
                   <Td>{i.revoked_at ? i.revoked_at.slice(0, 10) : 'Belum ada'}</Td>

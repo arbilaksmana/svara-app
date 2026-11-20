@@ -4,6 +4,13 @@ import type { Response } from 'express';
 import { all, get, nowIso, run } from '../db.ts';
 import type { AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
+import {
+  INVITATION_TTL_DAYS,
+  ORGANIZATION_INVITATION_COLUMNS,
+  invitationExpiry,
+  invitationStatus,
+  type OrganizationInvitationRow,
+} from '../organization-invitations.ts';
 
 /** Profil deployment milik organisasi; tanpa UI dan tanpa perubahan skema survei (PRD §1.2). */
 export const orgRouter = Router();
@@ -190,21 +197,92 @@ orgRouter.patch('/org/members/:id', async (req: AuthedRequest, res: Response) =>
   }
 });
 
+orgRouter.get('/org/invitations', async (req: AuthedRequest, res: Response) => {
+  try {
+    const organizationId = requireOrgScope(req, 'org_admin');
+    const now = nowIso();
+    const rows = await all<OrganizationInvitationRow>(
+      `SELECT ${ORGANIZATION_INVITATION_COLUMNS} FROM organization_invitations
+        WHERE organization_id = ? ORDER BY created_at DESC, id DESC LIMIT 50`,
+      organizationId,
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      data: {
+        invitations: rows.map((row) => ({ ...row, status: invitationStatus(row, now) })),
+        ttl_days: INVITATION_TTL_DAYS,
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 orgRouter.post('/org/invitations', async (req: AuthedRequest, res: Response) => {
   try {
     const organizationId = requireOrgScope(req, 'org_admin');
     const code = `ORG-${randomBytes(9).toString('base64url').toUpperCase()}`;
     const id = newId('oi');
+    const createdAt = nowIso();
+    const expiresAt = invitationExpiry(createdAt);
     await run(
-      'INSERT INTO organization_invitations (id, organization_id, code, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO organization_invitations (id, organization_id, code, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
       id,
       organizationId,
       code,
       req.account!.id,
-      nowIso(),
+      createdAt,
+      expiresAt,
     );
-    await audit(req, 'Buat undangan organisasi', id, 'berhasil');
-    res.status(201).json({ data: { invitation: { id, organization_id: organizationId, code, created_at: nowIso() } } });
+    await audit(req, 'Buat undangan organisasi', id, 'berhasil', { expires_at: expiresAt });
+    res.status(201).json({
+      data: {
+        invitation: {
+          id,
+          organization_id: organizationId,
+          code,
+          created_at: createdAt,
+          expires_at: expiresAt,
+          revoked_at: null,
+          used_at: null,
+          used_by: null,
+          status: 'active',
+        },
+      },
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+orgRouter.delete('/org/invitations/:id', async (req: AuthedRequest, res: Response) => {
+  try {
+    const organizationId = requireOrgScope(req, 'org_admin');
+    const id = pathParam(req, 'id');
+    const row = await get<OrganizationInvitationRow>(
+      `SELECT ${ORGANIZATION_INVITATION_COLUMNS} FROM organization_invitations WHERE id = ? AND organization_id = ?`,
+      id,
+      organizationId,
+    );
+    // 404 untuk kode organisasi lain: jangan membocorkan keberadaannya.
+    if (!row) fail(404, 'invitation_not_found', 'Kode undangan tidak ditemukan.');
+    if (row.used_at) {
+      fail(409, 'invitation_used', 'Kode undangan sudah dipakai dan tidak dapat dicabut.');
+    }
+    if (!row.revoked_at) {
+      const revokedAt = nowIso();
+      const changed = await run(
+        'UPDATE organization_invitations SET revoked_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL',
+        revokedAt,
+        id,
+      );
+      if (changed === 0) {
+        fail(409, 'invitation_used', 'Kode undangan sudah dipakai dan tidak dapat dicabut.');
+      }
+      await audit(req, 'Cabut undangan organisasi', id, 'berhasil');
+      row.revoked_at = revokedAt;
+    }
+    res.json({ data: { invitation: { ...row, status: invitationStatus(row, nowIso()) } } });
   } catch (error) {
     sendError(res, error);
   }

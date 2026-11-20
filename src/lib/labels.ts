@@ -1,4 +1,4 @@
-import type { AgeCategory, ConsentMode, OrganizationType, SurveyStatus, VersionStatus } from './types';
+import type { AgeCategory, ConsentMode, InvitationStatus, OrganizationType, SurveyStatus, VersionStatus } from './types';
 
 export const STATUS_LABEL: Record<SurveyStatus | VersionStatus, string> = {
   draft: 'Draf',
@@ -21,4 +21,19 @@ export const AGE_CATEGORY_LABEL: Record<AgeCategory, string> = {
 export const CONSENT_MODE_LABEL: Record<ConsentMode, string> = {
   self: 'Persetujuan sendiri',
   guardian: 'Persetujuan orang tua/wali',
+};
+
+/** Dipakai undangan survei dan kode undangan organisasi; dua permukaan, satu kosakata status. */
+export const INVITATION_STATUS_LABEL: Record<InvitationStatus, string> = {
+  active: 'Aktif',
+  used: 'Terpakai',
+  revoked: 'Dicabut',
+  expired: 'Kedaluwarsa',
+};
+
+export const INVITATION_STATUS_TONE: Record<InvitationStatus, 'success' | 'info' | 'danger' | 'warning'> = {
+  active: 'success',
+  used: 'info',
+  revoked: 'danger',
+  expired: 'warning',
 };

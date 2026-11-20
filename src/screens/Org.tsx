@@ -8,6 +8,7 @@ import {
   Card,
   Checkbox,
   Code,
+  ConfirmDialog,
   Field,
   SectionTitle,
   Table,
@@ -24,11 +25,13 @@ import {
   getOrgMembers,
   getOrgProfile,
   inviteOrgMember,
+  listOrgInvitations,
+  revokeOrgInvitation,
   saveOrgProfile,
   setOrgMemberStatus,
   type OrgProfileInput,
 } from '../lib/api';
-import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, ORGANIZATION_TYPE_LABEL } from '../lib/labels';
+import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, INVITATION_STATUS_LABEL, INVITATION_STATUS_TONE, ORGANIZATION_TYPE_LABEL } from '../lib/labels';
 import { formatWIB } from '../lib/summary';
 import type { AgeCategory, ConsentMode, OrgAuditRow, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
 
@@ -93,18 +96,22 @@ export function AdminOrgPage() {
   const [saved, setSaved] = useState(false);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
-  const [invitation, setInvitation] = useState<OrgInvitation | null>(null);
+  const [invitations, setInvitations] = useState<OrgInvitation[]>([]);
+  const [invitationBusy, setInvitationBusy] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<OrgInvitation | null>(null);
   const [audit, setAudit] = useState<OrgAuditRow[]>([]);
 
   const reload = async () => {
-    const [profileResult, memberResult, auditResult] = await Promise.all([
+    const [profileResult, memberResult, invitationResult, auditResult] = await Promise.all([
       getOrgProfile(),
       getOrgMembers(),
+      listOrgInvitations(),
       getOrgAudit(),
     ]);
     setProfile(profileResult.profile);
     setForm((current) => current ?? formFrom(profileResult.profile));
     setMembers(memberResult);
+    setInvitations(invitationResult.invitations);
     setAudit(auditResult);
   };
 
@@ -163,12 +170,28 @@ export function AdminOrgPage() {
   };
 
   const createInvitation = () => {
+    setInvitationBusy(true);
     void inviteOrgMember()
-      .then((created) => {
-        setInvitation(created);
+      .then(() => {
         notify('Kode undangan organisasi dibuat.');
+        return reload();
       })
-      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Undangan gagal dibuat.', 'danger'));
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Undangan gagal dibuat.', 'danger'))
+      .finally(() => setInvitationBusy(false));
+  };
+
+  const revokeInvitation = () => {
+    const target = revokeTarget;
+    if (!target) return;
+    setRevokeTarget(null);
+    setInvitationBusy(true);
+    void revokeOrgInvitation(target.id)
+      .then(() => {
+        notify('Kode undangan dicabut.');
+        return reload();
+      })
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Undangan gagal dicabut.', 'danger'))
+      .finally(() => setInvitationBusy(false));
   };
 
   const consentMismatch = (form?.respondent_age_category === 'minor' || form?.respondent_age_category === 'mixed')
@@ -341,14 +364,49 @@ export function AdminOrgPage() {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Undangan creator</SectionTitle>
-            <p className="text-body-sm text-muted">Kode undangan dipakai sekali saat pendaftaran dan menautkan akun baru ke organisasi ini.</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary" onClick={createInvitation}>Buat kode undangan</Button>
-              {invitation && (
-                <p className="text-body-sm text-ink">Kode: <Code>{invitation.code}</Code></p>
-              )}
+            <p className="text-body-sm text-muted">
+              Kode undangan dipakai sekali saat pendaftaran dan menautkan akun baru ke organisasi ini.
+              Setiap kode berlaku 14 hari dan dapat dicabut sebelum dipakai.
+            </p>
+            <div>
+              <Button variant="secondary" onClick={createInvitation} loading={invitationBusy} disabled={invitationBusy}>
+                Buat kode undangan
+              </Button>
             </div>
+            {invitations.length === 0 ? (
+              <p className="text-body-sm text-muted">Belum ada kode undangan.</p>
+            ) : (
+              <Table head={['Kode', 'Status', 'Dibuat', 'Kedaluwarsa', 'Aksi']}>
+                {invitations.map((row) => (
+                  <tr key={row.id}>
+                    <Td><Code>{row.code}</Code></Td>
+                    <Td><Badge tone={INVITATION_STATUS_TONE[row.status]}>{INVITATION_STATUS_LABEL[row.status]}</Badge></Td>
+                    <Td>{formatWIB(row.created_at)}</Td>
+                    <Td>{row.expires_at ? formatWIB(row.expires_at) : 'Tanpa batas'}</Td>
+                    <Td>
+                      {row.status === 'active' ? (
+                        <Button variant="ghost" disabled={invitationBusy} onClick={() => setRevokeTarget(row)}>Cabut</Button>
+                      ) : (
+                        <span className="text-caption text-muted">—</span>
+                      )}
+                    </Td>
+                  </tr>
+                ))}
+              </Table>
+            )}
           </Card>
+
+          <ConfirmDialog
+            open={revokeTarget !== null}
+            title="Cabut kode undangan ini?"
+            detail={revokeTarget
+              ? `Kode ${revokeTarget.code} tidak dapat dipakai lagi untuk mendaftar. Anggota yang sudah bergabung tidak terpengaruh.`
+              : ''}
+            confirmLabel="Cabut kode"
+            busy={invitationBusy}
+            onClose={() => setRevokeTarget(null)}
+            onConfirm={revokeInvitation}
+          />
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Log audit organisasi</SectionTitle>

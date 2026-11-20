@@ -252,6 +252,11 @@ export interface OrgInvitation {
   organization_id: string;
   code: string;
   created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  used_at: string | null;
+  used_by: string | null;
+  status: InvitationStatus;
 }
 
 export interface OrgAuditRow {

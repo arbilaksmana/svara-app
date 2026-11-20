@@ -175,24 +175,26 @@ Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; 
 
 ### Permukaan admin organisasi
 
-`/admin/org` adalah satu layar untuk `org_admin`: profil organisasi, anggota dan suspend, kode undangan creator, dan log audit organisasi (`src/app/admin/org/page.tsx:10-14`, `src/screens/Org.tsx:343-360`). Semua endpoint memakai awalan `/api/v1` dan hanya menerima `org_admin` yang terikat organisasi:
+`/admin/org` adalah satu layar untuk `org_admin`: profil organisasi, anggota dan suspend, kode undangan creator beserta pencabutannya, dan log audit organisasi (`src/app/admin/org/page.tsx:10-14`, `src/screens/Org.tsx:366-410`). Semua endpoint memakai awalan `/api/v1` dan hanya menerima `org_admin` yang terikat organisasi:
 
 | Endpoint | Perilaku |
 | --- | --- |
-| `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` (`server/routes/org.ts:44-58`) |
-| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:60-134`) |
-| `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:152-163`) |
-| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor (`server/routes/org.ts:166-190`) |
-| `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi (`server/routes/org.ts:192-211`) |
-| `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 (`server/routes/org.ts:214-228`) |
+| `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` (`server/routes/org.ts:50-66`) |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:67-159`) |
+| `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:160-174`) |
+| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor (`server/routes/org.ts:175-199`) |
+| `GET /org/invitations` | Daftar kode organisasi sesi; status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu, bukan disimpan (`server/routes/org.ts:200-220`) |
+| `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi, berlaku 14 hari (`server/routes/org.ts:221-257`) |
+| `DELETE /org/invitations/:id` | Mencabut kode yang belum terpakai; kode terpakai ditolak `409 invitation_used`, kode organisasi lain dijawab `404 invitation_not_found`, pencabutan ulang tetap `200` (`server/routes/org.ts:258-291`) |
+| `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 (`server/routes/org.ts:292-307`) |
 
-Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body atau query, dan akun tanpa organisasi ditolak `403` sebelum data apa pun disentuh (`server/routes/org.ts:137-150`).
+Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body atau query, dan akun tanpa organisasi ditolak `403` sebelum data apa pun disentuh (`server/routes/org.ts:151-156`).
 
 ### Onboarding creator lewat kode undangan organisasi
 
-1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual (`server/routes/org.ts:195-201`).
-2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`src/screens/Register.tsx:103`, `src/screens/Register.tsx:175-178`).
-3. `POST /auth/register` mencari kode yang belum terpakai (`used_at IS NULL`); kode tidak dikenal ditolak `422 invalid_invite_code` (`server/routes/auth.ts:134-144`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama (`server/routes/auth.ts:151-170`).
+1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual; kode berlaku 14 hari dan dapat dicabut dari tabel undangan sebelum terpakai (`server/routes/org.ts:221-291`).
+2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`src/screens/Register.tsx:103`, `src/screens/Register.tsx:185`).
+3. `POST /auth/register` mencari kode lalu menolak `422 invalid_invite_code` bila kode asing, sudah dipakai, dicabut, atau kedaluwarsa — alasan spesifik tidak dibocorkan (`server/routes/auth.ts:147-159`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama; guard `WHERE` menutup balapan dengan pencabutan (`server/routes/auth.ts:162-192`).
 4. Tanpa `invite_code`, akun dibuat tanpa organisasi.
 
 ### Menetapkan lingkup akun
@@ -232,8 +234,7 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 
 ### Belum tersedia
 
-- `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:166-181`).
-- Belum ada endpoint untuk mencabut kode undangan organisasi yang belum terpakai, hanya satu kali pakai.
+- `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:175-199`).
 
 ## Konfigurasi
 

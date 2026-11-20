@@ -539,6 +539,16 @@ export async function inviteOrgMember(): Promise<OrgInvitation> {
   return (await call<{ invitation: OrgInvitation }>('/org/invitations', { method: 'POST' })).invitation;
 }
 
+export async function listOrgInvitations(): Promise<{ invitations: OrgInvitation[]; ttlDays: number }> {
+  const result = await call<{ invitations: OrgInvitation[]; ttl_days: number }>('/org/invitations');
+  return { invitations: result.invitations, ttlDays: result.ttl_days };
+}
+
+export async function revokeOrgInvitation(id: string): Promise<OrgInvitation> {
+  return (await call<{ invitation: OrgInvitation }>(`/org/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' }))
+    .invitation;
+}
+
 export async function getOrgAudit(limit = 100): Promise<OrgAuditRow[]> {
   return (await call<{ rows: OrgAuditRow[] }>(`/org/audit?limit=${limit}`)).rows;
 }
