@@ -617,6 +617,65 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
   assert.ok(csv.text.includes('baris\nbaru"'), 'baris baru dikutip');
 });
 
+test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh ke versi lain', async () => {
+  const context = data<{
+    profile: { id: string; source: string; consent_mode: string | null; respondent_age_category: string | null };
+    notice: { id: string; version: string };
+    version: { notice_version: string };
+    guardianRequired: boolean;
+  }>(await call('/public/surveys/link-umum-demo'));
+
+  // s_demo1 milik org_smk dengan consent_mode guardian dan notice_version versi 1.0.
+  assert.equal(context.profile.source, 'organization');
+  assert.equal(context.profile.id, 'org_smk');
+  assert.equal(context.profile.consent_mode, 'guardian');
+  assert.equal(context.guardianRequired, true);
+  assert.equal(context.notice.id, 'on_org_smk_1_0');
+  assert.equal(context.notice.version, context.version.notice_version);
+  assert.equal(context.notice.version, '1.0');
+
+  const consent = data<{ consent_id: string; notice_version: string; notice_source: string }>(
+    await call('/public/surveys/link-umum-demo/consent', {
+      method: 'POST',
+      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sumber' },
+    }),
+  );
+  assert.equal(consent.notice_version, '1.0');
+  assert.equal(consent.notice_source, 'organization');
+
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    const history = await db.query<{ source: string; source_id: string; notice_id: string; notice_version: string }>(
+      'SELECT source, source_id, notice_id, notice_version FROM consent_notice_versions WHERE consent_id = $1',
+      [consent.consent_id],
+    );
+    assert.deepEqual(history.rows, [
+      { source: 'organization', source_id: 'org_smk', notice_id: 'on_org_smk_1_0', notice_version: '1.0' },
+    ]);
+
+    // Notice versi berbeda untuk organisasi yang sama tidak boleh menggantikan versi yang tercatat.
+    await db.query("DELETE FROM organization_notices WHERE id = 'on_org_smk_1_0'");
+  } finally {
+    await db.end();
+  }
+  const failClosed = await call('/public/surveys/link-umum-demo');
+  assert.equal(failClosed.status, 500);
+  assert.equal((failClosed.json as { code: string }).code, 'notice_version_unavailable');
+
+  const db2 = new Client({ connectionString: databaseUrl });
+  await db2.connect();
+  try {
+    await db2.query(
+      `INSERT INTO organization_notices (id, organization_id, version, effective_date, purpose, data_categories,
+        module15_usage, retention_text, recipients, contact, rights, child_data_text, cross_border_text, created_at)
+       VALUES ('on_org_smk_1_0', 'org_smk', '1.0', '2026-11-17', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', '2026-11-17')`,
+    );
+  } finally {
+    await db2.end();
+  }
+});
+
 test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutnya', async () => {
   const admin = await session('admin@svara.local');
   const accounts = data<{ accounts: Array<{ id: string; role: string; status: string }> }>(
@@ -967,7 +1026,7 @@ test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan 
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
         method: 'POST',
-        body: { respondent_click: true, eligibility: true },
+        body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-beban' },
       }),
     ),
   );
