@@ -35,6 +35,7 @@ const NAV: Record<ShellKind, NavEntry[]> = {
   admin: [
     { to: ROUTES.admin, label: 'Ringkasan' },
     { to: ROUTES.adminAccounts, label: 'Akun & izin' },
+    { to: ROUTES.adminPlatform, label: 'Profil platform' },
     { to: ROUTES.adminAudit, label: 'Log audit' },
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
     { to: ROUTES.adminRequests, label: 'Permintaan data' },

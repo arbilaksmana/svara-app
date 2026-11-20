@@ -7,6 +7,7 @@ import type {
   OrgMember,
   OrgProfile,
   OrganizationSummary,
+  PlatformProfile,
   AuditLog,
   DeploymentProfile,
   IntegrationEvent,
@@ -506,6 +507,21 @@ export type OrgProfileInput = Partial<
 
 export async function saveOrgProfile(input: OrgProfileInput): Promise<{ source: string; profile: OrgProfile }> {
   return call<{ source: string; profile: OrgProfile }>('/org/profile', { method: 'PUT', body: input });
+}
+
+export async function getPlatformProfile(): Promise<PlatformProfile> {
+  return (await call<{ profile: PlatformProfile }>('/admin/platform-profile')).profile;
+}
+
+export type PlatformProfileInput = Partial<
+  Pick<
+    PlatformProfile,
+    'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'data_request_contact'
+  >
+> & { cross_border_transfer?: boolean | null };
+
+export async function savePlatformProfile(input: PlatformProfileInput): Promise<PlatformProfile> {
+  return (await call<{ profile: PlatformProfile }>('/admin/platform-profile', { method: 'PUT', body: input })).profile;
 }
 
 export async function getOrgMembers(): Promise<OrgMember[]> {
