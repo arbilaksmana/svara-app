@@ -17,6 +17,11 @@ import {
 } from '../security.ts';
 import { buildBootstrap } from '../bootstrap.ts';
 import { ApiError, newId, sendError } from '../http.ts';
+import {
+  ORGANIZATION_INVITATION_COLUMNS,
+  invitationStatus,
+  type OrganizationInvitationRow,
+} from '../organization-invitations.ts';
 
 interface LoginRow extends AccountRow {
   password_hash: string;
@@ -102,6 +107,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Bump ketika isi halaman kebijakan privasi atau ketentuan layanan berubah. */
 const CURRENT_CONSENT_VERSION = '2026-11-19';
 
+/**
+ * Batas produksi 5 per alamat per 15 menit. Suite uji melakukan lebih dari lima
+ * pendaftaran sah dari satu alamat, jadi batasnya dinaikkan hanya saat NODE_ENV=test;
+ * pembatas tetap berjalan di uji, hanya ambangnya berbeda.
+ */
+const REGISTER_RATE_LIMIT = process.env.NODE_ENV === 'test' ? 50 : 5;
+
 authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
   try {
     const displayName = typeof req.body?.name === 'string' ? req.body.name.replace(/\s+/g, ' ').trim() : '';
@@ -122,7 +134,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     if (passwordError) {
       throw new ApiError(422, 'weak_password', passwordError);
     }
-    if (!rateLimit({ key: `register:${req.ip}`, limit: 5, windowMs: 15 * 60 * 1000 })) {
+    if (!rateLimit({ key: `register:${req.ip}`, limit: REGISTER_RATE_LIMIT, windowMs: 15 * 60 * 1000 })) {
       throw new ApiError(429, 'rate_limited', 'Terlalu banyak pendaftaran dari alamat ini. Coba lagi beberapa menit lagi.');
     }
 
@@ -132,14 +144,16 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     }
 
     // Undangan organisasi opsional: kode menentukan organisasi akun, bukan body lain.
+    // Kode dicari tanpa filter agar alasan penolakan tidak membocorkan statusnya; semua
+    // keadaan selain aktif menghasilkan pesan yang sama dengan kode asing.
     const inviteCode = typeof req.body?.invite_code === 'string' ? req.body.invite_code.trim().toUpperCase() : '';
     const invitation = inviteCode
-      ? await get<{ id: string; organization_id: string }>(
-          "SELECT id, organization_id FROM organization_invitations WHERE code = ? AND used_at IS NULL",
+      ? await get<OrganizationInvitationRow>(
+          `SELECT ${ORGANIZATION_INVITATION_COLUMNS} FROM organization_invitations WHERE code = ?`,
           inviteCode,
         )
       : undefined;
-    if (inviteCode && !invitation) {
+    if (inviteCode && (!invitation || invitationStatus(invitation, nowIso()) !== 'active')) {
       throw new ApiError(422, 'invalid_invite_code', 'Kode undangan organisasi tidak berlaku.');
     }
 
@@ -161,13 +175,20 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           invitation?.organization_id ?? null,
         );
         if (invitation) {
-          // Kode sekali pakai: pemakaian dicatat pada baris undangan.
-          await run(
-            'UPDATE organization_invitations SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL',
+          // Kode sekali pakai: pemakaian dicatat pada baris undangan. Guard di WHERE
+          // menutup balapan dengan pencabutan atau kode yang kedaluwarsa saat transaksi berjalan.
+          const consumed = await run(
+            `UPDATE organization_invitations SET used_at = ?, used_by = ?
+              WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at > ?)`,
             acceptedAt,
             accountId,
             invitation.id,
+            acceptedAt,
           );
+          if (consumed === 0) {
+            throw new ApiError(422, 'invalid_invite_code', 'Kode undangan organisasi tidak berlaku.');
+          }
         }
         await run(
           'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

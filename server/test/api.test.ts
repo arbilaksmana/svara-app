@@ -1729,3 +1729,121 @@ test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organi
     }
   }
 });
+
+interface OrgInvitationRow {
+  id: string;
+  organization_id: string;
+  code: string;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  used_at: string | null;
+  used_by: string | null;
+  status: 'active' | 'used' | 'revoked' | 'expired';
+}
+
+test('Kode undangan organisasi: masa berlaku, pencabutan, dan penolakan pemakaian', async () => {
+  const orgAdmin = await session('orgadmin@svara.local');
+  const creator = await session('creator.a@svara.local');
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  const createdIds: string[] = [];
+  try {
+    const forbidden = await call('/org/invitations', { cookie: creator });
+    assert.equal(forbidden.status, 403, 'creator tidak boleh melihat kode undangan organisasi');
+
+    const created = data<{ invitation: OrgInvitationRow }>(await call('/org/invitations', { method: 'POST', cookie: orgAdmin }));
+    createdIds.push(created.invitation.id);
+    assert.equal(created.invitation.status, 'active');
+    assert.equal(created.invitation.organization_id, 'org_smk');
+    assert.ok(created.invitation.expires_at, 'kode baru wajib punya masa berlaku');
+    const ttl = Date.parse(created.invitation.expires_at) - Date.parse(created.invitation.created_at);
+    assert.ok(ttl > 13 * 86_400_000 && ttl < 15 * 86_400_000, 'masa berlaku 14 hari');
+
+    const listed = data<{ invitations: OrgInvitationRow[]; ttl_days: number }>(await call('/org/invitations', { cookie: orgAdmin }));
+    assert.equal(listed.ttl_days, 14);
+    assert.equal(listed.invitations.find((row) => row.id === created.invitation.id)?.status, 'active');
+    assert.ok(listed.invitations.every((row) => row.organization_id === 'org_smk'));
+
+    const revoked = await call(`/org/invitations/${created.invitation.id}`, { method: 'DELETE', cookie: orgAdmin });
+    assert.equal(revoked.status, 200, revoked.text);
+    const revokedRow = data<{ invitation: OrgInvitationRow }>(revoked).invitation;
+    assert.equal(revokedRow.status, 'revoked');
+
+    const alreadyRevoked = await call(`/org/invitations/${created.invitation.id}`, { method: 'DELETE', cookie: orgAdmin });
+    assert.equal(alreadyRevoked.status, 200, 'mencabut dua kali tetap 200 dan tidak mengubah data');
+    assert.equal(data<{ invitation: OrgInvitationRow }>(alreadyRevoked).invitation.revoked_at, revokedRow.revoked_at);
+
+    const registerAfterRevoke = await call('/auth/register', {
+      method: 'POST',
+      body: {
+        name: 'Pendaftar Ditolak',
+        email: 'ditolak.cabut@contoh.test',
+        password: 'SandiAnggota123!',
+        acceptTerms: true,
+        invite_code: created.invitation.code,
+      },
+    });
+    assert.equal(registerAfterRevoke.status, 422, registerAfterRevoke.text);
+    assert.equal((registerAfterRevoke.json as { code?: string }).code, 'invalid_invite_code', 'kode dicabut tidak dapat dipakai');
+
+    // Kedaluwarsa: status dihitung dari expires_at, bukan kolom tersimpan.
+    const expiring = data<{ invitation: OrgInvitationRow }>(await call('/org/invitations', { method: 'POST', cookie: orgAdmin }));
+    createdIds.push(expiring.invitation.id);
+    await db.query('UPDATE organization_invitations SET expires_at = $1 WHERE id = $2', ['2000-01-01T00:00:00.000Z', expiring.invitation.id]);
+    const afterExpiry = data<{ invitations: OrgInvitationRow[] }>(await call('/org/invitations', { cookie: orgAdmin }));
+    assert.equal(afterExpiry.invitations.find((row) => row.id === expiring.invitation.id)?.status, 'expired');
+
+    const registerAfterExpiry = await call('/auth/register', {
+      method: 'POST',
+      body: {
+        name: 'Pendaftar Kedaluwarsa',
+        email: 'ditolak.kadaluarsa@contoh.test',
+        password: 'SandiAnggota123!',
+        acceptTerms: true,
+        invite_code: expiring.invitation.code,
+      },
+    });
+    assert.equal(registerAfterExpiry.status, 422, registerAfterExpiry.text);
+    assert.equal((registerAfterExpiry.json as { code?: string }).code, 'invalid_invite_code', 'kode kedaluwarsa tidak dapat dipakai');
+
+    // Kode terpakai tidak dapat dicabut.
+    const used = data<{ invitation: OrgInvitationRow }>(await call('/org/invitations', { method: 'POST', cookie: orgAdmin }));
+    createdIds.push(used.invitation.id);
+    await db.query('UPDATE organization_invitations SET used_at = $1, used_by = $2 WHERE id = $3', [
+      new Date().toISOString(),
+      'u_admin',
+      used.invitation.id,
+    ]);
+    const revokeUsed = await call(`/org/invitations/${used.invitation.id}`, { method: 'DELETE', cookie: orgAdmin });
+    assert.equal(revokeUsed.status, 409);
+    assert.equal((revokeUsed.json as { code?: string }).code, 'invitation_used');
+
+    // Kode organisasi lain tidak terlihat dan tidak dapat dicabut (404, bukan 403).
+    const foreignId = 'oi_uji_organisasi_lain';
+    await db.query('DELETE FROM organization_invitations WHERE id = $1', [foreignId]);
+    await db.query(
+      `INSERT INTO organization_invitations (id, organization_id, code, created_by, created_at, expires_at)
+       VALUES ($1, 'org_perpus', 'ORG-UJILAINORGANISASI', 'u_admin', $2, $3)`,
+      [foreignId, new Date().toISOString(), new Date(Date.now() + 86_400_000).toISOString()],
+    );
+    const foreignList = data<{ invitations: OrgInvitationRow[] }>(await call('/org/invitations', { cookie: orgAdmin }));
+    assert.ok(foreignList.invitations.every((row) => row.id !== foreignId), 'kode organisasi lain tidak muncul');
+    const revokeForeign = await call(`/org/invitations/${foreignId}`, { method: 'DELETE', cookie: orgAdmin });
+    assert.equal(revokeForeign.status, 404);
+    assert.equal((revokeForeign.json as { code?: string }).code, 'invitation_not_found');
+    await db.query('DELETE FROM organization_invitations WHERE id = $1', [foreignId]);
+
+    const revocationAudit = await db.query<{ id: string }>(
+      "SELECT id FROM audit_logs WHERE object = $1 AND action = 'Cabut undangan organisasi'",
+      [created.invitation.id],
+    );
+    assert.ok(revocationAudit.rows.length > 0, 'pencabutan tercatat pada audit');
+  } finally {
+    if (createdIds.length > 0) {
+      await db.query('DELETE FROM organization_invitations WHERE id = ANY($1::text[])', [createdIds]);
+    }
+    await db.query('DELETE FROM organization_invitations WHERE id = $1', ['oi_uji_organisasi_lain']);
+    await db.end();
+  }
+});
