@@ -70,7 +70,7 @@ export const consentRecords: ConsentRecord[] = [
     id: 'c_demo01', survey_id: 's_demo1', version_id: 'v_demo1_1',
     notice_version: '1.0', basis: 'Persetujuan wali',
     status: 'granted', recorded_at: '2026-11-09T04:58:00Z', respondent_click: true,
-    guardian_evidence_status: 'verified', guardian_evidence_ref: 'ref-wali-sintetis-01',
+    guardian_evidence_status: 'self_attested', guardian_evidence_ref: 'ref-wali-sintetis-01',
   },
   {
     id: 'c_demo02', survey_id: 's_demo1', version_id: 'v_demo1_1',

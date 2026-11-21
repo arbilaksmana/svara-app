@@ -77,6 +77,22 @@ function session(email: string): Promise<string> {
   return cached;
 }
 
+/** Baca kolom status dan referensi bukti wali langsung dari basis data uji. */
+async function storedGuardianEvidence(consentId: string): Promise<{ status: string; ref: string | null } | null> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query<{ guardian_evidence_status: string; guardian_evidence_ref: string | null }>(
+      'SELECT guardian_evidence_status, guardian_evidence_ref FROM consent_records WHERE id = $1',
+      [consentId],
+    );
+    const row = result.rows[0];
+    return row ? { status: row.guardian_evidence_status, ref: row.guardian_evidence_ref } : null;
+  } finally {
+    await client.end();
+  }
+}
+
 async function waitForServer(child: ChildProcess): Promise<void> {
   let ready!: () => void;
   const signal = new Promise<void>((resolveSignal) => {
@@ -494,6 +510,36 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
   assert.equal(secondRevoke.status, 200);
   const stillRevoked = data<{ state: string }>(await call(`/public/surveys/${created.token}`));
   assert.equal(stillRevoked.state, 'revoked');
+});
+
+test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified', async () => {
+  const token = 'link-umum-demo';
+  const context = data<{ guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
+  assert.equal(context.guardianRequired, true, 'tautan demo wajib bermode wali');
+
+  const evidenceRef = `ref-acak-${Math.random().toString(36).slice(2)}`;
+  const created = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: evidenceRef },
+  });
+  assert.equal(created.status, 201, created.text);
+  const consent = data<{ consent_id: string; guardian_evidence_status: string }>(created);
+  assert.equal(consent.guardian_evidence_status, 'self_attested');
+
+  const form = data<{ consent: { guardian_evidence_status: string } }>(
+    await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`),
+  );
+  assert.equal(form.consent.guardian_evidence_status, 'self_attested');
+
+  const stored = await storedGuardianEvidence(consent.consent_id);
+  assert.deepEqual(stored, { status: 'self_attested', ref: evidenceRef }, 'referensi mentah tetap tersimpan');
+
+  const missing = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true },
+  });
+  assert.equal(missing.status, 422);
+  assert.equal((missing.json as { code: string }).code, 'guardian_evidence_required');
 });
 
 test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () => {

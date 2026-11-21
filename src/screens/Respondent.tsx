@@ -29,6 +29,7 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { useToast } from '../components/Toast';
+import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
 import { useDraft } from '../lib/draft';
 import type { Question } from '../lib/types';
@@ -78,7 +79,7 @@ function writeConsent(
     respondent_click: true,
     basis,
     notice_version: noticeVersion,
-    guardian_evidence_status: guardianRequired ? (guardianEvidenceRef ? 'verified' : 'not_required') : 'not_required',
+    guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
     guardian_evidence_ref: guardianRequired ? guardianEvidenceRef : null,
   };
   try {
@@ -316,7 +317,7 @@ export function IntroPage({ token }: { token: string }) {
                 <div className="mt-2 flex flex-col gap-2">
                   <Checkbox
                     id="consent-wali"
-                    label="Bukti wali telah diverifikasi."
+                    label="Saya menyatakan memiliki bukti persetujuan wali. Statusnya dicatat sebagai pernyataan, belum diverifikasi pengelola."
                     checked={guardianEvidence}
                     onChange={setGuardianEvidence}
                   />
@@ -761,7 +762,7 @@ export function ReviewPage({ token }: { token: string }) {
               <div><dt className="text-caption font-bold text-muted">Dasar persetujuan</dt><dd className="mt-1 text-ink">{consent?.basis ?? 'Tidak tercatat'}</dd></div>
               <div><dt className="text-caption font-bold text-muted">Klik responden</dt><dd className="mt-1 text-ink">{consent?.respondent_click ? 'Tercatat' : 'Tidak tercatat'}</dd></div>
               <div><dt className="text-caption font-bold text-muted">Kelayakan konteks</dt><dd className="mt-1 text-ink">Terkonfirmasi pada pengantar</dd></div>
-              <div><dt className="text-caption font-bold text-muted">Bukti wali</dt><dd className="mt-1 text-ink">{consent?.guardian_evidence_status === 'verified' ? 'Terverifikasi' : 'Tidak diperlukan'}</dd></div>
+              <GuardianEvidenceSummary status={consent?.guardian_evidence_status ?? 'not_required'} />
             </dl>
           </Card>
 

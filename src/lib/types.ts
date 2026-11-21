@@ -162,7 +162,8 @@ export interface Response {
 }
 
 export type ConsentStatus = 'granted' | 'pending' | 'withdrawn';
-export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'verified' | 'revoked';
+/** `self_attested`: referensi diisi responden dan belum diverifikasi pengelola. */
+export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'self_attested' | 'verified' | 'revoked';
 
 export interface ConsentRecord {
   id: string;

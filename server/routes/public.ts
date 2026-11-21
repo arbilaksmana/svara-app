@@ -497,7 +497,9 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     }
     const consentId = newId('c');
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
-    const guardianStatus = context.guardianRequired ? 'verified' : 'not_required';
+    // SEC-04/BF-03: referensi dari form adalah pernyataan responden, bukan hasil verifikasi.
+    // Tidak ada jalur yang menandai evidence_ref sebagai sah, jadi statusnya self_attested.
+    const guardianStatus = context.guardianRequired ? 'self_attested' : 'not_required';
     const recordedAt = nowIso();
     await withTx(async () => {
       await run(

@@ -501,7 +501,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     await answer('r_perpus01', 'K01', 'q_k01', null, 'Tambahkan jam buka.');
 
     const consents: Array<[string, string, string, string, string, string, string, boolean, string, string | null]> = [
-      ['c_demo01', 's_demo1', 'v_demo1_1', '1.0', 'Persetujuan wali', 'granted', '2026-11-09T04:58:00Z', true, 'verified', 'ref-wali-sintetis-01'],
+      ['c_demo01', 's_demo1', 'v_demo1_1', '1.0', 'Persetujuan wali', 'granted', '2026-11-09T04:58:00Z', true, 'self_attested', 'ref-wali-sintetis-01'],
       ['c_demo02', 's_demo1', 'v_demo1_1', '1.0', 'Persetujuan wali', 'pending', '2026-11-09T05:02:00Z', false, 'pending', null],
       ['c_perpus01', 's_demo2', 'v_demo2_1', '1.0', 'Persetujuan diri', 'granted', '2026-11-10T03:08:00Z', true, 'not_required', null],
     ];

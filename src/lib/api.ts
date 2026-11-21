@@ -398,7 +398,7 @@ export interface ConsentPayload {
   respondent_click: boolean;
   basis: string;
   notice_version: string;
-  guardian_evidence_status: 'not_required' | 'verified';
+  guardian_evidence_status: 'not_required' | 'self_attested';
   guardian_evidence_ref: string | null;
 }
 
