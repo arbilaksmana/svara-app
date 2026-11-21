@@ -115,10 +115,7 @@ export function canManageSurvey(account: AccountRow, survey: SurveyRow): boolean
   );
 }
 
-/**
- * Survei yang bisa dikelola akun: super_admin semua, org_admin lingkup organisasinya,
- * creator miliknya sendiri. Dipakai GET /surveys dan bootstrap agar filter tidak diduplikasi.
- */
+/** Daftar mengikuti lingkup peran; creator melihat miliknya dan survei ber-grant, bukan hak kelola tambahan. */
 export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[]> {
   if (account.role === 'super_admin') {
     return all<SurveyRow>('SELECT * FROM surveys ORDER BY updated_at DESC, id');
@@ -132,7 +129,14 @@ export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[
     );
   }
   if (account.role === 'creator') {
-    return all<SurveyRow>('SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC, id', account.id);
+    return all<SurveyRow>(
+      `SELECT s.* FROM surveys s
+        WHERE s.owner_id = ?
+           OR EXISTS (SELECT 1 FROM access_grants g WHERE g.survey_id = s.id AND g.account_id = ?)
+        ORDER BY s.updated_at DESC, s.id`,
+      account.id,
+      account.id,
+    );
   }
   return all<SurveyRow>(
     `SELECT DISTINCT s.*

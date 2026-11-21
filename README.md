@@ -158,10 +158,12 @@ Apa artinya untuk visibilitas (`server/http.ts:108-144`):
 | --- | --- | --- |
 | `super_admin` | Semua survei | Semua survei |
 | `org_admin` | Survei dengan `organization_id` organisasinya | Survei organisasinya saja; survei `organization_id` NULL tidak pernah jatuh ke `org_admin` |
-| `creator` | Survei miliknya | Survei miliknya |
+| `creator` | Survei miliknya dan survei yang diberi grant ke akun itu | Survei miliknya saja; grant tidak memberi hak kelola |
 | Selain itu | Survei yang diberi grant | Tidak ada, hanya grant |
 
 Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`server/http.ts:108-116`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
+
+`GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
 
 ### Sumber kebijakan dan notice
 

@@ -184,6 +184,79 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   assert.equal(adminCsv.status, 403);
 });
 
+test('UIX-01/BR-01: creator melihat survei ber-grant tanpa memperoleh hak kelola', async () => {
+  const officer = await session('officer@svara.local');
+  const creator = await session('creator.a@svara.local');
+  const other = await session('creator.b@svara.local');
+  const orgAdmin = await session('orgadmin@svara.local');
+  const admin = await session('admin@svara.local');
+  interface Bootstrap {
+    surveys: Array<{ id: string }>;
+    versions: Array<{ survey_id: string }>;
+    invitations: Array<{ survey_id: string }>;
+    publicLinks: Array<{ survey_id: string }>;
+    assignments: Array<{ survey_id: string }>;
+    grants: Array<{
+      account_id: string;
+      survey_id: string;
+      can_read_individual: boolean;
+      can_export: boolean;
+      can_read_free_text: boolean;
+    }>;
+  }
+  const bootstrap = async (cookie: string) => data<Bootstrap>(await call('/bootstrap', { cookie }));
+  const list = async (cookie: string) => data<Array<{ id: string }>>(await call('/surveys', { cookie })).map((s) => s.id);
+  const granted = await bootstrap(officer);
+  assert.deepEqual(granted.surveys.map((s) => s.id), ['s_demo1'], 'bootstrap harus menampilkan survei yang diberikan');
+  assert.deepEqual(await list(officer), ['s_demo1'], 'daftar API harus sama dengan bootstrap');
+  assert.ok(granted.versions.some((v) => v.survey_id === 's_demo1'));
+  assert.deepEqual(granted.invitations, [], 'grant baca tidak membuka undangan');
+  assert.deepEqual(granted.publicLinks, [], 'grant baca tidak membuka token tautan umum');
+  assert.deepEqual(granted.assignments, [], 'grant baca tidak membuka identitas penugasan');
+  assert.equal((await call('/surveys/s_demo1', { cookie: officer })).status, 200);
+  assert.equal((await call('/surveys/s_demo1/summary', { cookie: officer })).status, 200);
+  assert.equal((await call('/surveys/s_demo2', { cookie: officer })).status, 403);
+  assert.deepEqual(await list(other), ['s_demo3'], 'grant akun lain tidak bocor');
+  for (const [method, suffix] of [
+    ['PUT', ''], ['POST', '/publish'], ['POST', '/duplicate'],
+    ['POST', '/invitations'], ['PUT', '/settings'],
+  ]) {
+    assert.equal((await call(`/surveys/s_demo1${suffix}`, { method, cookie: officer, body: {} })).status, 403, `${method} ${suffix} tetap khusus pengelola`);
+  }
+  const owned = await bootstrap(creator);
+  for (const key of ['invitations', 'publicLinks', 'assignments'] as const) {
+    assert.ok(owned[key].some((row) => row.survey_id === 's_demo1'), `${key} tetap tersedia bagi pemilik`);
+  }
+
+  const original = (await bootstrap(admin)).grants;
+  const setGrants = async (accountId: string, surveyIds: string[]) => {
+    const result = await call(`/admin/grants/${accountId}`, {
+      method: 'PUT', cookie: admin, body: { grants: surveyIds.map((survey_id) => ({ survey_id })) },
+    });
+    assert.equal(result.status, 200, result.text);
+  };
+  try {
+    await setGrants('u_creator_a', ['s_demo1', 's_demo3']);
+    const expected = ['s_demo3', 's_demo1', 's_demo2', 's_demo4'];
+    assert.deepEqual(await list(creator), expected, 'gabungan milik + grant terurut tanpa duplikasi');
+    assert.deepEqual((await bootstrap(creator)).surveys.map((s) => s.id), expected);
+    await setGrants('u_orgadmin', ['s_demo3']);
+    assert.deepEqual(await list(orgAdmin), ['s_demo1', 's_demo2', 's_demo4'], 'grant tidak melebarkan lingkup org_admin');
+    assert.deepEqual(await list(admin), expected, 'super_admin tetap melihat seluruh survei');
+    await setGrants('u_petugas', []);
+    assert.deepEqual(await list(officer), [], 'pencabutan grant langsung menghapus visibilitas');
+    assert.deepEqual((await bootstrap(officer)).surveys, []);
+    assert.equal((await call('/surveys/s_demo1', { cookie: officer })).status, 403);
+  } finally {
+    for (const id of ['u_creator_a', 'u_orgadmin', 'u_petugas']) {
+      const restored = await call(`/admin/grants/${id}`, {
+        method: 'PUT', cookie: admin, body: { grants: original.filter((grant) => grant.account_id === id) },
+      });
+      assert.equal(restored.status, 200, restored.text);
+    }
+  }
+});
+
 test('Mutasi menerima origin web lokal dan menolak origin asing', async () => {
   const body = { type: 'akses', contact: 'qa@example.org', note: 'Uji origin' };
   const local = await call('/data-requests', {

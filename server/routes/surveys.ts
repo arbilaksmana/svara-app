@@ -300,7 +300,6 @@ async function currentOrDraft(
 surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    // Satu sumber lingkup: creator hanya miliknya, org_admin organisasinya; tidak ada filter ganda.
     res.json({ data: await accessibleSurveys(req.account) });
   } catch (error) {
     sendError(res, error);
