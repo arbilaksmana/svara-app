@@ -136,6 +136,59 @@ test('SEC-08/BF-02: consent terpakai tidak dapat pindah respons; retry identik t
   assert.equal(reuse.code, 'consent_already_used');
   await assertSingleConsentBinding(consent.id, first.data.response_id, [firstKey, otherKey]);
 });
+test('SEC-08/BF-02: consent terpakai tidak dapat digunakan ulang pada konteks undangan', async () => {
+  const consent = await issueGuardianConsent(PUBLIC_LINK);
+  const first = await submit(PUBLIC_LINK, consent, 'kunci-consent-konteks-pertama');
+  assert.equal(first.status, 201);
+  assert.ok(first.data);
+
+  const reuse = await submit(INVITATION, consent, 'kunci-consent-konteks-kedua');
+  assert.equal(reuse.status, 409, 'consent terpakai tidak boleh dipakai di undangan lain');
+  assert.equal(reuse.code, 'consent_context_mismatch');
+});
+
+test('SEC-08/BF-02: memuat ulang review setelah pengiriman hanya membuka retry untuk sesi terikat', async () => {
+  const consent = await issueGuardianConsent(PUBLIC_LINK);
+  const key = 'kunci-retry-review-ulang';
+  const first = await submit(PUBLIC_LINK, consent, key);
+  assert.equal(first.status, 201);
+  assert.ok(first.data);
+
+  const review = await call<{ retryOnly?: boolean; canSubmit: boolean }>(
+    `${PUBLIC_LINK}/review?consent_id=${consent.id}`,
+    { Cookie: consent.cookie },
+  );
+  assert.equal(review.status, 200);
+  assert.equal(review.data?.retryOnly, true);
+  assert.equal(review.data?.canSubmit, false);
+  const retry = await submit(PUBLIC_LINK, consent, key);
+  assert.equal(retry.status, 200);
+  assert.deepEqual(retry.data, first.data);
+
+  const otherCookie = `svara_respondent=${'B'.repeat(43)}`;
+  const otherSession = await issueGuardianConsent(PUBLIC_LINK, otherCookie);
+  for (const [label, headers] of [
+    ['sesi lain', { Cookie: otherSession.cookie }],
+    ['tanpa sesi', {}],
+  ] as const) {
+    const deniedReview = await call(`${PUBLIC_LINK}/review?consent_id=${consent.id}`, headers);
+    assert.equal(deniedReview.status, 409, `${label}: review retry harus ditolak`);
+    assert.equal(deniedReview.code, 'consent_context_mismatch', `${label}: kode penolakan review`);
+    const deniedSubmit = await call(`${PUBLIC_LINK}/responses`, {
+      ...headers,
+      'Idempotency-Key': key,
+    }, {
+      consent_id: consent.id,
+      answers: [
+        { question_code: 'AD01', option_id: 'q_ad01_opt3' },
+        { question_code: 'TS01', option_id: 'q_ts01_opt2' },
+      ],
+    });
+    assert.equal(deniedSubmit.status, 409, `${label}: submit retry harus ditolak`);
+    assert.equal(deniedSubmit.code, 'consent_context_mismatch', `${label}: kode penolakan submit`);
+  }
+});
+
 
 test('SEC-08/BF-02: kiriman serentak dengan consent yang sama hanya menyimpan satu respons', async (t) => {
   const consent = await issueGuardianConsent(PUBLIC_LINK);
