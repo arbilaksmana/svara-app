@@ -165,6 +165,8 @@ Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; 
 
 `GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
 
+Daftar creator memberi label "Diberikan akses" pada survei bukan miliknya. Baris tersebut hanya menawarkan "Lihat hasil"; navigasi surveinya hanya "Hasil", tanpa Editor, Pratinjau, Publikasi, Bagikan, Pengaturan, atau Riwayat. Hak baca hasil dan ekspor tetap diperiksa API sesuai grant dan pengaturan survei.
+
 ### Sumber kebijakan dan notice
 
 - Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`server/http.ts:191-201`, `server/http.ts:218-234`, dipakai `server/routes/surveys.ts:158`).

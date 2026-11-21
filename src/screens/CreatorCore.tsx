@@ -232,7 +232,7 @@ export function CreatorListPage() {
                     <tr key={s.id}>
                       <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block text-caption text-muted">{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {s.updated_at.slice(0, 10)}</span>
+                        <span className="mt-1 block text-caption text-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {s.updated_at.slice(0, 10)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>
