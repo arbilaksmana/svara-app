@@ -141,7 +141,6 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       ],
     ];
     for (const [id, profile, version, effective, purpose, categories, module15, retention] of notices) {
-      const contact = profile === 'p_smk' ? 'Lihat pemberitahuan survei' : 'privasi@organisasi.contoh';
       await run(
         `INSERT INTO notices (id, profile_id, version, effective_date, purpose, data_categories, module15_usage,
           retention_text, recipients, contact, rights, child_data_text, cross_border_text, synthetic_placeholder)
@@ -157,12 +156,87 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         profile === 'p_smk'
           ? 'Pembuat survei, petugas berizin, dan penerima integrasi sesuai cakupan.'
           : 'Pembuat survei dan petugas berizin pada survei ini.',
-        contact,
+        profile === 'p_smk' ? 'Lihat pemberitahuan survei' : 'privasi@organisasi.contoh',
         'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali.',
         profile === 'p_smk'
           ? 'Persetujuan orang tua atau wali dan bukti verifikasi wajib sebelum pengiriman baru.'
           : 'Profil ini ditujukan untuk responden dewasa dengan persetujuan diri.',
         'Tidak ada transfer lintas negara.',
+      );
+    }
+
+    // Pemberitahuan per lingkup survei. Versi harus mencakup notice_version yang dipakai versi
+    // survei seed (1.0/1.1) dan notice_version organisasi (1.2) agar permintaan publik tidak
+    // jatuh ke notice versi lain.
+    const noticeBodies: Record<string, { text: string; recipients: string; childData: string; contact: string }> = {
+      org_smk: {
+        text: 'Jawaban pada skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Penyelenggara adalah sekolah pada profil organisasi.',
+        recipients: 'Pembuat survei, petugas berizin, dan penerima integrasi sesuai cakupan pengendali.',
+        childData: 'Responden berusia di bawah usia dewasa; persetujuan orang tua atau wali wajib sebelum pengiriman.',
+        contact: 'privasi@organisasi.contoh',
+      },
+      org_perpus: {
+        text: 'Jawaban pada skala, komentar singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Penyelenggara adalah organisasi pada profil organisasi.',
+        recipients: 'Pembuat survei dan petugas berizin pada survei ini.',
+        childData: 'Profil ini ditujukan untuk responden dewasa dengan persetujuan diri.',
+        contact: 'privasi@organisasi.contoh',
+      },
+      platform: {
+        text: 'Jawaban pada skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Survei mandiri dikelola pembuatnya di bawah kebijakan platform.',
+        recipients: 'Pembuat survei dan petugas berizin pada survei ini.',
+        childData: 'Persetujuan wali wajib bila penyelenggara menetapkan mode wali.',
+        contact: 'privasi@organisasi.contoh',
+      },
+    };
+    const noticeScopes: Array<{ org: string; version: string }> = [
+      { org: 'org_smk', version: '1.0' },
+      { org: 'org_smk', version: '1.1' },
+      { org: 'org_smk', version: '1.2' },
+      { org: 'org_perpus', version: '1.0' },
+      { org: 'org_perpus', version: '1.1' },
+      { org: 'org_perpus', version: '1.2' },
+    ];
+    for (const scope of noticeScopes) {
+      const body = noticeBodies[scope.org]!;
+      await run(
+        `INSERT INTO organization_notices (id, organization_id, version, effective_date, purpose, data_categories,
+          module15_usage, retention_text, recipients, contact, rights, child_data_text, cross_border_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `on_${scope.org}_${scope.version.replace('.', '_')}`,
+        scope.org,
+        scope.version,
+        '2026-11-17',
+        'Tujuan survei dinyatakan oleh pembuat survei pada setiap instrumen.',
+        body.text,
+        'Ringkasan dan data yang diizinkan dapat diteruskan ke konsumen analitik melalui API terbatas.',
+        scope.org === 'org_perpus' ? '90 hari sejak pengiriman.' : 'Mengikuti kebijakan retensi pengendali (belum ditetapkan).',
+        body.recipients,
+        body.contact,
+        'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali.',
+        body.childData,
+        'Tidak ada transfer lintas negara.',
+        createdAt,
+      );
+    }
+    for (const version of ['1.0', '1.1', '1.2', '2.0']) {
+      const body = noticeBodies.platform!;
+      await run(
+        `INSERT INTO platform_notices (id, version, effective_date, purpose, data_categories, module15_usage,
+          retention_text, recipients, contact, rights, child_data_text, cross_border_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `pn_${version.replace('.', '_')}`,
+        version,
+        '2026-11-17',
+        'Tujuan survei dinyatakan oleh pembuat survei pada setiap instrumen.',
+        body.text,
+        'Ringkasan dan data yang diizinkan dapat diteruskan ke konsumen analitik melalui API terbatas.',
+        'Mengikuti kebijakan retensi pengendali (belum ditetapkan).',
+        body.recipients,
+        body.contact,
+        'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali.',
+        body.childData,
+        'Tidak ada transfer lintas negara.',
+        createdAt,
       );
     }
 

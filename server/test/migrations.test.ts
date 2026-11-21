@@ -32,10 +32,11 @@ const VERSIONS = [
   '007_organization_invitations.sql',
   '008_organization_invitation_lifecycle.sql',
   '009_organization_invitation_expiry_backfill.sql',
+  '010_consent_notice_source.sql',
 ];
 
-test('migrasi membuat 24 tabel aplikasi dan mencatat versi', async () => {
-  assert.equal(await tableCount(), 24);
+test('migrasi membuat 27 tabel aplikasi dan mencatat versi', async () => {
+  assert.equal(await tableCount(), 27);
   const versions = await appliedVersions();
   assert.deepEqual(versions, VERSIONS);
 });
@@ -44,7 +45,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
   const { migrate } = await import('../migrate.ts');
   const applied = await migrate();
   assert.deepEqual(applied, []);
-  assert.equal(await tableCount(), 24);
+  assert.equal(await tableCount(), 27);
   assert.deepEqual(await appliedVersions(), VERSIONS);
 });
 
@@ -115,7 +116,7 @@ test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari la
     await client.end();
   }
 
-  assert.deepEqual(await migrate(), ['009_organization_invitation_expiry_backfill.sql']);
+  assert.deepEqual(await migrate(), ['009_organization_invitation_expiry_backfill.sql', '010_consent_notice_source.sql']);
 
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();

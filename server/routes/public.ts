@@ -68,37 +68,23 @@ interface OptionRow {
   value: number | null;
 }
 
+/** `profile` pada payload publik adalah profil kebijakan efektif, bukan baris `profiles` lama. */
 interface ProfileRow {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string;
-  consent_mode: string;
+  respondent_age_category: string | null;
+  consent_mode: string | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
   data_request_contact: string | null;
   cross_border_transfer: number | null;
   notice_version: string;
-  synthetic_placeholder: number;
+  source: 'organization' | 'platform';
 }
 
-interface NoticeRow {
-  id: string;
-  profile_id: string;
-  version: string;
-  effective_date: string;
-  purpose: string;
-  data_categories: string;
-  module15_usage: string;
-  retention_text: string;
-  recipients: string;
-  contact: string;
-  rights: string;
-  child_data_text: string;
-  cross_border_text: string;
-  synthetic_placeholder: number;
-}
+type NoticeRow = PolicyNotice;
 
 interface PublicQuestion {
   id: string;
@@ -196,16 +182,76 @@ async function publicQuestions(versionId: string): Promise<{ questions: PublicQu
   return { questions, options };
 }
 
-async function profileFor(id: string): Promise<ProfileRow | undefined> {
-  return get<ProfileRow>('SELECT * FROM profiles WHERE id = ?', id);
+/**
+ * Kebijakan efektif mengikuti lingkup survei: organisasi pemilik, atau platform untuk survei
+ * mandiri. `surveys.profile_id`/`profiles` adalah warisan deployment dan tidak dibaca lagi.
+ */
+interface NoticeSource {
+  id: string;
+  organization_name: string;
+  organization_type: string;
+  respondent_age_category: string | null;
+  consent_mode: string | null;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  notice_version: string;
+  source: 'organization' | 'platform';
 }
 
-async function noticeFor(profileId: string, version: string): Promise<NoticeRow | undefined> {
-  return get<NoticeRow>(
-    'SELECT * FROM notices WHERE profile_id = ? ORDER BY CASE WHEN version = ? THEN 0 ELSE 1 END, effective_date DESC LIMIT 1',
-    profileId,
-    version,
-  );
+interface PolicyNotice {
+  id: string;
+  version: string;
+  effective_date: string;
+  purpose: string;
+  data_categories: string;
+  module15_usage: string;
+  retention_text: string;
+  recipients: string;
+  contact: string;
+  rights: string;
+  child_data_text: string;
+  cross_border_text: string;
+}
+
+async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
+  const row = survey.organization_id
+    ? await get<Omit<NoticeSource, 'source'>>(
+        `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+                policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
+           FROM organizations WHERE id = ?`,
+        survey.organization_id,
+      )
+    : await get<Omit<NoticeSource, 'source'>>(
+        `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
+                NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
+                cross_border_transfer, notice_version
+           FROM platform_profile WHERE id = 'platform'`,
+      );
+  if (!row) fail(409, 'policy_source_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+  return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
+}
+
+/**
+ * Notice harus persis versi yang tercatat pada versi survei. Bila versi itu tidak ada,
+ * permintaan gagal (fail closed) alih-alih menampilkan notice versi lain.
+ */
+async function noticeForVersion(source: NoticeSource, version: string): Promise<PolicyNotice> {
+  const row =
+    source.source === 'organization'
+      ? await get<PolicyNotice>(
+          'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
+          source.id,
+          version,
+        )
+      : await get<PolicyNotice>(
+          'SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1',
+          version,
+        );
+  if (!row) fail(500, 'notice_version_unavailable', 'Pemberitahuan versi yang diperlukan survei tidak tersedia.');
+  return row;
 }
 
 async function invitationForToken(token: string): Promise<InvitationRow | undefined> {
@@ -230,9 +276,8 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
     const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
     const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', invitation.survey_id);
     if (!assignment || !version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-    const profile = await profileFor(survey.profile_id);
-    const notice = await noticeFor(survey.profile_id, version.notice_version);
-    if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
+    const profile = await noticeSourceFor(survey);
+    const notice = await noticeForVersion(profile, version.notice_version);
     const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', assignment.id);
     let state = baseState(version, survey);
     if (invitation.status === 'used' || existing) state = 'used';
@@ -259,9 +304,8 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', link.version_id);
   const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
   if (!version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const profile = await profileFor(survey.profile_id);
-  const notice = await noticeFor(survey.profile_id, version.notice_version);
-  if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
+  const profile = await noticeSourceFor(survey);
+  const notice = await noticeForVersion(profile, version.notice_version);
   let state = baseState(version, survey);
   if (link.status === 'closed') state = 'closed';
   else if (link.status === 'expired' || (link.expires_at && new Date(link.expires_at).getTime() < Date.now())) state = 'expired';
@@ -300,9 +344,9 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
       ...context.profile,
       cross_border_transfer:
         context.profile.cross_border_transfer === null ? null : context.profile.cross_border_transfer === 1,
-      synthetic_placeholder: context.profile.synthetic_placeholder === 1,
+      synthetic_placeholder: false,
     },
-    notice: { ...context.notice, synthetic_placeholder: context.notice.synthetic_placeholder === 1 },
+    notice: { ...context.notice, synthetic_placeholder: false },
     invitation: context.invitation
       ? {
           id: context.invitation.id,
@@ -455,25 +499,40 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
     const guardianStatus = context.guardianRequired ? 'verified' : 'not_required';
     const recordedAt = nowIso();
-    await run(
-      `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
-        respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, response_id)
-       VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, NULL)`,
-      consentId,
-      context.survey.id,
-      context.version.id,
-      context.version.notice_version,
-      basis,
-      recordedAt,
-      guardianStatus,
-      context.guardianRequired ? evidenceRef : null,
-      context.invitation?.id ?? null,
-    );
+    await withTx(async () => {
+      await run(
+        `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
+          respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, response_id)
+         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, NULL)`,
+        consentId,
+        context.survey.id,
+        context.version.id,
+        context.version.notice_version,
+        basis,
+        recordedAt,
+        guardianStatus,
+        context.guardianRequired ? evidenceRef : null,
+        context.invitation?.id ?? null,
+      );
+      // Catat notice yang benar-benar ditampilkan, terpisah dari notice_version pada versi survei.
+      await run(
+        `INSERT INTO consent_notice_versions (consent_id, source, source_id, notice_id, notice_version, effective_date, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        consentId,
+        context.profile.source,
+        context.profile.id,
+        context.notice.id,
+        context.notice.version,
+        context.notice.effective_date,
+        recordedAt,
+      );
+    });
     await auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
     res.status(201).json({
       data: {
         consent_id: consentId,
         notice_version: context.version.notice_version,
+        notice_source: context.profile.source,
         basis,
         guardian_evidence_status: guardianStatus,
         recorded_at: recordedAt,
