@@ -2327,8 +2327,16 @@ test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => 
   const path = await createSurvey(title);
   const v1 = await publish(path, title, 'Q1');
   const v1Intro = data<{ consent_version: string }>(await call(`/public/surveys/${v1.publicLink.token}`));
+  // Referensi wali wajib dikirim: tanpa itu fixture gagal 422 di setup (bukan di assertion remap) pada
+  // profil yang mewajibkan wali, sehingga bukti merah tidak pernah mencapai perilaku yang diuji.
   const oldConsent = await call(`/public/surveys/${v1.publicLink.token}/consent`, {
-    method: 'POST', body: { version_id: v1Intro.consent_version, respondent_click: true, eligibility: true },
+    method: 'POST',
+    body: {
+      version_id: v1Intro.consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-riwayat',
+    },
   });
   assert.equal(oldConsent.status, 201, oldConsent.text);
   const otherTitle = 'Survei kedua';
