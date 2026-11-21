@@ -3,6 +3,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
+import { provisionOrganizationNotice } from '../notice-provisioning.ts';
+import { hashPassword } from '../security.ts';
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
 const PORT = 3191;
@@ -1018,8 +1020,10 @@ test('Super admin menetapkan organisasi akun dan lingkupnya berlaku pada permint
 test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () => {
   const admin = await session('admin@svara.local');
   const email = 'admin.baru@svara.local';
+  // Notice organisasi baru berasal dari profil deployment legacy bernama sama+tipe (aturan 013).
   const payload = {
     name: 'SMA Harapan Baru (sintetis)',
+    notice_profile_name: 'SMK Nusantara (sintetis)',
     organization_type: 'school',
     respondent_age_category: 'minor',
     consent_mode: 'guardian',
@@ -1057,8 +1061,25 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
   assert.equal(taken.status, 409);
   assert.equal((taken.json as { code?: string } | null)?.code, 'email_taken');
 
+  // Tanpa notice legacy yang cocok nama+tipe (aturan 013), organisasi ditolak alih-alih lahir tanpa notice.
+  const noNoticeSource = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: admin,
+    body: { ...payload, admin: { ...payload.admin, email: 'tanpa.notice@svara.local' }, notice_profile_name: 'Tidak Ada' },
+  });
+  assert.equal(noNoticeSource.status, 422);
+  assert.equal((noNoticeSource.json as { code?: string } | null)?.code, 'notice_version_unavailable');
+  const rolledBack = new Client({ connectionString: databaseUrl });
+  await rolledBack.connect();
+  try {
+    const orphan = await rolledBack.query("SELECT id FROM organizations WHERE name = $1", [payload.name]);
+    assert.deepEqual(orphan.rows, [], 'penolakan tidak boleh meninggalkan organisasi tanpa notice');
+  } finally {
+    await rolledBack.end();
+  }
+
   const created = await call('/admin/organizations', { method: 'POST', cookie: admin, body: payload });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, created.text);
   const result = data<{
     organization: { id: string; name: string; organization_type: string; respondent_age_category: string; consent_mode: string };
     account: { id: string; role: string; status: string; organization_id: string | null; email: string };
@@ -1094,6 +1115,49 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
     ]);
     const metadata = JSON.parse(String(audit.rows[0]?.metadata ?? '{}')) as { admin_account_id?: string };
     assert.equal(metadata.admin_account_id, result.account.id);
+
+    // Notice legacy dari profil pilihan ikut terprovision; provisioning ulang tidak menggandakan baris.
+    const notices = await stored.query<{ version: string }>(
+      'SELECT version FROM organization_notices WHERE organization_id = $1',
+      [result.organization.id],
+    );
+    assert.deepEqual(notices.rows, [{ version: '1.0' }]);
+    assert.equal(await provisionOrganizationNotice(result.organization.id, payload.notice_profile_name), 0);
+    const again = await stored.query<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM organization_notices WHERE organization_id = $1',
+      [result.organization.id],
+    );
+    assert.equal(again.rows[0]?.count, notices.rows.length);
+
+    // End-to-end: creator milik organisasi baru menerbitkan survei, lalu pengantar publiknya harus 200
+    // dengan notice yang baru diprovision (bukan notice_version_unavailable).
+    const creatorEmail = 'creator.baru@svara.local';
+    await stored.query(
+      `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, organization_id)
+       VALUES ('u_orgbaru_creator', $1, 'Kreator Baru', 'creator', 'active', $2, $3, $4)`,
+      [creatorEmail, hashPassword('SvaraDemo123!'), new Date().toISOString(), result.organization.id],
+    );
+    const creatorCookie = await login(creatorEmail);
+    const ownSurvey = data<{ survey: { id: string } }>(await call('/surveys', {
+      method: 'POST', cookie: creatorCookie, body: { title: 'Survei organisasi baru', owner_scope: 'organization' },
+    }));
+    const saved = await call(`/surveys/${ownSurvey.survey.id}`, {
+      method: 'PUT', cookie: creatorCookie, body: {
+        title: 'Survei organisasi baru',
+        purpose: 'Menguji notice organisasi yang baru dibuat.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: [{ code: 'Q1', type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`/surveys/${ownSurvey.survey.id}/publish`, { method: 'POST', cookie: creatorCookie });
+    assert.equal(published.status, 200, published.text);
+    const linkToken = data<{ publicLink: { token: string } }>(published).publicLink.token;
+    const publicIntro = await call(`/public/surveys/${linkToken}`);
+    assert.equal(publicIntro.status, 200, publicIntro.text);
+    assert.equal(data<{ notice: { version: string } }>(publicIntro).notice.version, '1.0');
+    await stored.query('UPDATE accounts SET status = $1 WHERE email = $2', ['suspended', creatorEmail]);
   } finally {
     try {
       // audit_logs menahan akun lewat account_id (login/admin), jadi bersihkan barisnya dulu.
@@ -1101,8 +1165,26 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
         result.organization.id,
         result.account.id,
       ]);
-      await stored.query('DELETE FROM accounts WHERE id = $1', [result.account.id]);
-      await stored.query('DELETE FROM organizations WHERE id = $1', [result.organization.id]);
+      await stored.query(
+        'DELETE FROM audit_logs WHERE account_id IN (SELECT id FROM accounts WHERE organization_id = $1)',
+        [result.organization.id],
+      );
+      // Baris turunan survei organisasi uji (dibuat end-to-end di atas) harus pergi sebelum organisasi.
+      const orgSurveys = 'SELECT id FROM surveys WHERE organization_id = $1';
+      await stored.query(`DELETE FROM public_links WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query(
+        `DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE version_id IN (SELECT id FROM survey_versions WHERE survey_id IN (${orgSurveys})))`,
+        [result.organization.id],
+      );
+      await stored.query(
+        `DELETE FROM questions WHERE version_id IN (SELECT id FROM survey_versions WHERE survey_id IN (${orgSurveys}))`,
+        [result.organization.id],
+      );
+      await stored.query(`DELETE FROM survey_versions WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query(`DELETE FROM survey_settings WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query('DELETE FROM surveys WHERE organization_id = $1', [result.organization.id]);
+      await stored.query('DELETE FROM organization_notices WHERE organization_id = $1', [result.organization.id]);
+      await stored.query('DELETE FROM accounts WHERE organization_id = $1', [result.organization.id]);
     } finally {
       await stored.end();
     }

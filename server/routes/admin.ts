@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
+import { legacyProfileExists, NoticeVersionUnavailable, provisionNoticesForNewOrganization } from '../notice-provisioning.ts';
 import type { AuthedRequest } from '../security.ts';
 import { hashPassword, passwordPolicyError, requireRole } from '../security.ts';
 import {
+  ApiError,
   asBoolean,
   asString,
   audit,
@@ -199,10 +201,17 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
       fail(409, 'email_taken', 'Email sudah terdaftar. Tautkan akun itu ke organisasi lewat tabel akun, atau pakai email lain.');
     }
 
+    // Notice organisasi berasal dari satu profil deployment legacy; tanpa padanan eksplisit fallback ke
+    // nama organisasi (aturan 013). Provisioning menolak bila versi notice itu tidak tersedia.
+    const noticeProfile = asString(body.notice_profile_name ?? name, 'notice_profile_name', 200).trim() || name;
+    if (!(await legacyProfileExists(noticeProfile))) {
+      fail(422, 'notice_version_unavailable', 'Tidak ada profil pemberitahuan legacy untuk organisasi ini.');
+    }
+
     const organizationId = newId('org');
     const accountId = newId('u');
     const createdAt = nowIso();
-    await withTx(async () => {
+    const provisioned = await withTx(async () => {
       await run(
         `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days,
                                     data_request_contact, cross_border_transfer, notice_version, created_at,
@@ -232,11 +241,15 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
         createdAt,
         organizationId,
       );
+      // Tanpa notice, survei publik organisasi baru gagal notice_version_unavailable; provisioning
+      // berjalan dalam transaksi yang sama agar organisasi tanpa notice tidak pernah terlihat.
+      return provisionNoticesForNewOrganization(organizationId, noticeVersion, noticeProfile);
     });
     await audit(req, 'Buat organisasi', organizationId, 'berhasil', {
       organization_id: organizationId,
       admin_account_id: accountId,
       organization_type: organizationType,
+      notice_count: provisioned.organization_notices,
     });
     res.status(201).json({
       data: {
@@ -245,6 +258,10 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
       },
     });
   } catch (error) {
+    if (error instanceof NoticeVersionUnavailable) {
+      return sendError(res, new ApiError(422, 'notice_version_unavailable',
+        `Notice versi ${error.version} belum tersedia untuk organisasi ini. Pilih notice_version yang ada.`));
+    }
     sendError(res, error);
   }
 });

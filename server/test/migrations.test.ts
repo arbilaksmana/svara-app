@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
+import { provisionOrganizationNotice } from '../notice-provisioning.ts';
 import { closeTestDatabase, databaseUrl, indexExists, resetTestDatabase, tableCount } from './test-db.ts';
 
 async function appliedVersions(): Promise<string[]> {
@@ -38,10 +39,11 @@ const VERSIONS = [
   '012_consent_context_binding.sql',
   '013_consent_notice_backfill.sql',
   '014_public_link_close_reason.sql',
+  '015_notice_source_catalog.sql',
 ];
 
-test('migrasi membuat 28 tabel aplikasi dan mencatat versi', async () => {
-  assert.equal(await tableCount(), 28);
+test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
+  assert.equal(await tableCount(), 30);
   const versions = await appliedVersions();
   assert.deepEqual(versions, VERSIONS);
 });
@@ -50,7 +52,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
   const { migrate } = await import('../migrate.ts');
   const applied = await migrate();
   assert.deepEqual(applied, []);
-  assert.equal(await tableCount(), 28);
+  assert.equal(await tableCount(), 30);
   assert.deepEqual(await appliedVersions(), VERSIONS);
 });
 
@@ -315,7 +317,10 @@ test('013 idempoten dan tidak menimpa notice yang disesuaikan pengelola', async 
 });
 
 test('organisasi baru setelah migrasi mendapat notice dari jalur provisioning yang sama', async () => {
+  // Jalur provisioning butuh katalog 015; suite ini sengaja berhenti di 013 (lihat VERSIONS.slice(10))
+  // untuk menguji backfill, jadi pindah ke schema terbaru dulu agar organisasi baru diuji seperti di produksi.
   const { migrate } = await import('../migrate.ts');
+  await migrate();
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
@@ -330,15 +335,16 @@ test('organisasi baru setelah migrasi mendapat notice dari jalur provisioning ya
       INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at)
       VALUES ('v_kedua', 's_kedua', 1, 'published', '1.0', '2026-11-22T00:00:00Z');
     `);
-    await client.query("DELETE FROM schema_migrations WHERE version = '013_consent_notice_backfill.sql'");
-    assert.deepEqual(await migrate(), ['013_consent_notice_backfill.sql']);
+
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Tidak Ada Profil'), 0, 'tanpa padanan tidak ada notice');
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Yayasan Nyata'), 1);
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Yayasan Nyata'), 0, 'provisioning ulang tidak menggandakan notice');
+    // Aturan nama+tipe 013 hanya berlaku untuk organisasi yang sudah ada; organisasi baru memakai
+    // padanan profil legacy yang dipilih eksplisit. org_real (dari 013) tidak ikut berubah.
     const notices = await client.query<{ organization_id: string; version: string; rights: string }>(
-      'SELECT organization_id, version, rights FROM organization_notices ORDER BY organization_id',
+      "SELECT organization_id, version, rights FROM organization_notices WHERE organization_id = 'org_kedua'",
     );
-    assert.deepEqual(notices.rows, [
-      { organization_id: 'org_kedua', version: '1.0', rights: 'Hak nyata' },
-      { organization_id: 'org_real', version: '1.0', rights: 'Hak disesuaikan' },
-    ]);
+    assert.deepEqual(notices.rows, [{ organization_id: 'org_kedua', version: '1.0', rights: 'Hak nyata' }]);
   } finally {
     await client.end();
   }
