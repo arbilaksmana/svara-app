@@ -107,6 +107,9 @@ interface AnswerDbRow {
 
 export const surveysRouter = Router();
 
+/** Format ekspor → isi yang boleh diterima klien. Dicatat di audit agar tujuan ekspor terbaca. */
+const EXPORT_ACCEPT: Record<ExportFormat, readonly string[]> = { csv: ['text/csv'], codebook: ['text/csv'] };
+
 function stringOrNull(value: unknown, field: string, max = 2000): string | null {
   if (value === null || value === undefined || value === '') return null;
   return asString(value, field, max);
@@ -746,7 +749,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
           }
         }
       }
-      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil');
+      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil', { format, rows: rows.length - 1, includeText, individual: false, ...target });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="kodebook-${survey.id}-v${version.number}.csv"`);
       res.send(csvDocument(rows));
@@ -791,7 +794,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
         }),
       ];
     });
-    await audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { rows: rows.length, includeText });
+    await audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { format, rows: rows.length, includeText, individual: true, ...target });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
     res.send(csvDocument([header, ...rows]));
