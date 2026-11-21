@@ -309,15 +309,20 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   }
   const link = await linkForToken(token);
   if (!link) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  let version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ? AND survey_id = ?', link.version_id, link.survey_id);
+  const version0 = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ? AND survey_id = ?', link.version_id, link.survey_id);
   const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
-  if (!version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
+  if (!version0 || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
+  let version = version0;
   const expired = link.status === 'expired' || (link.expires_at !== null && Date.parse(link.expires_at) < Date.now());
+  // Tautan yang dicabut ditolak sebelum isi survei dibaca; arsip/penutupan tetap dilayani sebagai
+  // 'closed' (tanpa pertanyaan, tanpa kiriman) seperti kontrak publik sebelumnya.
+  if (link.status === 'revoked') fail(409, 'link_revoked', 'Tautan ini sudah tidak aktif.');
   let state = baseState(version, survey);
   if (link.status === 'closed') state = 'closed';
   else if (expired) state = 'expired';
-  else if (link.status !== 'active') state = 'revoked';
-  if (survey.status === 'published' && version.status === 'closed' && !expired && (link.status === 'closed' || link.status === 'active')) {
+  // Versi terbit saat ini berstatus published, jadi sumber remap wajib sudah tidak terbit; arsip menutup
+  // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa.
+  if (version.status !== 'published' && link.status !== 'expired' && !expired && survey.status === 'published' && survey.current_version_id !== version.id) {
     // The survey's current_version_id can point to a draft instead of the published version.
     const latest = await get<VersionRow>(
       `SELECT * FROM survey_versions
