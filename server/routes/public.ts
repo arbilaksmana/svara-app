@@ -354,6 +354,12 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   };
 }
 
+// SEC-02: id versi tidak boleh bocor ke responden (juga mencakup id draf). Token buram di bawah membuat
+// klien bisa mengirim balik versi yang dirender tanpa memegang id internalnya.
+function consentVersionToken(versionId: string): string {
+  return Buffer.from(versionId, 'utf8').toString('base64url');
+}
+
 function publicPayload(context: PublicContext, includeQuestions = false) {
   return {
     kind: context.kind,
@@ -371,6 +377,7 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
       number: context.version.number,
       notice_version: context.version.notice_version,
     },
+    consent_version: consentVersionToken(context.version.id),
     questions: includeQuestions ? context.questions : [],
     options: includeQuestions ? context.options : [],
     profile: {
@@ -544,6 +551,12 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     if (context.guardianRequired && !evidenceRef) {
       fail(422, 'guardian_evidence_required', 'Bukti verifikasi wali wajib tersedia sebelum pengisian.');
     }
+    // SEC-02: persetujuan hanya sah untuk versi+notice yang benar-benar dirender pada intro. Klien mengirim
+    // consent_version dari konteks yang tampil; remap tautan lama tidak boleh diam-diam mengganti notice yang disetujui.
+    const shownToken = typeof req.body?.version_id === 'string' ? req.body.version_id.trim() : '';
+    if (!shownToken) {
+      fail(422, 'version_id_required', 'Muat ulang pengantar sebelum menyetujui pemberitahuan.');
+    }
     const consentId = newId('c');
     const existingSession = respondentSession(req);
     const session = existingSession ?? randomBytes(32).toString('base64url');
@@ -553,6 +566,11 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     const guardianStatus = context.guardianRequired ? 'self_attested' : 'not_required';
     const recordedAt = nowIso();
     await withTx(async () => {
+      // Versi diperiksa di dalam transaksi agar publish yang terjadi setelah resolve tidak lolos.
+      const shownVersionId = Buffer.from(shownToken, 'base64url').toString('utf8');
+      if (shownVersionId !== context.version.id) {
+        fail(409, 'notice_changed', 'Pemberitahuan atau versi survei berubah. Baca ulang pengantar lalu setujui.');
+      }
       await run(
         `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
           respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, public_link_id,
