@@ -62,7 +62,9 @@ async function call<T>(path: string, headers: Record<string, string> = {}, body?
 }
 
 async function issueGuardianConsent(token: string, existingCookie?: string) {
+  const context = await call<{ consent_version: string }>(token);
   const result = await call<{ consent_id: string }>(`${token}/consent`, existingCookie ? { Cookie: existingCookie } : {}, {
+    version_id: context.data!.consent_version,
     respondent_click: true,
     eligibility: true,
     guardian_evidence_ref: 'wali-sintetis',

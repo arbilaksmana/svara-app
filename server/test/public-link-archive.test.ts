@@ -100,7 +100,11 @@ async function fixture() {
 }
 
 async function consentAndSubmit(token: string, key: string) {
+  // Tautan dicabut: konteks sudah 409 tanpa data, jadi konsentrasi uji ada pada penolakan di endpoint consent.
+  const intro = (await request(`/public/surveys/${token}`)).json.data as { consent_version?: string } | undefined;
+  const versionId = intro?.consent_version ?? '';
   const consent = await request(`/public/surveys/${token}/consent`, 'POST', {
+    version_id: versionId,
     respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali uji sintetis',
   });
   if (consent.status !== 200) return consent;

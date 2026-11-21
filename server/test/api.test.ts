@@ -457,7 +457,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   );
   const token = fresh.token;
   const base = await call(`/public/surveys/${token}`);
-  const baseData = data<{ questions: unknown[]; guardianRequired: boolean; canSubmit: boolean }>(base);
+  const baseData = data<{ questions: unknown[]; guardianRequired: boolean; canSubmit: boolean; consent_version: string }>(base);
   assert.equal(baseData.questions.length, 0, 'metadata publik tidak membocorkan item sebelum consent');
   assert.equal(baseData.guardianRequired, true);
 
@@ -473,13 +473,13 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const issuedConsent = await call(`/public/surveys/${token}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
+    body: { version_id: baseData.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
   });
   const consent = data<{ consent_id: string }>(issuedConsent);
   const cookie = consentCookie(issuedConsent);
   const otherCookie = consentCookie(await call(`/public/surveys/${token}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sesi-lain' },
+    body: { version_id: baseData.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sesi-lain' },
   }));
   const form = data<{
     questions: Array<{ code: string; type: string; required: boolean; option_ids: string[] }>;
@@ -619,13 +619,13 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
 
 test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified', async () => {
   const token = 'link-umum-demo';
-  const context = data<{ guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
+  const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true, 'tautan demo wajib bermode wali');
 
   const evidenceRef = `ref-acak-${Math.random().toString(36).slice(2)}`;
   const created = await call(`/public/surveys/${token}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: evidenceRef },
+    body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: evidenceRef },
   });
   assert.equal(created.status, 201, created.text);
   const consent = data<{ consent_id: string; guardian_evidence_status: string }>(created);
@@ -735,11 +735,11 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
 
 test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai tersimpan', async () => {
   const token = 'link-umum-demo';
-  const context = data<{ guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
+  const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true);
   const issuedConsent = await call(`/public/surveys/${token}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
+    body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
   });
   const consent = data<{ consent_id: string }>(issuedConsent);
   const text = '=SUM(1,2) "kutip", baris\nbaru';
@@ -772,6 +772,7 @@ test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh k
     profile: { id: string; source: string; consent_mode: string | null; respondent_age_category: string | null };
     notice: { id: string; version: string };
     version: { notice_version: string };
+    consent_version: string;
     guardianRequired: boolean;
   }>(await call('/public/surveys/link-umum-demo'));
 
@@ -787,7 +788,7 @@ test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh k
   const consent = data<{ consent_id: string; notice_version: string; notice_source: string }>(
     await call('/public/surveys/link-umum-demo/consent', {
       method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sumber' },
+      body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sumber' },
     }),
   );
   assert.equal(consent.notice_version, '1.0');
@@ -1231,11 +1232,12 @@ test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas'
 
 test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons', async () => {
   const token = 'link-umum-perpus';
+  const { consent_version: consentVersion } = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
         method: 'POST',
-        body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-beban' },
+        body: { version_id: consentVersion, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-beban' },
       }),
     ),
   );
@@ -2129,6 +2131,92 @@ test('Kode undangan organisasi: masa berlaku, pencabutan, dan penolakan pemakaia
   }
 });
 
+test('SEC-02: consent menolak notice yang berubah sejak intro dan mencatat notice yang dirender', async () => {
+  const creator = await session('creator.a@svara.local');
+  const title = 'Survei notice berganti';
+  const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+    method: 'POST', cookie: creator, body: { title },
+  }));
+  const surveyPath = `/surveys/${survey.id}`;
+  const save = async (questionCode: string) => {
+    const saved = await call(surveyPath, {
+      method: 'PUT', cookie: creator, body: {
+        title,
+        purpose: 'Menguji pemberitahuan yang berubah di antara intro dan persetujuan.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: [{ code: questionCode, type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`${surveyPath}/publish`, { method: 'POST', cookie: creator });
+    assert.equal(published.status, 200, published.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(published);
+  };
+
+  const v1 = await save('Q1');
+  const introToken = v1.publicLink.token;
+  const intro = data<{ consent_version: string; version: { notice_version: string } }>(await call(`/public/surveys/${introToken}`));
+
+  const countConsents = async () => {
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const result = await client.query<{ count: string }>('SELECT COUNT(*) AS count FROM consent_records WHERE survey_id = $1', [survey.id]);
+      return Number(result.rows[0]!.count);
+    } finally {
+      await client.end();
+    }
+  };
+  const before = await countConsents();
+
+  const v2 = await save('Q2');
+  assert.notEqual(v2.version.id, v1.version.id);
+  // Versi v2 memakai notice platform aktif yang sama dengan v1, jadi cacatnya hanya terlihat dari version_id:
+  // klien tidak boleh menyetujui versi lain yang tidak pernah ia render.
+  const stale = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { version_id: intro.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(stale.status, 409, stale.text);
+  assert.equal((stale.json as { code: string }).code, 'notice_changed');
+  assert.equal(await countConsents(), before, 'consent basi tidak boleh tercatat');
+
+  const withoutVersion = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(withoutVersion.status, 422, withoutVersion.text);
+  assert.equal((withoutVersion.json as { code: string }).code, 'version_id_required');
+  assert.equal(await countConsents(), before);
+
+  const reloaded = data<{ consent_version: string }>(await call(`/public/surveys/${introToken}`));
+  assert.notEqual(reloaded.consent_version, intro.consent_version, 'token lama meremap ke versi terbit terbaru');
+  const fresh = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { version_id: reloaded.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(fresh.status, 201, fresh.text);
+  const consentId = data<{ consent_id: string }>(fresh).consent_id;
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const recorded = await client.query<{ version_id: string; notice_id: string; notice_version: string }>(
+      'SELECT c.version_id, n.notice_id, n.notice_version FROM consent_records c JOIN consent_notice_versions n ON n.consent_id = c.id WHERE c.id = $1',
+      [consentId],
+    );
+    assert.equal(recorded.rows[0]?.version_id, v2.version.id);
+    const noticeVersion = recorded.rows[0]?.notice_version;
+    assert.match(noticeVersion ?? '', /^\d+\.\d+$/u);
+    assert.equal(recorded.rows[0]?.notice_id, `pn_${noticeVersion.replace(".", "_")}`);
+    const { notice } = data<{ notice: { id: string; version: string } }>(await call(`/public/surveys/${introToken}`));
+    assert.deepEqual(
+      { id: recorded.rows[0]?.notice_id, version: noticeVersion },
+      { id: notice.id, version: notice.version },
+    );
+  } finally {
+    await client.end();
+  }
+});
+
 test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => {
   const cookie = await session('creator.a@svara.local');
   async function createSurvey(title: string) {
@@ -2155,8 +2243,9 @@ test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => 
   const title = 'Survei riwayat tautan';
   const path = await createSurvey(title);
   const v1 = await publish(path, title, 'Q1');
+  const v1Intro = data<{ consent_version: string }>(await call(`/public/surveys/${v1.publicLink.token}`));
   const oldConsent = await call(`/public/surveys/${v1.publicLink.token}/consent`, {
-    method: 'POST', body: { respondent_click: true, eligibility: true },
+    method: 'POST', body: { version_id: v1Intro.consent_version, respondent_click: true, eligibility: true },
   });
   assert.equal(oldConsent.status, 201, oldConsent.text);
   const otherTitle = 'Survei kedua';
@@ -2170,7 +2259,7 @@ test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => 
   const currentPath = `/public/surveys/${v2.publicLink.token}`;
   const key = 'kiriman-tautan-v1-0001';
   let receiptRequest: { path: string; cookie: string } | undefined;
-  type LinkContext = { state: string; canSubmit: boolean; version: { number: number } };
+  type LinkContext = { state: string; canSubmit: boolean; consent_version: string; version: { number: number } };
 
   await t.test('token v1 menyajikan v2 tanpa redirect HTTP dan dapat dipakai mengirim', async () => {
     const response = await call(oldPath, { redirect: 'manual' });
@@ -2186,7 +2275,7 @@ test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => 
     assert.equal(stale.json?.code, 'consent_context_mismatch');
 
     const issued = await call(`${oldPath}/consent`, {
-      method: 'POST', body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-versi' },
+      method: 'POST', body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-versi' },
     });
     assert.equal(issued.status, 201, issued.text);
     const { consent_id } = data<{ consent_id: string }>(issued);

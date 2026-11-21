@@ -113,10 +113,19 @@ function storedReceipt(): ReceiptData | null {
   }
 }
 
-function usePublicPage(token: string, view: 'intro' | 'form' | 'review' = 'intro'): { token: string; ctx: PublicContextData | null; loading: boolean; loadError: Error | null } {
+interface PublicPage {
+  token: string;
+  ctx: PublicContextData | null;
+  loading: boolean;
+  loadError: Error | null;
+  reload: () => void;
+}
+
+function usePublicPage(token: string, view: 'intro' | 'form' | 'review' = 'intro'): PublicPage {
   const [ctx, setCtx] = useState<PublicContextData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,9 +149,9 @@ function usePublicPage(token: string, view: 'intro' | 'form' | 'review' = 'intro
     return () => {
       cancelled = true;
     };
-  }, [token, view]);
+  }, [token, view, reloadCount]);
 
-  return { token, ctx, loading, loadError };
+  return { token, ctx, loading, loadError, reload: () => setReloadCount((count) => count + 1) };
 }
 
 function isInvitationUsed(ctx: PublicContextData): boolean {
@@ -226,7 +235,16 @@ function MissingToken() {
 /* ---------------- Pengantar + notice ---------------- */
 
 export function IntroPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token);
+  const { ctx, loading, loadError, reload } = usePublicPage(token);
+  // Muat ulang intro membatalkan konteks lama: kosongkan pilihan agar responden menyetujui ulang notice yang tampil.
+  const consentVersion = ctx?.consent_version;
+  useEffect(() => {
+    setConsent(false);
+    setEligibility(false);
+    setGuardianEvidence(false);
+    setGuardianRef('');
+    setConsentError(null);
+  }, [consentVersion]);
   const { state } = useScreenState('respondent-intro');
   const router = useRouter();
   const [consent, setConsent] = useState(false);
@@ -355,12 +373,17 @@ export function IntroPage({ token }: { token: string }) {
               onClick={() => {
                 setBusy(true);
                 setConsentError(null);
-                void createConsent(token, guardianRequired ? guardianRef.trim() : null)
+                void createConsent(token, ctx.consent_version, guardianRequired ? guardianRef.trim() : null)
                   .then((record) => {
                     writeConsent(token, record.consent_id, guardianRequired, guardianRequired ? guardianRef.trim() : null, record.basis, record.notice_version);
                     router.push(ROUTES.respondentForm(token));
                   })
                   .catch((error: unknown) => {
+                    // SEC-02: versi/notice berganti di antara intro dan klik setuju — muat ulang intro tanpa pesan teknis.
+                    if (error instanceof ApiError && error.code === 'notice_changed') {
+                      reload();
+                      return;
+                    }
                     setConsentError(
                       error instanceof ApiError ? error.message : 'Koneksi gagal. Coba lagi sebelum mengisi formulir.',
                     );

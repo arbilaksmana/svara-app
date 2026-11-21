@@ -81,7 +81,9 @@ async function fixture(published = true) {
 }
 
 async function submit(token: string, key: string) {
+  const context = await call<{ consent_version: string }>(`/public/surveys/${token}`);
   const consent = await call<{ consent_id: string }>(`/public/surveys/${token}/consent`, 'POST', {
+    version_id: context.data.consent_version,
     respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali uji sintetis',
   }, {});
   await call(`/public/surveys/${token}/responses`, 'POST', {

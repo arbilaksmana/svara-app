@@ -380,6 +380,8 @@ export interface PublicContextData {
   retryOnly?: true;
   survey: Pick<Survey, 'title' | 'purpose' | 'object_label' | 'instructions'>;
   version: Pick<SurveyVersion, 'number' | 'notice_version'>;
+  /** Token buram versi yang dirender; wajib dikirim balik saat mencatat persetujuan. */
+  consent_version: string;
   questions: Omit<Question, 'version_id'>[];
   options: QuestionOption[];
   profile: DeploymentProfile;
@@ -425,11 +427,17 @@ export interface ConsentRecord {
 
 export async function createConsent(
   token: string,
+  versionId: string,
   guardianEvidenceRef: string | null,
 ): Promise<ConsentRecord> {
   return call<ConsentRecord>(`/public/surveys/${encodeURIComponent(token)}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: guardianEvidenceRef ?? undefined },
+    body: {
+      version_id: versionId,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: guardianEvidenceRef ?? undefined,
+    },
   });
 }
 

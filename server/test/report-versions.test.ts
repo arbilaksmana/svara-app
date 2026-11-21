@@ -124,9 +124,11 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
     return (result.body as Payload).data!;
   };
   const prepareSubmission = async (token: string, answers: Record<string, number>, key: string) => {
+    const context = await call(`/public/surveys/${token}`);
+    const versionId = (context.body as { data?: { consent_version?: string } }).data?.consent_version ?? '';
     const consent = await call(`/public/surveys/${token}/consent`, {
       method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali kelas 9A' },
+      body: { version_id: versionId, respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali kelas 9A' },
     });
     assert.equal(consent.status < 300, true, consent.text);
     const consentId = (consent.body as { data?: { consent_id?: string } }).data?.consent_id ?? '';
