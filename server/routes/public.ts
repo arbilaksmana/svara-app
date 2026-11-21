@@ -319,8 +319,10 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   // 'closed' (tanpa pertanyaan, tanpa kiriman) seperti kontrak publik sebelumnya.
   if (link.status === 'revoked') fail(409, 'link_revoked', 'Tautan ini sudah tidak aktif.');
   let state = baseState(version, survey);
-  if (link.status === 'closed') state = 'closed';
-  else if (expired) state = 'expired';
+  // Expiry menang atas status baris: tautan yang lewat expires_at selalu 'expired' walau barisnya
+  // 'closed'/'active', agar responden tidak mencoba mengisi tautan yang sudah tidak berlaku.
+  if (expired) state = 'expired';
+  else if (link.status === 'closed') state = 'closed';
   // Versi terbit saat ini berstatus published, jadi sumber remap wajib sudah tidak terbit; arsip menutup
   // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa.
   if (version.status !== 'published' && link.status !== 'expired' && !expired && survey.status === 'published' && survey.current_version_id !== version.id) {

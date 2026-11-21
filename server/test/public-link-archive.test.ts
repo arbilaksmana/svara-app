@@ -5,7 +5,7 @@ import { after, before, test } from 'node:test';
 import { closeTestDatabase, resetTestDatabase } from './test-db.ts';
 import type { QuestionPayload, SurveyPayload } from '../../src/lib/api.ts';
 import { app } from '../app.ts';
-import { all, get } from '../db.ts';
+import { all, get, run } from '../db.ts';
 import { seedDemoIfEmpty } from '../seed-data.ts';
 
 process.env.NODE_ENV = 'test';
@@ -150,6 +150,20 @@ test('Tautan expired tetap expired melewati arsip dan terbit ulang', async () =>
   assert.equal(data.canSubmit, false);
   assert.deepEqual(data.questions, []);
   assert.deepEqual(await f.responses(), []);
+});
+
+test('Tautan dengan expires_at lampau selalu expired, apa pun status barisnya', async () => {
+  const f = await fixture();
+  const { token } = f.first.publicLink;
+  const past = new Date(Date.now() - 60_000).toISOString();
+  for (const status of ['active', 'closed', 'used']) {
+    await run('UPDATE public_links SET status = ?, expires_at = ? WHERE survey_id = ? AND version_id = ?', status, past, f.id, f.first.version.id);
+    const response = await request(`/public/surveys/${token}`);
+    assert.equal(response.status, 200, `${status}: ${JSON.stringify(response.json)}`);
+    const data = response.json.data as { state: string; canSubmit: boolean };
+    assert.equal(data.state, 'expired', `${status}: expiry harus menang atas status baris`);
+    assert.equal(data.canSubmit, false, status);
+  }
 });
 
 test('Tautan yang ditutup oleh publish versi baru tetap menyajikan versi terbaru; arsip mematikannya', async () => {
