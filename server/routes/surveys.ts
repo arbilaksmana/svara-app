@@ -9,6 +9,7 @@ import {
   asString,
   audit,
   canExport,
+  canExportIndividual,
   canReadAggregate,
   canReadFreeText,
   canReadIndividual,
@@ -29,6 +30,8 @@ import {
 import { summaryFor } from '../summary.ts';
 
 type QuestionType = 'likert' | 'short_text' | 'single_choice';
+
+type ExportFormat = 'csv' | 'codebook';
 
 interface VersionDbRow {
   id: string;
@@ -698,14 +701,32 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireSurvey(req.params.id);
+    const format: ExportFormat = req.query.format === 'codebook' ? 'codebook' : 'csv';
     if (!(await canExport(req.account, survey))) {
-      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', { format: req.query.format ?? 'csv' });
+      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
+        format,
+        reason: 'forbidden_export',
+        accepts: [...EXPORT_ACCEPT[format]],
+      });
       fail(403, 'forbidden_export', 'Akun ini tidak memiliki izin ekspor pada survei ini.');
     }
+    if (format === 'csv' && !(await canExportIndividual(req.account, survey))) {
+      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
+        format,
+        reason: 'forbidden_export_individual',
+        accepts: [...EXPORT_ACCEPT[format]],
+      });
+      fail(
+        403,
+        'forbidden_export_individual',
+        'Ekspor CSV memuat data per responden; izin membaca jawaban individual atau pengaturan survei menolaknya. Gunakan format=codebook untuk agregat.',
+      );
+    }
+    // Target ekspor (klien yang meminta) dicatat di setiap hasil agar log audit menjawab "ke mana data ini pergi".
+    const target = { destination: 'download', accepts: [...EXPORT_ACCEPT[format]] };
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
     const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
-    const format = req.query.format === 'codebook' ? 'codebook' : 'csv';
     const questions = await questionRows(version.id);
     const includeText = await canReadFreeText(req.account, survey);
     if (format === 'codebook') {

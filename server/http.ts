@@ -173,9 +173,15 @@ export async function canReadIndividual(account: AccountRow, survey: SurveyRow):
   return Boolean(grant?.can_read_individual && settings?.allow_individual);
 }
 
+/** Izin ekspor apa pun (CSV per-responden maupun kodebook) tetap butuh grant `can_export`. */
 export async function canExport(account: AccountRow, survey: SurveyRow): Promise<boolean> {
   if (canManageSurvey(account, survey)) return true;
   return Boolean((await grantFor(account.id, survey.id))?.can_export);
+}
+
+/** Ekspor CSV memuat baris per-responden, jadi izinnya tidak boleh lebih longgar dari canReadIndividual. */
+export async function canExportIndividual(account: AccountRow, survey: SurveyRow): Promise<boolean> {
+  return (await canExport(account, survey)) && (await canReadIndividual(account, survey));
 }
 
 export async function canReadFreeText(account: AccountRow, survey: SurveyRow): Promise<boolean> {
