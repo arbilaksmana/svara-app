@@ -456,33 +456,53 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
   }
 });
 
+async function closePublishedVersions(surveyId: string, now: string): Promise<Array<{ number: number }>> {
+  return all<{ number: number }>(
+    `WITH closed_versions AS (
+       UPDATE survey_versions SET status = 'closed', closed_at = ?
+       WHERE survey_id = ? AND status = 'published'
+       RETURNING id, number
+     ), closed_links AS (
+       UPDATE public_links SET status = 'closed'
+       WHERE version_id IN (SELECT id FROM closed_versions) AND status = 'active'
+         AND (expires_at IS NULL OR expires_at::timestamptz >= ?::timestamptz)
+     )
+     SELECT number FROM closed_versions ORDER BY number`,
+    now,
+    surveyId,
+    now,
+  );
+}
+
 surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireManageSurvey(req.account, req.params.id);
-    const { draft } = await currentOrDraft(survey.id);
-    if (!draft) fail(409, 'no_draft', 'Tidak ada draf untuk diterbitkan.');
-    const questionRowsForDraft = await questionRows(draft.id);
-    const questions: QuestionInput[] = [];
-    for (const question of questionRowsForDraft) {
-      questions.push({
-        code: question.code,
-        type: question.type,
-        required: question.required === 1,
-        section: question.section,
-        label: question.label,
-        hint: question.hint,
-        group_code: question.group_code,
-        dimension_code: question.dimension_code,
-        direction: question.direction,
-        options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
-      });
-    }
-    const errors = validateForPublish(survey.title, survey.purpose, questions);
-    if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
-    const now = nowIso();
-    let publicToken = '';
-    await withTx(async () => {
+    const { draft, publicToken } = await withTx(async () => {
+      // Serialkan transisi survei tanpa menghalangi FK kiriman ke survei.
+      await get('SELECT id FROM surveys WHERE id = ? FOR NO KEY UPDATE', survey.id);
+      const { draft } = await currentOrDraft(survey.id);
+      if (!draft) fail(409, 'no_draft', 'Tidak ada draf untuk diterbitkan.');
+      const questionRowsForDraft = await questionRows(draft.id);
+      const questions: QuestionInput[] = [];
+      for (const question of questionRowsForDraft) {
+        questions.push({
+          code: question.code,
+          type: question.type,
+          required: question.required === 1,
+          section: question.section,
+          label: question.label,
+          hint: question.hint,
+          group_code: question.group_code,
+          dimension_code: question.dimension_code,
+          direction: question.direction,
+          options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
+        });
+      }
+      const errors = validateForPublish(survey.title, survey.purpose, questions);
+      if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
+      const now = nowIso();
+      await closePublishedVersions(survey.id, now);
       await run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
       await run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
       const existing = await get<{ token: string }>(
@@ -490,10 +510,8 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
         survey.id,
         draft.id,
       );
-      if (existing) {
-        publicToken = existing.token;
-      } else {
-        publicToken = `pl_${randomBytes(12).toString('base64url')}`;
+      const publicToken = existing?.token ?? `pl_${randomBytes(12).toString('base64url')}`;
+      if (!existing) {
         await run(
           `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?)`,
@@ -506,6 +524,7 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
           now,
         );
       }
+      return { draft, publicToken };
     });
     await audit(req, 'Publikasi versi', `${survey.id} · v${draft.number}`, 'berhasil');
     res.json({
@@ -524,15 +543,15 @@ surveysRouter.post('/surveys/:id/close', async (req: AuthedRequest, res: Respons
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireManageSurvey(req.account, req.params.id);
-    const published = (await versionRows(survey.id)).find((version) => version.status === 'published');
-    if (!published) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
-    const now = nowIso();
-    await withTx(async () => {
-      await run('UPDATE survey_versions SET status = ?, closed_at = ? WHERE id = ?', 'closed', now, published.id);
+    const published = await withTx(async () => {
+      await get('SELECT id FROM surveys WHERE id = ? FOR NO KEY UPDATE', survey.id);
+      const now = nowIso();
+      const closedVersions = await closePublishedVersions(survey.id, now);
+      if (closedVersions.length === 0) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
       await run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'closed', now, survey.id);
-      await run("UPDATE public_links SET status = 'closed' WHERE version_id = ?", published.id);
+      return closedVersions;
     });
-    await audit(req, 'Tutup versi', `${survey.id} · v${published.number}`, 'berhasil');
+    await audit(req, 'Tutup versi', `${survey.id} · ${published.map(({ number }) => `v${number}`).join(', ')}`, 'berhasil');
     res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);

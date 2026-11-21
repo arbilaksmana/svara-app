@@ -274,9 +274,7 @@ async function linkForToken(token: string): Promise<LinkRow | undefined> {
 }
 
 function baseState(version: VersionRow, survey: SurveyRow): 'active' | 'closed' | 'expired' | 'revoked' | 'used' {
-  if (survey.status === 'archived') return 'closed';
-  if (version.status === 'closed' || version.status === 'archived') return 'closed';
-  if (version.status !== 'published') return 'closed';
+  if (survey.status !== 'published' || version.status !== 'published') return 'closed';
   return 'active';
 }
 
@@ -707,7 +705,8 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
       const responseId = newId('r');
       const respondentId = newId('p');
       const now = nowIso();
-      const freshVersion = await get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ?', context.version.id);
+      // Jangan biarkan penutupan versi commit di antara pengecekan status dan penyimpanan respons.
+      const freshVersion = await get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ? FOR SHARE', context.version.id);
       if (freshVersion?.status !== 'published') fail(409, 'submission_closed', 'Versi ini sudah ditutup.');
       await run(
         'INSERT INTO respondents (id, source, external_ref, created_at) VALUES (?, ?, NULL, ?)',
