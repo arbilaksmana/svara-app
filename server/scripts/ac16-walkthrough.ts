@@ -135,7 +135,6 @@ try {
       }),
     );
     const form = data<{
-      version: { id: string };
       questions: Array<{ id: string; code: string }>;
       options: Array<{ id: string; question_id: string; value: number }>;
     }>(await call(`/public/surveys/${token}/form?consent_id=${encodeURIComponent(consent.consent_id)}`));
@@ -150,7 +149,6 @@ try {
         key: `ac16-demo-${index + 1}-abcdef`,
         body: {
           consent_id: consent.consent_id,
-          version_id: form.version.id,
           answers: [
             { question_code: 'AD01', option_id: optionId('AD01', pattern.AD01) },
             { question_code: 'TS01', option_id: optionId('TS01', pattern.TS01) },

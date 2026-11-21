@@ -30,7 +30,7 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 | Area | Isi |
 | --- | --- |
 | Instrumen | Editor pertanyaan Likert, pilihan tunggal, dan isian singkat; kode item unik; validasi sebelum simpan dan sebelum terbit |
-| Versi | Terbitkan, duplikasi, tutup, dan arsipkan versi; tautan selalu menunjuk satu versi tetap |
+| Versi | Hanya versi terbit terbaru yang menerima kiriman. Tautan umum versi sebelumnya membuka versi terbit terbaru pada survei yang sama |
 | Distribusi | Tautan umum dan undangan individual berkode, dengan status, masa berlaku, dan pencabutan |
 | Pengumpulan | Persetujuan tercatat di server, kiriman idempoten, bukti terima yang dapat dibuka kembali |
 | Hasil | Agregat per versi, ekspor CSV, dan codebook per versi |
@@ -76,10 +76,10 @@ Tanpa `SEED_DEMO=1` basis data tetap kosong dan admin pertama dibuat lewat `pnpm
 ## Alur pemakaian
 
 1. Creator menyusun draf instrumen: judul, tujuan, petunjuk, pertanyaan, opsi, dan kode item.
-2. Draf diterbitkan menjadi versi tetap. Tautan umum dan undangan menunjuk versi itu.
+2. Draf diterbitkan menjadi versi tetap. Tautan umum lama tetap dapat membuka versi terbit terbaru; undangan individual tetap terikat pada versinya.
 3. Responden membuka tautan, membaca pemberitahuan, memberi persetujuan, mengisi, lalu menerima bukti kirim.
 4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah.
-5. Perubahan berikutnya membuat versi baru; versi lama tetap terbaca dan dapat ditutup.
+5. Publikasi menutup versi terbit sebelumnya. Jika tidak ada versi terbit, tautan umum tidak menerima kiriman baru.
 
 ## Arsitektur
 

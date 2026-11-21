@@ -32,7 +32,6 @@ import { useToast } from '../components/Toast';
 import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
 import { useDraft } from '../lib/draft';
-import type { Question } from '../lib/types';
 import {
   ApiError,
   createConsent,
@@ -90,8 +89,8 @@ function writeConsent(
   return consent;
 }
 
-function submissionKey(token: string, versionId: string, retryOnly: boolean): string | null {
-  const key = `${IDEMPOTENCY_PREFIX}${token}.${versionId}`;
+function submissionKey(token: string, versionNumber: number, retryOnly: boolean): string | null {
+  const key = `${IDEMPOTENCY_PREFIX}${token}.${versionNumber}`;
   try {
     const existing = sessionStorage.getItem(key);
     if (existing) return existing;
@@ -261,9 +260,6 @@ export function IntroPage({ token }: { token: string }) {
               <Badge tone={isPublicLink ? 'neutral' : 'info'}>{isPublicLink ? 'Tautan umum' : 'Undangan individual'}</Badge>
               <Badge tone={guardianRequired ? 'warning' : 'neutral'}>{guardianRequired ? 'Mode wali' : 'Persetujuan diri'}</Badge>
             </div>
-            <p className="text-body-sm text-ink">
-              Formulir ini merujuk ke <Code>{version.id}</Code>. Versi yang ditampilkan tidak berubah selama halaman terbuka.
-            </p>
             <p className="text-body-sm text-ink"><span className="font-bold">Tujuan survei:</span> {survey.purpose}</p>
             <p className="text-caption text-muted">Objek: {survey.object_label}</p>
           </Panel>
@@ -394,7 +390,7 @@ function QuestionField({
   highlightEmpty,
   options,
 }: {
-  q: Question;
+  q: PublicContextData['questions'][number];
   token: string;
   value: { optionId: string | null; text: string };
   setOption: (code: string, optionId: string) => void;
@@ -466,7 +462,7 @@ export function FormPage({ token }: { token: string }) {
   const { state, link } = useScreenState('respondent-form');
   const router = useRouter();
   const items = ctx ? [...ctx.questions].sort((a, b) => a.order - b.order) : [];
-  const { draft, setOption, setText } = useDraft(token, items.map((q) => q.code));
+  const { draft, setOption, setText } = useDraft(`${token}.${ctx?.version.number ?? ''}`, items.map((q) => q.code));
   const [checked, setChecked] = useState(false);
   const summaryRef = useRef<HTMLDivElement>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
@@ -516,13 +512,6 @@ export function FormPage({ token }: { token: string }) {
           <Progress step={2} />
           
           {usedInvite && <Banner tone="warning" title="Undangan individual sudah dipakai">Satu undangan hanya menerima satu respons final. Buka tautan bukti bila perlu memeriksa pengiriman sebelumnya.</Banner>}
-
-          <Panel className="flex flex-col gap-2">
-            <p className="text-body-sm font-bold text-ink">Versi 1 terkunci untuk formulir ini</p>
-            <p className="text-body-sm text-muted">
-              Bila versi baru diterbitkan, formulir yang sudah terbuka tetap mengirim ke versi <Code>{version.id}</Code> selama penerimaannya masih terbuka.
-            </p>
-          </Panel>
 
           {effectiveState === 'validation' && (
             <ValidationSummary items={['Item wajib kosong harus diisi.', 'Opsi yang dipilih harus berasal dari versi formulir ini.']} />
@@ -612,7 +601,7 @@ export function ReviewPage({ token }: { token: string }) {
   const { state, link } = useScreenState('respondent-review');
   const router = useRouter();
   const items = ctx ? [...ctx.questions].sort((a, b) => a.order - b.order) : [];
-  const { draft } = useDraft(token, items.map((q) => q.code));
+  const { draft } = useDraft(`${token}.${ctx?.version.number ?? ''}`, items.map((q) => q.code));
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
@@ -656,7 +645,7 @@ export function ReviewPage({ token }: { token: string }) {
       setSubmitError('Persetujuan tidak ditemukan. Buka kembali pengantar dan lengkapi persetujuan.');
       return;
     }
-    const key = submissionKey(token, version.id, retryOnly);
+    const key = submissionKey(token, version.number, retryOnly);
     if (!key) {
       setSubmitError('Kunci pengiriman sebelumnya tidak tersedia di sesi ini.');
       return;
@@ -716,7 +705,7 @@ export function ReviewPage({ token }: { token: string }) {
           <Card className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SectionTitle>{survey.title}</SectionTitle>
-              <Badge tone="info">Versi {version.number} · <Code>{version.id}</Code></Badge>
+              <Badge tone="info">Versi {version.number}</Badge>
             </div>
             <Divider />
             <div className="hidden sm:block">
@@ -877,7 +866,7 @@ export function ReceiptPage({ token }: { token: string }) {
                 <div className="hidden sm:block">
                   <Table head={['Field', 'Nilai']}>
                     <tr><Th>ID bukti</Th><Td><Code>{receipt.response_id}</Code></Td></tr>
-                    <tr><Th>Versi</Th><Td><Code>{receipt.version_id}</Code> · versi {receipt.version_number}</Td></tr>
+                    <tr><Th>Versi</Th><Td>{receipt.version_number}</Td></tr>
                     <tr><Th>Waktu server</Th><Td>{formatWIB(receipt.submitted_at)}</Td></tr>
                     <tr><Th>Status</Th><Td>{receipt.status}</Td></tr>
                     <tr><Th>Kunci pengiriman</Th><Td><Code>{receipt.idempotency_key}</Code></Td></tr>
@@ -885,7 +874,7 @@ export function ReceiptPage({ token }: { token: string }) {
                 </div>
                 <dl className="grid gap-3 sm:hidden">
                   <div><dt className="text-caption font-bold text-muted">ID bukti</dt><dd className="mt-1 break-all"><Code>{receipt.response_id}</Code></dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Versi</dt><dd className="mt-1"><Code>{receipt.version_id}</Code> · versi {receipt.version_number}</dd></div>
+                  <div><dt className="text-caption font-bold text-muted">Versi</dt><dd className="mt-1">{receipt.version_number}</dd></div>
                   <div><dt className="text-caption font-bold text-muted">Waktu server</dt><dd className="mt-1">{formatWIB(receipt.submitted_at)}</dd></div>
                   <div><dt className="text-caption font-bold text-muted">Status</dt><dd className="mt-1">{receipt.status}</dd></div>
                   <div><dt className="text-caption font-bold text-muted">Kunci pengiriman</dt><dd className="mt-1 break-all"><Code>{receipt.idempotency_key}</Code></dd></div>

@@ -365,14 +365,13 @@ export interface PublicContextData {
   canSubmit: boolean;
   guardianRequired: boolean;
   retryOnly?: true;
-  survey: Survey;
-  version: SurveyVersion;
-  questions: Question[];
+  survey: Pick<Survey, 'title' | 'purpose' | 'object_label' | 'instructions'>;
+  version: Pick<SurveyVersion, 'number' | 'notice_version'>;
+  questions: Omit<Question, 'version_id'>[];
   options: QuestionOption[];
   profile: DeploymentProfile;
   notice: Notice;
-  invitation: (Invitation & { token?: string }) | null;
-  assignment: { id: string; survey_id: string; version_id: string; label: string; participant_ref: string } | null;
+  invitation: Pick<Invitation, 'code' | 'status'> | null;
 }
 
 export async function publicContext(token: string): Promise<PublicContextData> {
@@ -430,7 +429,6 @@ export interface AnswerPayload {
 export interface ReceiptData {
   response_id: string;
   survey_id: string;
-  version_id: string;
   version_number: number;
   submitted_at: string;
   status: string;

@@ -29,6 +29,7 @@ async function call(
     idempotencyKey?: string;
     headers?: Record<string, string>;
     auth?: string;
+    redirect?: RequestRedirect;
   } = {},
 ): Promise<Result> {
   const headers = new Headers({ 'X-Svara-Client': 'web', Accept: 'application/json' });
@@ -41,6 +42,7 @@ async function call(
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    redirect: options.redirect,
   });
   const bytes = new Uint8Array(await response.arrayBuffer());
   const text = new TextDecoder().decode(bytes);
@@ -386,7 +388,7 @@ test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi ta
   assert.equal((copySummary.json as { data: { total: number } }).data.total, 0);
 });
 
-test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melayani versi lama', async () => {
+test('AC02/AC04: draf baru tidak menggantikan versi yang masih terbit pada tautan umum', async () => {
   const cookie = await session('creator.a@svara.local');
   const detail = data<{
     survey: { id: string; current_version_id: string };
@@ -440,7 +442,8 @@ test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melaya
 
   const legacy = await call('/public/surveys/link-umum-demo');
   assert.equal(legacy.status, 200);
-  assert.equal((legacy.json as { data: { version: { id: string } } }).data.version.id, published.id);
+  assert.equal(data<{ version: { number: number } }>(legacy).version.number, published.number);
+  assert.ok(!legacy.text.includes(draft.id), 'ID draf tidak dikirim ke responden');
 });
 
 test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons, retry bukti sama', async () => {
@@ -732,7 +735,7 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
 
 test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai tersimpan', async () => {
   const token = 'link-umum-demo';
-  const context = data<{ version: { id: string }; guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
+  const context = data<{ guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true);
   const issuedConsent = await call(`/public/surveys/${token}/consent`, {
     method: 'POST',
@@ -746,7 +749,6 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
     idempotencyKey: 'kunci-formula-0001',
     body: {
       consent_id: consent.consent_id,
-      version_id: context.version.id,
       answers: [
         { question_code: 'AD01', option_id: 'q_ad01_opt3' },
         { question_code: 'TS01', option_id: 'q_ts01_opt2' },
@@ -1229,7 +1231,6 @@ test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas'
 
 test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons', async () => {
   const token = 'link-umum-perpus';
-  const context = data<{ version: { id: string } }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
@@ -1248,7 +1249,6 @@ test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan 
         idempotencyKey: `beban-kunci-${index}-abcdef`,
         body: {
           consent_id: consentId,
-          version_id: context.version.id,
           answers: [
             { question_code: 'P01', option_id: 'q_p01_opt3' },
             { question_code: 'P02', option_id: 'q_p02_opt2' },
@@ -2127,4 +2127,130 @@ test('Kode undangan organisasi: masa berlaku, pencabutan, dan penolakan pemakaia
     await db.query('DELETE FROM organization_invitations WHERE id = $1', ['oi_uji_organisasi_lain']);
     await db.end();
   }
+});
+
+test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => {
+  const cookie = await session('creator.a@svara.local');
+  async function createSurvey(title: string) {
+    const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+      method: 'POST', cookie, body: { title },
+    }));
+    return `/surveys/${survey.id}`;
+  }
+
+  async function publish(path: string, title: string, questionCode: string) {
+    const saved = await call(path, {
+      method: 'PUT', cookie, body: {
+        title,
+        purpose: 'Menguji perubahan instrumen.',
+        questions: [{ code: questionCode, type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(await call(`${path}/publish`, {
+      method: 'POST', cookie,
+    }));
+  }
+
+  const title = 'Survei riwayat tautan';
+  const path = await createSurvey(title);
+  const v1 = await publish(path, title, 'Q1');
+  const oldConsent = await call(`/public/surveys/${v1.publicLink.token}/consent`, {
+    method: 'POST', body: { respondent_click: true, eligibility: true },
+  });
+  assert.equal(oldConsent.status, 201, oldConsent.text);
+  const otherTitle = 'Survei kedua';
+  const otherSurvey = await createSurvey(otherTitle);
+  await publish(otherSurvey, otherTitle, 'OTHER1');
+  await publish(otherSurvey, otherTitle, 'OTHER2');
+  const other = await publish(otherSurvey, otherTitle, 'OTHER3');
+  const otherPath = `/public/surveys/${other.publicLink.token}`;
+  const v2 = await publish(path, title, 'Q2');
+  const oldPath = `/public/surveys/${v1.publicLink.token}`;
+  const currentPath = `/public/surveys/${v2.publicLink.token}`;
+  const key = 'kiriman-tautan-v1-0001';
+  let receiptRequest: { path: string; cookie: string } | undefined;
+  type LinkContext = { state: string; canSubmit: boolean; version: { number: number } };
+
+  await t.test('token v1 menyajikan v2 tanpa redirect HTTP dan dapat dipakai mengirim', async () => {
+    const response = await call(oldPath, { redirect: 'manual' });
+    assert.equal(response.status, 200, response.text);
+    const context = data<LinkContext>(response);
+    assert.equal(context.version.number, 2, 'token v1 harus menyajikan konteks v2');
+    assert.equal(context.state, 'active');
+    assert.equal(context.canSubmit, true);
+    assert.ok(!response.text.includes(v1.version.id) && !response.text.includes(v2.version.id));
+    const { consent_id: oldConsentId } = data<{ consent_id: string }>(oldConsent);
+    const stale = await call(`${oldPath}/form?consent_id=${oldConsentId}`, { cookie: consentCookie(oldConsent) });
+    assert.equal(stale.status, 409, stale.text);
+    assert.equal(stale.json?.code, 'consent_context_mismatch');
+
+    const issued = await call(`${oldPath}/consent`, {
+      method: 'POST', body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-versi' },
+    });
+    assert.equal(issued.status, 201, issued.text);
+    const { consent_id } = data<{ consent_id: string }>(issued);
+    const respondent = consentCookie(issued);
+    const formResponse = await call(`${oldPath}/form?consent_id=${consent_id}`, { cookie: respondent });
+    assert.ok(!formResponse.text.includes(v2.version.id));
+    const form = data<{ questions: Array<{ code: string }> }>(formResponse);
+    assert.deepEqual(form.questions.map(({ code }) => code), ['Q2']);
+
+    const submitted = await call(`${oldPath}/responses`, {
+      method: 'POST', cookie: respondent, idempotencyKey: key,
+      body: { consent_id, answers: [{ question_code: 'Q2', text: 'Jawaban versi dua' }] },
+    });
+    assert.equal(submitted.status, 201, submitted.text);
+    const { response_id } = data<{ response_id: string }>(submitted);
+    assert.ok(!submitted.text.includes(v2.version.id));
+    receiptRequest = { path: `${oldPath}/receipt/${response_id}`, cookie: respondent };
+    const db = new Client({ connectionString: databaseUrl });
+    await db.connect();
+    try {
+      const stored = await db.query<{ version_id: string }>('SELECT version_id FROM responses WHERE id = $1', [response_id]);
+      assert.deepEqual(stored.rows, [{ version_id: v2.version.id }]);
+    } finally {
+      await db.end();
+    }
+  });
+
+  await t.test('token versi aktif tetap melayani versi miliknya', async () => {
+    const current = data<LinkContext>(await call(currentPath, { redirect: 'manual' }));
+    assert.equal(current.state, 'active');
+    assert.equal(current.canSubmit, true);
+    assert.equal(current.version.number, 2);
+  });
+
+  await t.test('token v1 langsung menyajikan v3 setelah publikasi ketiga', async () => {
+    const v3 = await publish(path, title, 'Q3');
+    const latest = data<LinkContext>(await call(`/public/surveys/${v3.publicLink.token}`));
+    assert.equal(latest.version.number, 3);
+    assert.deepEqual(data(await call(oldPath)), latest);
+    assert.deepEqual(data(await call(currentPath)), latest);
+  });
+
+  await t.test('bukti v2 tetap bisa dipulihkan melalui token v1 setelah v3 terbit', async () => {
+    assert.ok(receiptRequest);
+    const receipt = await call(receiptRequest.path, { cookie: receiptRequest.cookie, idempotencyKey: key });
+    assert.equal(receipt.status, 200, receipt.text);
+    assert.equal(data<{ version_number: number }>(receipt).version_number, 2);
+    assert.ok(!receipt.text.includes(v2.version.id));
+  });
+
+  await t.test('setelah penutupan, token tetap closed meski survei lain masih terbit', async () => {
+    const otherContext = data<LinkContext & { survey: { title: string } }>(await call(otherPath));
+    assert.equal(otherContext.state, 'active');
+    assert.equal(otherContext.survey.title, otherTitle);
+    assert.equal(otherContext.version.number, 3);
+
+    const closed = await call(`${path}/close`, { method: 'POST', cookie });
+    assert.equal(closed.status, 200, closed.text);
+    for (const tokenPath of [oldPath, currentPath]) {
+      const context = data<{ state: string; canSubmit: boolean; survey: { title: string } }>(await call(tokenPath));
+      assert.equal(context.state, 'closed');
+      assert.equal(context.canSubmit, false);
+      assert.equal(context.survey.title, title);
+    }
+    assert.deepEqual(data(await call(otherPath)), otherContext);
+  });
 });

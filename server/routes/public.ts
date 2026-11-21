@@ -89,7 +89,6 @@ type NoticeRow = PolicyNotice;
 
 interface PublicQuestion {
   id: string;
-  version_id: string;
   code: string;
   ord: number;
   type: QuestionType;
@@ -175,7 +174,6 @@ async function publicQuestions(versionId: string): Promise<{ questions: PublicQu
     const questionOptions = await optionRows(question.id);
     questions.push({
       id: question.id,
-      version_id: question.version_id,
       code: question.code,
       ord: question.ord,
       type: question.type,
@@ -310,15 +308,30 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   }
   const link = await linkForToken(token);
   if (!link) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', link.version_id);
+  let version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ? AND survey_id = ?', link.version_id, link.survey_id);
   const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
   if (!version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const profile = await noticeSourceFor(survey);
-  const notice = await noticeForVersion(profile, version.notice_version);
+  const expired = link.status === 'expired' || (link.expires_at !== null && Date.parse(link.expires_at) < Date.now());
   let state = baseState(version, survey);
   if (link.status === 'closed') state = 'closed';
-  else if (link.status === 'expired' || (link.expires_at && new Date(link.expires_at).getTime() < Date.now())) state = 'expired';
+  else if (expired) state = 'expired';
   else if (link.status !== 'active') state = 'revoked';
+  if (survey.status === 'published' && version.status === 'closed' && !expired && (link.status === 'closed' || link.status === 'active')) {
+    // The survey's current_version_id can point to a draft instead of the published version.
+    const latest = await get<VersionRow>(
+      `SELECT * FROM survey_versions
+       WHERE survey_id = ? AND status = 'published' AND number > ?
+       ORDER BY number DESC LIMIT 1`,
+      link.survey_id,
+      version.number,
+    );
+    if (latest) {
+      version = latest;
+      state = 'active';
+    }
+  }
+  const profile = await noticeSourceFor(survey);
+  const notice = await noticeForVersion(profile, version.notice_version);
   const { questions, options } = await publicQuestions(version.id);
   return {
     kind: 'public',
@@ -342,10 +355,15 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
     state: context.state,
     canSubmit: context.canSubmit,
     guardianRequired: context.guardianRequired,
-    survey: context.survey,
+    survey: {
+      title: context.survey.title,
+      purpose: context.survey.purpose,
+      object_label: context.survey.object_label,
+      instructions: context.survey.instructions,
+    },
     version: {
-      ...context.version,
-      question_ids: includeQuestions ? context.questions.map((question) => question.id) : [],
+      number: context.version.number,
+      notice_version: context.version.notice_version,
     },
     questions: includeQuestions ? context.questions : [],
     options: includeQuestions ? context.options : [],
@@ -358,19 +376,10 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
     notice: { ...context.notice, synthetic_placeholder: false },
     invitation: context.invitation
       ? {
-          id: context.invitation.id,
-          assignment_id: context.invitation.assignment_id,
-          survey_id: context.invitation.survey_id,
-          version_id: context.invitation.version_id,
           code: context.invitation.code,
           status: context.state === 'used' ? 'used' : context.invitation.status,
-          expires_at: context.invitation.expires_at,
-          used_at: context.invitation.used_at,
-          revoked_at: context.invitation.revoked_at,
-          token_hash: '',
         }
       : null,
-    assignment: context.assignment ?? null,
   };
 }
 
@@ -434,7 +443,7 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
   return result;
 }
 
-function consentForSession(context: PublicContext, id: string, session: string, lock = false) {
+function consentForSession(context: PublicContext, versionId: string, id: string, session: string, lock = false) {
   return get<ConsentRow>(
     `SELECT id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
        FROM consent_records
@@ -443,7 +452,7 @@ function consentForSession(context: PublicContext, id: string, session: string, 
         AND respondent_session_hash = ?${lock ? ' FOR UPDATE' : ''}`,
     id,
     context.survey.id,
-    context.version.id,
+    versionId,
     context.invitation?.id ?? null,
     context.link?.id ?? null,
     consentSessionHash(id, session),
@@ -457,7 +466,7 @@ async function requireConsent(
   if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
   const session = respondentSession(req);
   if (!session) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
-  const consent = await consentForSession(context, id, session, lock);
+  const consent = await consentForSession(context, context.version.id, id, session, lock);
   if (!consent) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
   return consent;
 }
@@ -481,12 +490,11 @@ async function receiptFor(responseId: string) {
   const row = await get<{
     id: string;
     survey_id: string;
-    version_id: string;
     submitted_at: string;
     idempotency_key: string;
     number: number;
   }>(
-    `SELECT r.id, r.survey_id, r.version_id, r.submitted_at, r.idempotency_key, v.number
+    `SELECT r.id, r.survey_id, r.submitted_at, r.idempotency_key, v.number
        FROM responses r JOIN survey_versions v ON v.id = r.version_id
       WHERE r.id = ?`,
     responseId,
@@ -495,7 +503,6 @@ async function receiptFor(responseId: string) {
   return {
     response_id: row.id,
     survey_id: row.survey_id,
-    version_id: row.version_id,
     version_number: row.number,
     submitted_at: row.submitted_at,
     status: 'submitted',
@@ -793,15 +800,17 @@ publicRouter.get('/public/surveys/:token/receipt/:responseId', async (req: Authe
     const context = await resolvePublicContext(pathParam(req, 'token'));
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
     const responseId = pathParam(req, 'responseId');
-    const attempt = await get<{ consent_id: string }>(
-      `SELECT c.id AS consent_id
-         FROM submission_attempts a JOIN consent_records c ON c.response_id = a.response_id
+    const attempt = await get<{ consent_id: string; version_id: string }>(
+      `SELECT c.id AS consent_id, r.version_id
+         FROM submission_attempts a
+         JOIN responses r ON r.id = a.response_id
+         JOIN consent_records c ON c.response_id = r.id
         WHERE a.scope = ? AND a.idempotency_key = ? AND a.response_id = ?`,
       scope,
       key,
       responseId,
     );
-    const consent = attempt && await consentForSession(context, attempt.consent_id, session);
+    const consent = attempt && await consentForSession(context, attempt.version_id, attempt.consent_id, session);
     if (consent?.response_id !== responseId) {
       fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     }

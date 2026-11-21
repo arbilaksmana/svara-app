@@ -156,7 +156,8 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
       { number: 2, status: 'published' },
     ]);
     const oldLink = await call(`/public/surveys/${first.publicLink!.token!}`);
-    assert.equal((oldLink.body?.data as { state: string } | undefined)?.state, 'closed');
+    assert.equal(oldLink.status, 200, oldLink.text);
+    assert.equal((oldLink.body as Payload).data?.version?.number, 2, 'tautan umum lama melayani versi terbit');
   });
 
   await t.test('BF-04: setelah penutupan, kedua tautan menolak kiriman baru', async () => {
