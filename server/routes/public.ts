@@ -25,6 +25,7 @@ interface LinkRow {
   label: string;
   status: string;
   expires_at: string | null;
+  closed_reason: string | null;
 }
 
 interface InvitationRow {

@@ -37,6 +37,7 @@ const VERSIONS = [
   '011_integration_token_scope.sql',
   '012_consent_context_binding.sql',
   '013_consent_notice_backfill.sql',
+  '014_public_link_close_reason.sql',
 ];
 
 test('migrasi membuat 28 tabel aplikasi dan mencatat versi', async () => {

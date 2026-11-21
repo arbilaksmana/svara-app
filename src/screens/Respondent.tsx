@@ -7,6 +7,7 @@ import {
   ActionLink,
   Badge,
   Banner,
+  BlockedNotice,
   Button,
   Card,
   Checkbox,
@@ -165,11 +166,15 @@ function PublicLoading() {
 
 function PublicLoadError({ error }: { error: Error }) {
   const notFound = error instanceof ApiError && error.status === 404;
+  const blockedState = error instanceof ApiError && error.status === 409
+    ? ({ link_revoked: 'revoked', link_expired: 'expired' } as const)[error.code as 'link_revoked' | 'link_expired']
+    : undefined;
   return (
     <Shell kind="respondent" title="Tautan tidak dapat dibuka">
       <Card>
-        <p className="text-body font-bold text-ink">{notFound ? 'Tautan tidak dikenal' : 'Tautan gagal dimuat'}</p>
+        <p className="text-body font-bold text-ink">{notFound ? 'Tautan tidak dikenal' : blockedState ? 'Tautan sudah tidak aktif' : 'Tautan gagal dimuat'}</p>
         <p className="mt-2 text-body-sm text-muted">{error.message}</p>
+        {blockedState && <div className="mt-4"><BlockedNotice state={blockedState} /></div>}
         <div className="mt-4 flex flex-wrap gap-3">
           <ActionLink to={ROUTES.home} variant="secondary">Kembali ke beranda</ActionLink>
         </div>

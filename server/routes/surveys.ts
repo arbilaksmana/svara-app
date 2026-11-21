@@ -507,7 +507,7 @@ async function closePublishedVersions(surveyId: string, now: string): Promise<Ar
        WHERE survey_id = ? AND status = 'published'
        RETURNING id, number
      ), closed_links AS (
-       UPDATE public_links SET status = 'closed'
+       UPDATE public_links SET status = 'closed', closed_reason = 'superseded'
        WHERE version_id IN (SELECT id FROM closed_versions) AND status = 'active'
          AND (expires_at IS NULL OR expires_at::timestamptz >= ?::timestamptz)
      )
@@ -614,7 +614,9 @@ surveysRouter.post('/surveys/:id/archive', async (req: AuthedRequest, res: Respo
         now,
         survey.id,
       );
-      await run("UPDATE public_links SET status = 'closed' WHERE survey_id = ?", survey.id);
+      // Hanya tautan yang benar-benar terbuka yang ditutup; revoked/expired/used adalah
+      // keputusan eksplisit pengelola atau hasil kedaluwarsa dan tidak boleh ditimpa.
+      await run("UPDATE public_links SET status = 'closed', closed_reason = 'archived' WHERE survey_id = ? AND status = 'active'", survey.id);
     });
     await audit(req, 'Arsipkan survei', survey.id, 'berhasil');
     res.json({ data: await detailFor(survey.id) });
