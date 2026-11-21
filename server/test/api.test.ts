@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -118,6 +119,7 @@ before(async () => {
       ...process.env,
       PORT: String(PORT),
       DATABASE_URL: databaseUrl,
+      INTEGRATION_ORGANIZATION_ID: 'org_smk',
       INTEGRATION_TOKEN,
       COOKIE_SECURE: '0',
       ENABLE_HSTS: '0',
@@ -1014,6 +1016,66 @@ test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
   assert.ok(stats.perSurvey.length >= 1);
   assert.ok(stats.perSurvey.every((row) => typeof row.owner === 'string'));
 });
+
+test('SEC-12: token integrasi tanpa cakupan ditolak', async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tokenHash = createHash('sha256').update(INTEGRATION_TOKEN).digest('hex');
+    await client.query('DELETE FROM integration_token_scopes WHERE token_hash = $1', [tokenHash]);
+  } finally {
+    await client.end();
+  }
+
+  const unscoped = await call('/integration/survey-data?survey_id=s_demo1&version=1', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(unscoped.status, 403, unscoped.text);
+});
+
+async function assignIntegrationTokenToOrganizationA(): Promise<void> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tokenHash = createHash('sha256').update(INTEGRATION_TOKEN).digest('hex');
+    await client.query(
+      `INSERT INTO integration_token_scopes (token_hash, organization_id, survey_id)
+       VALUES ($1, 'org_smk', NULL)
+       ON CONFLICT (token_hash) DO UPDATE SET organization_id = EXCLUDED.organization_id, survey_id = NULL`,
+      [tokenHash],
+    );
+    await client.query(
+      `INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at)
+       VALUES ('v_sec12_org_b_published', 's_demo3', 1, 'published', '1.0', '2026-11-21T00:00:00Z')
+       ON CONFLICT (id) DO NOTHING`,
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+test('SEC-12: token organisasi A menolak survei organisasi B', async () => {
+  await assignIntegrationTokenToOrganizationA();
+  const crossOrganization = await call('/integration/survey-data?survey_id=s_demo3&version=v_sec12_org_b_published', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(crossOrganization.status, 404, crossOrganization.text);
+});
+
+test('SEC-12: token menolak versi draf tetapi tetap membaca versi terbit dalam cakupannya', async () => {
+  await assignIntegrationTokenToOrganizationA();
+  const draft = await call('/integration/survey-data?survey_id=s_demo1&version=v_demo1_2', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(draft.status, 404, draft.text);
+
+  const published = await call('/integration/survey-data?survey_id=s_demo1&version=v_demo1_1', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(published.status, 200, published.text);
+  assert.equal(published.json?.survey_version, 1);
+});
+
 
 test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas', async () => {
   const admin = await session('admin@svara.local');
