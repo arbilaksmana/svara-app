@@ -138,6 +138,7 @@ interface ValidAnswer {
 
 interface ConsentRow {
   id: string;
+  version_id: string;
   notice_version: string;
   basis: string;
   recorded_at: string;
@@ -360,6 +361,19 @@ function consentVersionToken(versionId: string): string {
   return Buffer.from(versionId, 'utf8').toString('base64url');
 }
 
+/**
+ * Retry harus divalidasi terhadap versi milik attempt pertama, bukan versi terbit saat ini: sesudah
+ * publish berikutnya, isi dan kunci idempotensi yang sama masih milik versi lama. Pertanyaan, opsi,
+ * dan consent diambil dari versi attempt agar hash idempotensi bisa dibandingkan apa adanya.
+ */
+async function contextForStoredAttempt(context: PublicContext, versionId: string): Promise<PublicContext> {
+  if (versionId === context.version.id) return context;
+  const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', versionId);
+  if (!version) fail(409, 'submission_closed', 'Versi respons ini tidak tersedia lagi.');
+  const { questions, options } = await publicQuestions(version.id);
+  return { ...context, version, questions, options, state: 'active', canSubmit: false };
+}
+
 function publicPayload(context: PublicContext, includeQuestions = false) {
   return {
     kind: context.kind,
@@ -458,7 +472,7 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
 
 function consentForSession(context: PublicContext, versionId: string, id: string, session: string, lock = false) {
   return get<ConsentRow>(
-    `SELECT id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
        FROM consent_records
       WHERE id = ? AND survey_id = ? AND version_id = ? AND status = 'granted'
         AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
@@ -466,6 +480,25 @@ function consentForSession(context: PublicContext, versionId: string, id: string
     id,
     context.survey.id,
     versionId,
+    context.invitation?.id ?? null,
+    context.link?.id ?? null,
+    consentSessionHash(id, session),
+  );
+}
+
+/**
+ * Consent milik sesi ini tanpa syarat versi; dipakai review historis yang harus tetap terbuka untuk
+ * attempt pada versi lama sesudah publish berikutnya. Form/review versi lain tetap ditolak pemanggil.
+ */
+function sessionConsent(context: PublicContext, id: string, session: string) {
+  return get<ConsentRow>(
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+       FROM consent_records
+      WHERE id = ? AND survey_id = ? AND status = 'granted'
+        AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
+        AND respondent_session_hash = ?`,
+    id,
+    context.survey.id,
     context.invitation?.id ?? null,
     context.link?.id ?? null,
     consentSessionHash(id, session),
@@ -628,9 +661,18 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
 
 async function loadPublicForm(req: AuthedRequest, res: Response, allowRetry: boolean) {
   try {
-    const context = await resolvePublicContext(pathParam(req, 'token'));
-    const consent = await requireConsent(context, req, req.query.consent_id);
-    const retryOnly = allowRetry && consent.response_id !== null;
+    const resolved = await resolvePublicContext(pathParam(req, 'token'));
+    const consentId = typeof req.query.consent_id === 'string' ? req.query.consent_id.trim() : '';
+    const session = respondentSession(req);
+    const owned = consentId && session ? await sessionConsent(resolved, consentId, session) : undefined;
+    // Review retry milik attempt historis memakai versi milik consent, bukan versi terbit sekarang.
+    const retryOnly = allowRetry && owned !== undefined && owned.response_id !== null;
+    const context = retryOnly && owned.version_id !== resolved.version.id
+      ? await contextForStoredAttempt(resolved, owned.version_id)
+      : resolved;
+    const consent = owned?.version_id === context.version.id
+      ? owned
+      : await requireConsent(context, req, req.query.consent_id);
     if (!retryOnly) {
       if (!context.canSubmit) {
         fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
@@ -692,32 +734,56 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
     }
     const context = await resolvePublicContext(pathParam(req, 'token'));
     auditObject = `${context.survey.id} · v${context.version.number}`;
-    const consent = await requireConsent(context, req, req.body?.consent_id);
-    const answers = await parseAnswers(context, req.body?.answers);
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
-    const hash = payloadHash({
-      consent_id: consent.id,
-      answers: answers.map((answer) => ({
-        code: answer.question.code,
-        option_id: answer.option?.id ?? null,
-        text: answer.text,
-        skipped: answer.skipped,
-      })),
-    });
     const outcome = await withTx(async () => {
       // Serialkan retry dengan kunci yang sama sebelum memeriksa idempotensi.
       await get('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', `${scope}:${key}`);
-      const existingAttempt = await get<{ response_id: string; payload_hash: string }>(
-        'SELECT response_id, payload_hash FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
+      const existingAttempt = await get<{ response_id: string; payload_hash: string; version_id: string }>(
+        `SELECT a.response_id, a.payload_hash, r.version_id
+           FROM submission_attempts a JOIN responses r ON r.id = a.response_id
+          WHERE a.scope = ? AND a.idempotency_key = ?`,
         scope,
         key,
       );
       if (existingAttempt) {
+        const attemptContext = await contextForStoredAttempt(context, existingAttempt.version_id);
+        const bound = await get<{ consent_id: string }>(
+          'SELECT id AS consent_id FROM consent_records WHERE response_id = ?',
+          existingAttempt.response_id,
+        );
+        const session = respondentSession(req);
+        const attemptConsent = bound && session
+          ? await consentForSession(context, attemptContext.version.id, bound.consent_id, session)
+          : undefined;
+        if (attemptConsent?.response_id !== existingAttempt.response_id) {
+          fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
+        }
+        const answers = await parseAnswers(attemptContext, req.body?.answers);
+        const hash = payloadHash({
+          consent_id: attemptConsent.id,
+          answers: answers.map((answer) => ({
+            code: answer.question.code,
+            option_id: answer.option?.id ?? null,
+            text: answer.text,
+            skipped: answer.skipped,
+          })),
+        });
         if (existingAttempt.payload_hash !== hash) {
           fail(409, 'idempotency_conflict', 'Kunci pengiriman yang sama dipakai dengan isi berbeda.', { retryable: false });
         }
         return { receipt: await receiptFor(existingAttempt.response_id), created: false };
       }
+      const consent = await requireConsent(context, req, req.body?.consent_id);
+      const answers = await parseAnswers(context, req.body?.answers);
+      const hash = payloadHash({
+        consent_id: consent.id,
+        answers: answers.map((answer) => ({
+          code: answer.question.code,
+          option_id: answer.option?.id ?? null,
+          text: answer.text,
+          skipped: answer.skipped,
+        })),
+      });
       if (!context.canSubmit) {
         fail(409, `submission_${context.state}`, `Formulir tidak dapat menerima kiriman: ${context.state}.`, { state: context.state });
       }

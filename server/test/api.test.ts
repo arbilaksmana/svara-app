@@ -1230,6 +1230,89 @@ test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas'
   assert.ok(audit.some((log) => log.actor === 'layanan-15'));
 });
 
+test('Retry identik setelah publish berikutnya tetap mengembalikan bukti yang sama', async () => {
+  const creator = await session('creator.a@svara.local');
+  const title = 'Survei retry setelah publish';
+  const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+    method: 'POST', cookie: creator, body: { title, owner_scope: 'organization' },
+  }));
+  const surveyPath = `/surveys/${survey.id}`;
+  // PERHATIAN fixture: profil org_smk mewajibkan wali, jadi setiap consent di bawah wajib membawa
+  // guardian_evidence_ref. Tanpa itu baseline gagal 422 di setup, bukan di assertion retry.
+  const save = async (questionCodes: string[]) => {
+    const saved = await call(surveyPath, {
+      method: 'PUT', cookie: creator, body: {
+        title,
+        purpose: 'Menguji retry idempoten setelah versi baru terbit.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: questionCodes.map((code) => ({
+          code, type: 'short_text', required: true, section: 'Uji', label: `Tanggapan ${code}`,
+        })),
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`${surveyPath}/publish`, { method: 'POST', cookie: creator });
+    assert.equal(published.status, 200, published.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(published);
+  };
+
+  const v1 = await save(['Q1']);
+  const token = v1.publicLink.token;
+  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
+  const consent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: intro.consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-retry',
+    },
+  });
+  assert.equal(consent.status, 201, consent.text);
+  const consentId = data<{ consent_id: string }>(consent).consent_id;
+  const respondent = consentCookie(consent);
+  const key = 'retry-identik-publish-0001';
+  const body = { consent_id: consentId, answers: [{ question_code: 'Q1', text: 'Jawaban tetap' }] };
+  const first = await call(`/public/surveys/${token}/responses`, {
+    method: 'POST', cookie: respondent, idempotencyKey: key, body,
+  });
+  assert.equal(first.status, 201, first.text);
+  const receipt = data(first);
+
+  const v2 = await save(['Q1', 'Q2']);
+  assert.notEqual(v2.version.id, v1.version.id);
+
+  const retry = await call(`/public/surveys/${token}/responses`, {
+    method: 'POST', cookie: respondent, idempotencyKey: key, body,
+  });
+  assert.equal(retry.status, 200, retry.text);
+  assert.deepEqual(data(retry), receipt, 'retry identik mengembalikan bukti yang sama');
+  assert.equal(data<{ version_number: number }>(retry).version_number, 1, 'bukti tetap milik versi attempt');
+
+  // Review historis untuk sesi pemilik attempt harus tetap terbuka (retryOnly), bukan ditolak.
+  const review = await call(`/public/surveys/${token}/review?consent_id=${consentId}`, { cookie: respondent });
+  assert.equal(review.status, 200, review.text);
+  assert.equal(data<{ retryOnly?: boolean }>(review).retryOnly, true);
+
+  // Sesi lain tidak boleh membuka review attempt orang lain.
+  const otherSession = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: data<{ consent_version: string }>(await call(`/public/surveys/${token}`)).consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-sesi-lain',
+    },
+  });
+  assert.equal(otherSession.status, 201, otherSession.text);
+  const foreignReview = await call(`/public/surveys/${token}/review?consent_id=${consentId}`, {
+    cookie: consentCookie(otherSession),
+  });
+  assert.equal(foreignReview.status, 409, foreignReview.text);
+  assert.equal(foreignReview.json?.code, 'consent_context_mismatch');
+});
+
 test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons', async () => {
   const token = 'link-umum-perpus';
   const { consent_version: consentVersion } = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
