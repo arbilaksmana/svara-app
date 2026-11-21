@@ -81,6 +81,7 @@ export interface Question {
   hint: string | null;
   group_code: string | null;
   dimension_code: string | null;
+  direction?: string | null;
   option_ids: string[];
 }
 

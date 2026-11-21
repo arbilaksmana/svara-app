@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Shell } from '../components/Shell';
 import {
@@ -33,7 +33,7 @@ import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersi
 import { formatWIB } from '../lib/summary';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
-import { ApiError, type SurveyScope } from '../lib/api';
+import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
 import { createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
@@ -293,6 +293,7 @@ interface EditableQuestion {
   hint: string;
   group_code: string;
   dimension_code: string;
+  direction: string | null;
   options: EditableOption[];
 }
 
@@ -317,6 +318,7 @@ function editableQuestionsFor(versionId: string, drafts: Record<string, { codes:
     hint: question.hint ?? '',
     group_code: question.group_code ?? '',
     dimension_code: question.dimension_code ?? '',
+    direction: question.direction ?? null,
     options: optionsFor(question.id).map((option) => ({
       key: option.id,
       label: option.label,
@@ -336,6 +338,7 @@ function blankQuestion(): EditableQuestion {
     hint: '',
     group_code: '',
     dimension_code: '',
+    direction: null,
     options: [
       { key: nextEditorKey('o'), label: '', value: '1' },
       { key: nextEditorKey('o'), label: '', value: '2' },
@@ -364,6 +367,8 @@ export function EditorPage({ id }: { id: string }) {
   const [attempted, setAttempted] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [pendingSave, setPendingSave] = useState<{ payload: SurveyPayload; snapshot: string; affectedResponses: number } | null>(null);
+  const saveTriggerRef = useRef<HTMLButtonElement | null>(null);
   const baselineRef = useRef<string | null>(null);
   const snapshot = JSON.stringify({ title, purpose, instructions, editorQuestions });
 
@@ -374,6 +379,12 @@ export function EditorPage({ id }: { id: string }) {
     }
     setDirty(snapshot !== baselineRef.current);
   }, [snapshot]);
+
+  useEffect(() => {
+    if (pendingSave || busy || !saveTriggerRef.current) return;
+    saveTriggerRef.current.focus();
+    saveTriggerRef.current = null;
+  }, [pendingSave, busy]);
 
   const duplicate = editorQuestions
     .map((question) => question.code.trim().toUpperCase())
@@ -434,12 +445,28 @@ export function EditorPage({ id }: { id: string }) {
     });
   };
 
-  const onSave = () => {
+  const persistDraft = async (payload: SurveyPayload, savedSnapshot: string) => {
+    const at = await saveDraft(id, payload);
+    baselineRef.current = savedSnapshot;
+    setDirty(false);
+    setSaved(at);
+    setPendingSave(null);
+    notify('Draf berhasil disimpan.');
+  };
+
+  const reportSaveError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Draf gagal disimpan.';
+    setSaveError(message);
+    notify(message, 'danger');
+  };
+
+  const onSave = (event: MouseEvent<HTMLButtonElement>) => {
+    const trigger = event.currentTarget;
     setAttempted(true);
     setSaveError(null);
     if (editorQuestions.length === 0) return;
     setBusy(true);
-    void saveDraft(id, {
+    const payload: SurveyPayload = {
       title,
       purpose,
       object_label: survey.object_label,
@@ -453,26 +480,25 @@ export function EditorPage({ id }: { id: string }) {
         hint: question.hint.trim() || null,
         group_code: question.group_code.trim() || null,
         dimension_code: question.dimension_code.trim() || null,
-        direction: null,
+        direction: question.direction,
         options: question.type === 'short_text'
           ? []
           : question.options.map((option, optionIndex) => ({
               label: option.label,
-              value: Number(option.value) || optionIndex + 1,
+              value: option.value.trim() === '' ? optionIndex + 1 : Number(option.value),
             })),
       })),
-    })
-      .then((at) => {
-        baselineRef.current = snapshot;
-        setDirty(false);
-        setSaved(at);
-        notify('Draf berhasil disimpan.');
+    };
+    void previewSurveyChange(id, payload)
+      .then(async ({ instrumentChange }) => {
+        if (instrumentChange.changed && instrumentChange.affectedResponses > 0) {
+          saveTriggerRef.current = trigger;
+          setPendingSave({ payload, snapshot, affectedResponses: instrumentChange.affectedResponses });
+          return;
+        }
+        await persistDraft(payload, snapshot);
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Draf gagal disimpan.';
-        setSaveError(message);
-        notify(message, 'danger');
-      })
+      .catch(reportSaveError)
       .finally(() => setBusy(false));
   };
 
@@ -750,6 +776,23 @@ export function EditorPage({ id }: { id: string }) {
 
         </Shell>
       </NavigationGuardProvider>
+      <ConfirmDialog
+        open={pendingSave !== null}
+        title="Simpan perubahan pertanyaan?"
+        detail={`${new Intl.NumberFormat('id-ID').format(pendingSave?.affectedResponses ?? 0)} jawaban terdampak. Jawaban lama tidak akan sebanding dengan versi baru. Jawaban yang sudah masuk tetap tersimpan.`}
+        confirmLabel="Tetap simpan draf"
+        tone="primary"
+        busy={busy}
+        onClose={() => setPendingSave(null)}
+        onConfirm={() => {
+          if (!pendingSave) return;
+          setSaveError(null);
+          setBusy(true);
+          void persistDraft(pendingSave.payload, pendingSave.snapshot)
+            .catch(reportSaveError)
+            .finally(() => setBusy(false));
+        }}
+      />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title={pendingDelete?.kind === 'option' ? 'Hapus opsi ini?' : 'Hapus pertanyaan ini?'}

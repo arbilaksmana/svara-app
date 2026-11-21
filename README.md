@@ -167,6 +167,14 @@ Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; 
 
 Daftar creator memberi label "Diberikan akses" pada survei bukan miliknya. Baris tersebut hanya menawarkan "Lihat hasil"; navigasi surveinya hanya "Hasil", tanpa Editor, Pratinjau, Publikasi, Bagikan, Pengaturan, atau Riwayat. Hak baca hasil dan ekspor tetap diperiksa API sesuai grant dan pengaturan survei.
 
+### Perubahan pertanyaan setelah ada jawaban
+
+`PUT /surveys/:id` mengembalikan `data.instrumentChange: { changed, affectedResponses }`. Instrumen dibandingkan dengan versi terakhir yang pernah terbit (termasuk yang sudah ditutup), atau draf yang ada bila belum pernah terbit. Jumlah, kode, tipe, teks, wajib/tidak, serta label dan nilai opsi termasuk instrumen; urutan pertanyaan/opsi dan metadata survei (`title`, `purpose`, `object_label`, `instructions`) tidak termasuk.
+
+`affectedResponses` menghitung submission pada versi yang pernah terbit dengan instrumen berbeda dari pertanyaan yang dikirim, hanya ketika `changed` bernilai `true`. Versi historis yang instrumennya identik tidak dihitung. Jawaban dan versi terbit tidak dipindahkan, dihapus, atau ditulis ulang. Simpan ulang pertanyaan identik tidak membuat draf baru dan tidak mengganti ID pertanyaan; perubahan urutan tetap disimpan sebagai draf tanpa sinyal perubahan instrumen.
+
+Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yang tidak menyimpan metadata, pertanyaan, draf, atau audit penyimpanan. Jika jumlah terdampak lebih dari nol, dialog menyebut jumlah jawaban dan ketidaksebandingan jawaban lama dengan versi baru. **Batal** mempertahankan edit lokal tanpa menyimpan; **Tetap simpan draf** menyimpan lewat `PUT` biasa. Perubahan tanpa jawaban tidak memerlukan konfirmasi. Pemeriksaan dan penyimpanan merupakan dua permintaan; jumlah dapat bertambah bila ada submission di antaranya, dan respons penyimpanan menghitung ulang dampaknya.
+
 ### Sumber kebijakan dan notice
 
 - Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`server/http.ts:191-201`, `server/http.ts:218-234`, dipakai `server/routes/surveys.ts:158`).

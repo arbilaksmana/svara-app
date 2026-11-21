@@ -198,6 +198,21 @@ function parseQuestions(raw: unknown): QuestionInput[] {
   });
 }
 
+async function questionInputsFor(versionId: string): Promise<QuestionInput[]> {
+  const rows = await questionRows(versionId);
+  return parseQuestions(await Promise.all(rows.map(serializeQuestion)));
+}
+
+function instrumentSignature(questions: QuestionInput[]): string {
+  return JSON.stringify(questions.map((question) => JSON.stringify([
+    question.code,
+    question.type,
+    question.label,
+    question.required,
+    question.options.map(({ label, value }) => JSON.stringify([label, value])).sort(),
+  ])).sort());
+}
+
 function validateForPublish(title: string, purpose: string, questions: QuestionInput[]): string[] {
   const errors: string[] = [];
   if (!title.trim()) errors.push('Judul survei wajib diisi.');
@@ -380,10 +395,38 @@ surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
     const instructions = asString(req.body?.instructions ?? '', 'instructions', 2000);
     const questions = parseQuestions(req.body?.questions ?? []);
     const notice = await noticeVersionFor(survey.organization_id);
-    await withTx(async () => {
-      const { draft } = await currentOrDraft(survey.id);
-      const target = draft ?? (await createDraft(survey.id, notice.notice_version));
-      await writeDraftQuestions(target.id, questions);
+    const preview = req.query.preview === 'true';
+    const instrumentChange = await withTx(async () => {
+      await get<{ id: string }>('SELECT id FROM surveys WHERE id = ? FOR UPDATE', survey.id);
+      const versions = await versionRows(survey.id);
+      const draft = versions.find((version) => version.status === 'draft');
+      // Versi yang sudah ditutup tetap menjadi acuan bila survei pernah terbit.
+      const published = versions.findLast((version) => version.published_at !== null);
+      const draftQuestions = draft ? await questionInputsFor(draft.id) : undefined;
+      const baseline = published ? await questionInputsFor(published.id) : draftQuestions ?? [];
+      const signature = instrumentSignature(questions);
+      const changed = signature !== instrumentSignature(baseline);
+      let affectedResponses = 0;
+      if (changed) {
+        const counts = await all<{ version_id: string; count: number }>(
+          `SELECT r.version_id, COUNT(*) AS count FROM responses r
+           JOIN survey_versions v ON v.id = r.version_id
+           WHERE r.survey_id = ? AND v.published_at IS NOT NULL GROUP BY r.version_id`,
+          survey.id,
+        );
+        for (const row of counts) {
+          const previous = row.version_id === published?.id ? baseline : await questionInputsFor(row.version_id);
+          if (signature !== instrumentSignature(previous)) affectedResponses += row.count;
+        }
+      }
+      const change = { changed, affectedResponses };
+      if (preview) return change;
+      let target = draft ?? published;
+      const savedQuestions = draftQuestions ?? baseline;
+      if (JSON.stringify(questions) !== JSON.stringify(savedQuestions)) {
+        target = draft ?? (await createDraft(survey.id, notice.notice_version));
+        await writeDraftQuestions(target.id, questions);
+      }
       const status = survey.status === 'archived' ? 'draft' : survey.status === 'published' ? 'published' : 'draft';
       await run(
         'UPDATE surveys SET title = ?, purpose = ?, object_label = ?, instructions = ?, status = ?, updated_at = ?, current_version_id = ? WHERE id = ?',
@@ -393,12 +436,13 @@ surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
         instructions,
         status,
         nowIso(),
-        target.id,
+        target?.id ?? survey.current_version_id,
         survey.id,
       );
+      return change;
     });
-    await audit(req, 'Simpan draf', survey.id, 'berhasil');
-    res.json({ data: await detailFor(survey.id) });
+    if (!preview) await audit(req, 'Simpan draf', survey.id, 'berhasil');
+    res.json({ data: { ...await detailFor(survey.id), instrumentChange } });
   } catch (error) {
     sendError(res, error);
   }
