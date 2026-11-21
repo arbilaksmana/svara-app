@@ -436,14 +436,8 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
   return result;
 }
 
-async function requireConsent(
-  context: PublicContext, req: AuthedRequest, consentId: unknown, lock = false,
-): Promise<ConsentRow> {
-  const id = typeof consentId === 'string' ? consentId.trim() : '';
-  if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
-  const session = respondentSession(req);
-  if (!session) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
-  const consent = await get<ConsentRow>(
+function consentForSession(context: PublicContext, id: string, session: string, lock = false) {
+  return get<ConsentRow>(
     `SELECT id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
        FROM consent_records
       WHERE id = ? AND survey_id = ? AND version_id = ? AND status = 'granted'
@@ -456,6 +450,16 @@ async function requireConsent(
     context.link?.id ?? null,
     consentSessionHash(id, session),
   );
+}
+
+async function requireConsent(
+  context: PublicContext, req: AuthedRequest, consentId: unknown, lock = false,
+): Promise<ConsentRow> {
+  const id = typeof consentId === 'string' ? consentId.trim() : '';
+  if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
+  const session = respondentSession(req);
+  if (!session) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
+  const consent = await consentForSession(context, id, session, lock);
   if (!consent) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
   return consent;
 }
@@ -593,18 +597,22 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
   }
 });
 
-publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: Response) => {
+async function loadPublicForm(req: AuthedRequest, res: Response, allowRetry: boolean) {
   try {
     const context = await resolvePublicContext(pathParam(req, 'token'));
     const consent = await requireConsent(context, req, req.query.consent_id);
-    if (!context.canSubmit) {
-      fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
+    const retryOnly = allowRetry && consent.response_id !== null;
+    if (!retryOnly) {
+      if (!context.canSubmit) {
+        fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
+      }
+      requireUnusedConsent(context, consent);
     }
-    requireUnusedConsent(context, consent);
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       data: {
         ...publicPayload(context, true),
+        ...(retryOnly ? { retryOnly: true, canSubmit: false } : {}),
         consent: {
           consent_id: consent.id,
           notice_version: consent.notice_version,
@@ -616,7 +624,10 @@ publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: 
   } catch (error) {
     sendError(res, error);
   }
-});
+}
+
+publicRouter.get('/public/surveys/:token/form', (req: AuthedRequest, res: Response) => loadPublicForm(req, res, false));
+publicRouter.get('/public/surveys/:token/review', (req: AuthedRequest, res: Response) => loadPublicForm(req, res, true));
 
 publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res: Response) => {
   try {
@@ -775,20 +786,27 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
 
 publicRouter.get('/public/surveys/:token/receipt/:responseId', async (req: AuthedRequest, res: Response) => {
   try {
+    res.setHeader('Cache-Control', 'no-store');
     const key = req.get('idempotency-key')?.trim() ?? '';
     if (!key) fail(422, 'idempotency_key_required', 'Header Idempotency-Key diperlukan untuk memulihkan bukti.');
+    const session = respondentSession(req);
+    if (!session) fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     const context = await resolvePublicContext(pathParam(req, 'token'));
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
-    const attempt = await get<{ response_id: string }>(
-      'SELECT response_id FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
+    const responseId = pathParam(req, 'responseId');
+    const attempt = await get<{ consent_id: string }>(
+      `SELECT c.id AS consent_id
+         FROM submission_attempts a JOIN consent_records c ON c.response_id = a.response_id
+        WHERE a.scope = ? AND a.idempotency_key = ? AND a.response_id = ?`,
       scope,
       key,
+      responseId,
     );
-    if (!attempt || attempt.response_id !== pathParam(req, 'responseId')) {
+    const consent = attempt && await consentForSession(context, attempt.consent_id, session);
+    if (consent?.response_id !== responseId) {
       fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     }
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: await receiptFor(attempt.response_id) });
+    res.json({ data: await receiptFor(responseId) });
   } catch (error) {
     sendError(res, error);
   }

@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
-// Resolve the isolated database URL before importing modules that initialize the pool.
-import { closeTestDatabase, resetTestDatabase } from './test-db.ts';
-import { app } from '../app.ts';
-import { all, get, run } from '../db.ts';
-import { sha256Hex } from '../http.ts';
-import { seedDemoIfEmpty } from '../seed-data.ts';
+import { Client } from 'pg';
+import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
+
+// Set the pool size before importing the app; the submissions must occupy two connections.
+process.env.PG_POOL_MAX = '2';
+const { app } = await import('../app.ts');
+const { all, get, run } = await import('../db.ts');
+const { sha256Hex } = await import('../http.ts');
+const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
 const PUBLIC_LINK = 'link-umum-demo';
 const INVITATION = 'undangan-demo';
@@ -67,11 +70,7 @@ async function issueGuardianConsent(token: string, existingCookie?: string) {
   assert.equal(result.status, 201);
   assert.ok(result.data);
   const setCookie = result.headers.get('set-cookie') ?? '';
-  if (!existingCookie) {
-    assert.match(setCookie, /^svara_respondent=[A-Za-z0-9_-]{43};/u, 'penerbitan consent harus mengikat sesi responden');
-    assert.match(setCookie, /; HttpOnly/u);
-  }
-  return { id: result.data.consent_id, cookie: existingCookie ?? setCookie.split(';')[0]! };
+  return { id: result.data.consent_id, cookie: existingCookie ?? setCookie.split(';')[0]!, setCookie };
 }
 
 function submit(token: string, consent: { id: string; cookie: string }, key: string) {
@@ -92,11 +91,16 @@ async function assertSingleConsentBinding(id: string, responseId: string, keys: 
   assert.deepEqual(responses, [{ id: responseId }]);
 }
 
+test('SEC-08/BF-02: consent baru menerbitkan cookie responden HttpOnly', async () => {
+  const { setCookie } = await issueGuardianConsent(PUBLIC_LINK);
+  assert.match(setCookie, /^svara_respondent=[A-Za-z0-9_-]{43};/u);
+  assert.match(setCookie, /; HttpOnly/u);
+});
+
 test('SEC-08/BF-02: consent hanya membuka formulir dan pengiriman pada konteks penerbitannya', async () => {
   const consent = await issueGuardianConsent(PUBLIC_LINK);
   const invitationConsent = await issueGuardianConsent(INVITATION, consent.cookie);
   const otherSession = await issueGuardianConsent(PUBLIC_LINK);
-  assert.notEqual(otherSession.cookie, consent.cookie);
   const otherContexts = [
     { token: INVITATION, id: consent.id, cookie: consent.cookie },
     { token: PUBLIC_LINK, id: invitationConsent.id, cookie: consent.cookie },
@@ -105,10 +109,10 @@ test('SEC-08/BF-02: consent hanya membuka formulir dan pengiriman pada konteks p
   ];
   for (const [index, { token, id, cookie }] of otherContexts.entries()) {
     const form = await call(`${token}/form?consent_id=${id}`, { Cookie: cookie });
-    assert.equal(form.status, 409);
+    assert.equal(form.status, 409, `form di luar konteks consent: ${index}`);
     assert.equal(form.code, 'consent_context_mismatch');
     const denied = await submit(token, { id, cookie }, `kunci-konteks-sec08-${index}`);
-    assert.equal(denied.status, 409);
+    assert.equal(denied.status, 409, `kiriman di luar konteks consent: ${index}`);
     assert.equal(denied.code, 'consent_context_mismatch');
   }
   const ownForm = await call(`${PUBLIC_LINK}/form?consent_id=${consent.id}`, { Cookie: consent.cookie });
@@ -133,10 +137,38 @@ test('SEC-08/BF-02: consent terpakai tidak dapat pindah respons; retry identik t
   await assertSingleConsentBinding(consent.id, first.data.response_id, [firstKey, otherKey]);
 });
 
-test('SEC-08/BF-02: kiriman serentak dengan consent yang sama hanya menyimpan satu respons', async () => {
+test('SEC-08/BF-02: kiriman serentak dengan consent yang sama hanya menyimpan satu respons', async (t) => {
   const consent = await issueGuardianConsent(PUBLIC_LINK);
   const keys = ['kunci-consent-paralel-a', 'kunci-consent-paralel-b'];
-  const results = await Promise.all(keys.map((key) => submit(PUBLIC_LINK, consent, key)));
+  const barrier = new Client({ connectionString: databaseUrl, statement_timeout: 5000 });
+  await barrier.connect();
+  let pending: Promise<unknown> | undefined;
+  let results;
+  try {
+    await barrier.query('BEGIN');
+    // Non-locking consent reads can finish; both submissions must wait before consuming it.
+    await barrier.query('LOCK TABLE consent_records IN EXCLUSIVE MODE');
+    let completed = 0;
+    const attempts = keys.map((key) => submit(PUBLIC_LINK, consent, key).finally(() => { completed += 1; }));
+    pending = Promise.allSettled(attempts);
+    const deadline = performance.now() + 5000;
+    let waiting = 0;
+    while (waiting < keys.length && completed === 0 && performance.now() < deadline) {
+      const { rows } = await barrier.query<{ waiting: number }>(`
+        SELECT count(DISTINCT pid)::int AS waiting FROM pg_locks
+         WHERE locktype = 'relation' AND relation = 'consent_records'::regclass AND NOT granted
+           AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+      `);
+      waiting = rows[0]?.waiting ?? 0;
+    }
+    assert.equal(waiting, keys.length, 'kedua transaksi harus menunggu lock PostgreSQL yang sama');
+    t.diagnostic(`PostgreSQL: ${waiting} transaksi menunggu lock yang sama sebelum dilepas.`);
+    await barrier.query('ROLLBACK');
+    results = await Promise.all(attempts);
+  } finally {
+    await barrier.end();
+    await pending;
+  }
   assert.deepEqual(results.map(({ status }) => status).sort(), [201, 409]);
   const created = results.find(({ status }) => status === 201);
   assert.ok(created?.data);

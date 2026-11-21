@@ -401,6 +401,10 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   const consent = data<{ consent_id: string }>(issuedConsent);
   const cookie = consentCookie(issuedConsent);
+  const otherCookie = consentCookie(await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sesi-lain' },
+  }));
   const form = data<{
     questions: Array<{ code: string; type: string; required: boolean; option_ids: string[] }>;
     options: Array<{ id: string }>;
@@ -455,6 +459,15 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
     'semua audit Kirim respons lewat route publik harus memakai aktor publik',
   );
 
+  const reload = await call(`/public/surveys/${token}/review?consent_id=${consent.consent_id}`, { cookie });
+  assert.equal(reload.status, 200, reload.text);
+  const review = data<{ retryOnly: boolean; canSubmit: boolean; questions: unknown[] }>(reload);
+  assert.equal(review.retryOnly, true);
+  assert.equal(review.canSubmit, false);
+  assert.deepEqual(review.questions, form.questions);
+  assert.equal((await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie })).status, 409);
+  assert.equal((await call(`/public/surveys/${token}/review?consent_id=${consent.consent_id}`, { cookie: otherCookie })).status, 409);
+
   const replay = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
     cookie,
@@ -480,14 +493,17 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(second.status, 409, 'undangan terpakai tidak menerima respons kedua');
 
-  const wrongReceipt = await call(`/public/surveys/${token}/receipt/${receipt.response_id}`, {
-    headers: { 'Idempotency-Key': 'kunci-lain-000000' },
-  });
+  const receiptPath = `/public/surveys/${token}/receipt/${receipt.response_id}`;
+  const receiptHeaders = { 'Idempotency-Key': 'kunci-undangan-0001' };
+  const wrongReceipt = await call(receiptPath, { cookie, headers: { 'Idempotency-Key': 'kunci-lain-000000' } });
   assert.equal(wrongReceipt.status, 404);
-  const rightReceipt = await call(`/public/surveys/${token}/receipt/${receipt.response_id}`, {
-    headers: { 'Idempotency-Key': 'kunci-undangan-0001' },
-  });
+  const anonymousReceipt = await call(receiptPath, { headers: receiptHeaders });
+  assert.equal(anonymousReceipt.status, 404);
+  const otherSessionReceipt = await call(receiptPath, { cookie: otherCookie, headers: receiptHeaders });
+  assert.equal(otherSessionReceipt.status, 404);
+  const rightReceipt = await call(receiptPath, { cookie, headers: receiptHeaders });
   assert.equal(rightReceipt.status, 200);
+  assert.deepEqual(data(rightReceipt), receipt);
 });
 
 test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () => {

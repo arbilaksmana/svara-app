@@ -90,16 +90,17 @@ function writeConsent(
   return consent;
 }
 
-function ensureIdempotencyKey(token: string, versionId: string): string {
+function submissionKey(token: string, versionId: string, retryOnly: boolean): string | null {
   const key = `${IDEMPOTENCY_PREFIX}${token}.${versionId}`;
   try {
     const existing = sessionStorage.getItem(key);
     if (existing) return existing;
+    if (retryOnly) return null;
     const created = crypto.randomUUID();
     sessionStorage.setItem(key, created);
     return created;
   } catch {
-    return crypto.randomUUID();
+    return retryOnly ? null : crypto.randomUUID();
   }
 }
 
@@ -112,7 +113,7 @@ function storedReceipt(): ReceiptData | null {
   }
 }
 
-function usePublicPage(token: string, withForm = false): { token: string; ctx: PublicContextData | null; loading: boolean; loadError: Error | null } {
+function usePublicPage(token: string, view: 'intro' | 'form' | 'review' = 'intro'): { token: string; ctx: PublicContextData | null; loading: boolean; loadError: Error | null } {
   const [ctx, setCtx] = useState<PublicContextData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -121,8 +122,8 @@ function usePublicPage(token: string, withForm = false): { token: string; ctx: P
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    const consent = withForm ? readConsent(token) : null;
-    const request = consent ? publicForm(token, consent.consent_id) : publicContext(token);
+    const consent = view === 'intro' ? null : readConsent(token);
+    const request = consent && view !== 'intro' ? publicForm(token, consent.consent_id, view) : publicContext(token);
     void request
       .then((data) => {
         if (!cancelled) setCtx(data);
@@ -139,7 +140,7 @@ function usePublicPage(token: string, withForm = false): { token: string; ctx: P
     return () => {
       cancelled = true;
     };
-  }, [token, withForm]);
+  }, [token, view]);
 
   return { token, ctx, loading, loadError };
 }
@@ -461,7 +462,7 @@ function QuestionField({
 }
 
 export function FormPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token, true);
+  const { ctx, loading, loadError } = usePublicPage(token, 'form');
   const { state, link } = useScreenState('respondent-form');
   const router = useRouter();
   const items = ctx ? [...ctx.questions].sort((a, b) => a.order - b.order) : [];
@@ -606,7 +607,7 @@ export function FormPage({ token }: { token: string }) {
 /* ---------------- Tinjau ---------------- */
 
 export function ReviewPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token, true);
+  const { ctx, loading, loadError } = usePublicPage(token, 'review');
   const notify = useToast();
   const { state, link } = useScreenState('respondent-review');
   const router = useRouter();
@@ -641,9 +642,10 @@ export function ReviewPage({ token }: { token: string }) {
   if (!ctx) return <MissingToken />;
   if (!consentReady) return <PublicLoading />;
   const { survey, version } = ctx;
-  const effectiveState = state === 'default' ? serverState(ctx) : state;
+  const retryOnly = ctx.retryOnly === true;
+  const effectiveState = state === 'default' && !retryOnly ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
-  const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading', 'conflict'].includes(effectiveState) || !consent || usedInvite;
+  const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading', 'conflict'].includes(effectiveState) || !consent || (usedInvite && !retryOnly);
 
   if (!consent && effectiveState === 'default') {
     return <PublicLoading />;
@@ -654,6 +656,11 @@ export function ReviewPage({ token }: { token: string }) {
       setSubmitError('Persetujuan tidak ditemukan. Buka kembali pengantar dan lengkapi persetujuan.');
       return;
     }
+    const key = submissionKey(token, version.id, retryOnly);
+    if (!key) {
+      setSubmitError('Kunci pengiriman sebelumnya tidak tersedia di sesi ini.');
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     const answers = rows.flatMap(({ q, value }): Array<{ question_code: string; option_id?: string; text?: string }> => {
@@ -662,7 +669,6 @@ export function ReviewPage({ token }: { token: string }) {
       }
       return value.text.trim() !== '' ? [{ question_code: q.code, text: value.text.trim() }] : [];
     });
-    const key = ensureIdempotencyKey(token, version.id);
     void submitResponse(token, key, consent.consent_id, answers)
       .then((receipt) => {
         try {
@@ -697,7 +703,9 @@ export function ReviewPage({ token }: { token: string }) {
         <div className="mx-auto flex max-w-[720px] flex-col gap-5">
           <Progress step={3} />
           
-          {usedInvite && <Banner tone="warning" title="Undangan individual sudah dipakai">Satu undangan hanya menerima satu respons final. Buka tautan bukti bila perlu memeriksa pengiriman sebelumnya.</Banner>}
+          {retryOnly ? (
+            <Banner tone="info" title="Respons sudah terkirim">Kirim ulang jawaban yang sama untuk membuka bukti pengiriman. Respons final tidak dapat diubah.</Banner>
+          ) : usedInvite && <Banner tone="warning" title="Undangan individual sudah dipakai">Satu undangan hanya menerima satu respons final. Buka tautan bukti bila perlu memeriksa pengiriman sebelumnya.</Banner>}
           {effectiveState === 'validation' && <ValidationSummary items={['Item kosong ditandai di bawah.', 'Periksa kembali opsi sebelum mengirim.']} />}
           {emptyCount > 0 && effectiveState === 'default' && (
             <ValidationSummary items={rows.filter((r) => r.empty).map((r) => `Item ${r.q.code} masih kosong.`)} />
@@ -777,9 +785,9 @@ export function ReviewPage({ token }: { token: string }) {
                 loading={submitting}
                 onClick={onSubmit}
               >
-                Kirim jawaban
+                {retryOnly ? 'Kirim ulang jawaban' : 'Kirim jawaban'}
               </Button>
-              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked}>Perbaiki jawaban</ActionLink>
+              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked || retryOnly}>Perbaiki jawaban</ActionLink>
             </div>
             {(blocked || emptyCount > 0) && (
               <p role="status" className="text-caption font-bold text-danger">

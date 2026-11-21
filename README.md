@@ -130,7 +130,7 @@ scripts/         Smoke test web
 - Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
 - Lingkup `/org/*` selalu diambil dari sesi (`accounts.organization_id`), tidak pernah dari body atau query; akun tanpa organisasi ditolak `403`.
 - Setiap baris audit mencatat `account_id` pelaku dan `organization_id` dari sesi, sehingga baca jawaban individual, ekspor CSV, dan ekspor kodebook dapat ditelusuri per organisasi. `super_admin` tanpa organisasi menulis `organization_id` NULL.
-- Respons publik disimpan dengan kunci idempotensi; bukti hanya dapat dibuka dengan kunci yang sama.
+- Pemulihan bukti memerlukan kunci idempotensi dan sesi responden yang mengonsumsi persetujuan. Setelah memuat ulang halaman tinjau, sesi itu dapat mengirim ulang jawaban identik dengan kunci yang sama tanpa membuat respons baru; formulir pengisian tetap terkunci.
 - Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
 - Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
 

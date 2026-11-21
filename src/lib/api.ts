@@ -364,6 +364,7 @@ export interface PublicContextData {
   state: 'active' | 'closed' | 'expired' | 'revoked' | 'used';
   canSubmit: boolean;
   guardianRequired: boolean;
+  retryOnly?: true;
   survey: Survey;
   version: SurveyVersion;
   questions: Question[];
@@ -387,9 +388,9 @@ export interface PublicFormData extends PublicContextData {
   };
 }
 
-export async function publicForm(token: string, consentId: string): Promise<PublicFormData> {
+export async function publicForm(token: string, consentId: string, view: 'form' | 'review'): Promise<PublicFormData> {
   return call<PublicFormData>(
-    `/public/surveys/${encodeURIComponent(token)}/form?consent_id=${encodeURIComponent(consentId)}`,
+    `/public/surveys/${encodeURIComponent(token)}/${view}?consent_id=${encodeURIComponent(consentId)}`,
   );
 }
 
