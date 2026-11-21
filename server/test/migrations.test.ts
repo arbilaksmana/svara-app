@@ -34,6 +34,7 @@ const VERSIONS = [
   '009_organization_invitation_expiry_backfill.sql',
   '010_consent_notice_source.sql',
   '011_integration_token_scope.sql',
+  '012_consent_context_binding.sql',
 ];
 
 test('migrasi membuat 28 tabel aplikasi dan mencatat versi', async () => {
@@ -117,11 +118,7 @@ test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari la
     await client.end();
   }
 
-  assert.deepEqual(await migrate(), [
-    '009_organization_invitation_expiry_backfill.sql',
-    '010_consent_notice_source.sql',
-    '011_integration_token_scope.sql',
-  ]);
+  assert.deepEqual(await migrate(), VERSIONS.slice(8));
 
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();

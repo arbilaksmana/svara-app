@@ -78,6 +78,13 @@ function session(email: string): Promise<string> {
   return cached;
 }
 
+function consentCookie(result: Result): string {
+  const cookie = result.headers.get('set-cookie') ?? '';
+  assert.match(cookie, /^svara_respondent=[A-Za-z0-9_-]{43};/u, 'penerbitan consent harus mengikat sesi responden');
+  assert.match(cookie, /; HttpOnly/u);
+  return cookie.split(';')[0]!;
+}
+
 /** Baca kolom status dan referensi bukti wali langsung dari basis data uji. */
 async function storedGuardianEvidence(consentId: string): Promise<{ status: string; ref: string | null } | null> {
   const client = new Client({ connectionString: databaseUrl });
@@ -388,20 +395,21 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(missingGuardian.status, 422);
 
-  const consent = data<{ consent_id: string }>(
-    await call(`/public/surveys/${token}/consent`, {
-      method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
-    }),
-  );
+  const issuedConsent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
+  });
+  const consent = data<{ consent_id: string }>(issuedConsent);
+  const cookie = consentCookie(issuedConsent);
   const form = data<{
     questions: Array<{ code: string; type: string; required: boolean; option_ids: string[] }>;
     options: Array<{ id: string }>;
-  }>(await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`));
+  }>(await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie }));
   assert.equal(form.questions.length, 3);
 
   const missingAnswers = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-validasi-001',
     body: { consent_id: consent.consent_id, version_id: 'v_demo1_1', answers: [] },
   });
@@ -425,7 +433,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(noConsent.status, 403);
 
-  const ambientCreator = creator;
+  const ambientCreator = `${creator}; ${cookie}`;
   const created = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
     idempotencyKey: 'kunci-undangan-0001',
@@ -449,6 +457,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const replay = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0001',
     body,
   });
@@ -457,6 +466,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const conflict = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0001',
     body: { ...body, answers: [] },
   });
@@ -464,6 +474,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const second = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0002',
     body,
   });
@@ -529,7 +540,7 @@ test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified'
   assert.equal(consent.guardian_evidence_status, 'self_attested');
 
   const form = data<{ consent: { guardian_evidence_status: string } }>(
-    await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`),
+    await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie: consentCookie(created) }),
   );
   assert.equal(form.consent.guardian_evidence_status, 'self_attested');
 
@@ -634,15 +645,15 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
   const token = 'link-umum-demo';
   const context = data<{ version: { id: string }; guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true);
-  const consent = data<{ consent_id: string }>(
-    await call(`/public/surveys/${token}/consent`, {
-      method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
-    }),
-  );
+  const issuedConsent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
+  });
+  const consent = data<{ consent_id: string }>(issuedConsent);
   const text = '=SUM(1,2) "kutip", baris\nbaru';
   const created = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie: consentCookie(issuedConsent),
     idempotencyKey: 'kunci-formula-0001',
     body: {
       consent_id: consent.consent_id,
@@ -1144,6 +1155,7 @@ test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan 
       const consentId = (consent.json as { data: { consent_id: string } }).data.consent_id;
       return call(`/public/surveys/${token}/responses`, {
         method: 'POST',
+        cookie: consentCookie(consent),
         idempotencyKey: `beban-kunci-${index}-abcdef`,
         body: {
           consent_id: consentId,

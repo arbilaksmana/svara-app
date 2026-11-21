@@ -21,13 +21,16 @@ interface ApiResult {
 }
 
 let cookie = '';
+let respondentCookie = '';
 
 async function call(
   path: string,
   init: { method?: string; body?: unknown; key?: string; raw?: boolean } = {},
 ): Promise<ApiResult> {
   const headers: Record<string, string> = { 'X-Svara-Client': 'web' };
-  if (cookie) headers.Cookie = cookie;
+  const isPublicSurvey = path.startsWith('/public/surveys/');
+  const requestCookie = isPublicSurvey ? respondentCookie : cookie;
+  if (requestCookie) headers.Cookie = requestCookie;
   if (init.key) headers['Idempotency-Key'] = init.key;
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(`${BASE}${path}`, {
@@ -35,8 +38,11 @@ async function call(
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) cookie = setCookie.split(';')[0] ?? '';
+  const issuedCookie = response.headers.get('set-cookie')?.split(';')[0];
+  if (issuedCookie) {
+    if (isPublicSurvey) respondentCookie = issuedCookie;
+    else cookie = issuedCookie;
+  }
   const bytes = new Uint8Array(await response.arrayBuffer());
   const text = new TextDecoder().decode(bytes);
   let body: Record<string, unknown> = {};

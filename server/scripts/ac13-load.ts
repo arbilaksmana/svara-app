@@ -16,13 +16,15 @@ const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'SvaraDemo123!';
 interface ApiResult {
   status: number;
   body: Record<string, unknown>;
+  cookie: string;
 }
 
 let cookie = '';
 
-async function call(path: string, init: { method?: string; body?: unknown; key?: string } = {}): Promise<ApiResult> {
+async function call(path: string, init: { method?: string; body?: unknown; key?: string; cookie?: string } = {}): Promise<ApiResult> {
   const headers: Record<string, string> = { 'X-Svara-Client': 'web' };
-  if (cookie) headers.Cookie = cookie;
+  const requestCookie = path.startsWith('/public/surveys/') ? init.cookie : cookie;
+  if (requestCookie) headers.Cookie = requestCookie;
   if (init.key) headers['Idempotency-Key'] = init.key;
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(`${BASE}${path}`, {
@@ -30,8 +32,8 @@ async function call(path: string, init: { method?: string; body?: unknown; key?:
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) cookie = setCookie.split(';')[0] ?? '';
+  const issuedCookie = response.headers.get('set-cookie')?.split(';')[0] ?? '';
+  if (path === '/auth/login' && issuedCookie) cookie = issuedCookie;
   const text = await response.text();
   let body: Record<string, unknown> = {};
   try {
@@ -39,7 +41,7 @@ async function call(path: string, init: { method?: string; body?: unknown; key?:
   } catch {
     body = { raw: text };
   }
-  return { status: response.status, body };
+  return { status: response.status, body, cookie: issuedCookie };
 }
 
 function data<T>(result: ApiResult): T {
@@ -136,16 +138,15 @@ try {
       }),
     ),
   );
-  const consentIds = consents.map((result) =>
-    (data<{ consent_id: string }>(result)).consent_id,
-  );
 
   const startedAt = performance.now();
   const submissions = await Promise.all(
-    consentIds.map(async (consentId, index) => {
+    consents.map(async (consent, index) => {
+      const consentId = data<{ consent_id: string }>(consent).consent_id;
       const sendStarted = performance.now();
       const result = await call(`/public/surveys/${token}/responses`, {
         method: 'POST',
+        cookie: consent.cookie,
         key: `ac13-${index}-${String(performance.now())}`,
         body: {
           consent_id: consentId,

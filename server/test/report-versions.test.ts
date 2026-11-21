@@ -126,6 +126,7 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
     const consentId = (consent.body as { data?: { consent_id?: string } }).data?.consent_id ?? '';
     const result = await call(`/public/surveys/${token}/responses`, {
       method: 'POST',
+      cookie: consent.headers.get('set-cookie')?.split(';')[0],
       headers: { 'Idempotency-Key': key },
       body: { consent_id: consentId, answers: Object.entries(answers).map(([code, value]) => ({ question_code: code, text: String(value) })) },
     });

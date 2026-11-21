@@ -124,6 +124,8 @@ scripts/         Smoke test web
 
 - Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt`, dan header `X-Svara-Client` untuk mutasi.
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
+- Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
+- Persetujuan mengizinkan satu respons final dalam 24 jam. Retry identik dari sesi yang sama tetap mengembalikan bukti yang sama. Jika persetujuan lama belum dipakai saat migrasi `012`, responden harus mencatat persetujuan baru; migrasi tidak mengubah bukti kiriman lama.
 - Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
 - Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
 - Lingkup `/org/*` selalu diambil dari sesi (`accounts.organization_id`), tidak pernah dari body atau query; akun tanpa organisasi ditolak `403`.

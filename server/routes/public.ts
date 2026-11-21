@@ -1,7 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
-import { rateLimit, type AuthedRequest } from '../security.ts';
+import { parseCookies, rateLimit, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
@@ -137,17 +138,27 @@ interface ValidAnswer {
 
 interface ConsentRow {
   id: string;
-  survey_id: string;
-  version_id: string;
   notice_version: string;
   basis: string;
-  status: string;
   recorded_at: string;
   guardian_evidence_status: string;
+  guardian_evidence_ref: string | null;
   response_id: string | null;
 }
 
 export const publicRouter = Router();
+
+const RESPONDENT_COOKIE = 'svara_respondent';
+const CONSENT_TTL_MS = 24 * 60 * 60 * 1000;
+
+function respondentSession(req: AuthedRequest): string | undefined {
+  const token = parseCookies(req.headers.cookie)[RESPONDENT_COOKIE];
+  return token && /^[A-Za-z0-9_-]{43}$/u.test(token) ? token : undefined;
+}
+
+function consentSessionHash(consentId: string, session: string): string {
+  return sha256Hex(`${consentId}:${session}`);
+}
 
 async function questionRows(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
@@ -425,20 +436,43 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
   return result;
 }
 
-/** Persetujuan harus tercatat lebih dulu; formulir dan kiriman menolak tanpa consent_id yang sah. */
-async function requireConsent(context: PublicContext, consentId: unknown): Promise<ConsentRow> {
+async function requireConsent(
+  context: PublicContext, req: AuthedRequest, consentId: unknown, lock = false,
+): Promise<ConsentRow> {
   const id = typeof consentId === 'string' ? consentId.trim() : '';
   if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
-  const consent = await get<ConsentRow>('SELECT * FROM consent_records WHERE id = ?', id);
-  if (
-    !consent ||
-    consent.status !== 'granted' ||
-    consent.survey_id !== context.survey.id ||
-    consent.version_id !== context.version.id
-  ) {
-    fail(403, 'consent_required', 'Persetujuan tidak berlaku untuk formulir ini.');
-  }
+  const session = respondentSession(req);
+  if (!session) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
+  const consent = await get<ConsentRow>(
+    `SELECT id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+       FROM consent_records
+      WHERE id = ? AND survey_id = ? AND version_id = ? AND status = 'granted'
+        AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
+        AND respondent_session_hash = ?${lock ? ' FOR UPDATE' : ''}`,
+    id,
+    context.survey.id,
+    context.version.id,
+    context.invitation?.id ?? null,
+    context.link?.id ?? null,
+    consentSessionHash(id, session),
+  );
+  if (!consent) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
   return consent;
+}
+
+function requireUnusedConsent(context: PublicContext, consent: ConsentRow): void {
+  if (consent.response_id !== null) {
+    fail(409, 'consent_already_used', 'Persetujuan ini sudah dipakai untuk satu respons final.');
+  }
+  const age = Date.now() - Date.parse(consent.recorded_at);
+  if (!Number.isFinite(age) || age < 0 || age >= CONSENT_TTL_MS) {
+    fail(409, 'consent_expired', 'Persetujuan kedaluwarsa. Buka kembali pengantar untuk mencatat persetujuan baru.');
+  }
+  if (context.guardianRequired && (
+    !['self_attested', 'verified'].includes(consent.guardian_evidence_status) || !consent.guardian_evidence_ref?.trim()
+  )) {
+    fail(409, 'guardian_evidence_required', 'Buka kembali pengantar dan lengkapi bukti wali.');
+  }
 }
 
 async function receiptFor(responseId: string) {
@@ -496,6 +530,8 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
       fail(422, 'guardian_evidence_required', 'Bukti verifikasi wali wajib tersedia sebelum pengisian.');
     }
     const consentId = newId('c');
+    const existingSession = respondentSession(req);
+    const session = existingSession ?? randomBytes(32).toString('base64url');
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
     // SEC-04/BF-03: referensi dari form adalah pernyataan responden, bukan hasil verifikasi.
     // Tidak ada jalur yang menandai evidence_ref sebagai sah, jadi statusnya self_attested.
@@ -504,8 +540,9 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     await withTx(async () => {
       await run(
         `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
-          respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, response_id)
-         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, NULL)`,
+          respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, public_link_id,
+          respondent_session_hash, response_id)
+         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, ?, ?, NULL)`,
         consentId,
         context.survey.id,
         context.version.id,
@@ -515,6 +552,8 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
         guardianStatus,
         context.guardianRequired ? evidenceRef : null,
         context.invitation?.id ?? null,
+        context.link?.id ?? null,
+        consentSessionHash(consentId, session),
       );
       // Catat notice yang benar-benar ditampilkan, terpisah dari notice_version pada versi survei.
       await run(
@@ -530,6 +569,15 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
       );
     });
     await auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!existingSession) {
+      res.cookie(RESPONDENT_COOKIE, session, {
+        path: '/api/v1/public/surveys',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.COOKIE_SECURE === '1' || req.secure || req.get('x-forwarded-proto') === 'https',
+      });
+    }
     res.status(201).json({
       data: {
         consent_id: consentId,
@@ -548,10 +596,11 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
 publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: Response) => {
   try {
     const context = await resolvePublicContext(pathParam(req, 'token'));
-    const consent = await requireConsent(context, req.query.consent_id);
+    const consent = await requireConsent(context, req, req.query.consent_id);
     if (!context.canSubmit) {
       fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
     }
+    requireUnusedConsent(context, consent);
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       data: {
@@ -603,7 +652,7 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
     }
     const context = await resolvePublicContext(pathParam(req, 'token'));
     auditObject = `${context.survey.id} · v${context.version.number}`;
-    const consent = await requireConsent(context, req.body?.consent_id);
+    const consent = await requireConsent(context, req, req.body?.consent_id);
     const answers = await parseAnswers(context, req.body?.answers);
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
     const hash = payloadHash({
@@ -643,6 +692,7 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
         const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', context.assignment!.id);
         if (existing) fail(409, 'already_submitted', 'Undangan ini sudah digunakan untuk respons final.');
       }
+      requireUnusedConsent(context, await requireConsent(context, req, consent.id, true));
       const responseId = newId('r');
       const respondentId = newId('p');
       const now = nowIso();
@@ -679,7 +729,12 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
           answer.skipped ? 1 : 0,
         );
       }
-      await run('UPDATE consent_records SET response_id = ? WHERE id = ?', responseId, consent.id);
+      const consumed = await run(
+        'UPDATE consent_records SET response_id = ? WHERE id = ? AND response_id IS NULL',
+        responseId,
+        consent.id,
+      );
+      if (consumed !== 1) fail(409, 'consent_already_used', 'Persetujuan ini sudah dipakai untuk satu respons final.');
       await run(
         'INSERT INTO submission_attempts (id, scope, idempotency_key, payload_hash, response_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         newId('sa'),

@@ -17,7 +17,7 @@
     "start": "node scripts/dev.mjs",
     "start:api": "tsx server/index.ts",
     "start:web": "next start -p 3000",
-    "test": "pnpm typecheck && tsx server/test/migrations.test.ts && tsx server/test/api.test.ts && tsx server/test/export.test.ts && tsx server/test/report-versions.test.ts && tsx server/test/seed-policy.test.ts && tsx --test server/test/guardian-evidence-ui.test.ts",
+    "test": "pnpm typecheck && tsx server/test/migrations.test.ts && tsx server/test/api.test.ts && tsx server/test/consent-context.test.ts && tsx server/test/export.test.ts && tsx server/test/report-versions.test.ts && tsx server/test/seed-policy.test.ts && tsx --test server/test/guardian-evidence-ui.test.ts",
     "lint": "eslint .",
     "smoke:web": "node scripts/smoke-web.mjs",
     "demo:ac13": "tsx server/scripts/ac13-load.ts",
