@@ -349,6 +349,10 @@ export interface DataRequest {
   handled_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Jejak balasan (migrasi 016); NULL pada baris yang belum pernah ditandai dengan kanal balasan. */
+  response_channel?: string | null;
+  responded_by?: string | null;
+  responded_at?: string | null;
 }
 
 export async function submitDataRequest(input: { type: string; contact: string; note?: string }): Promise<DataRequest> {
@@ -359,10 +363,22 @@ export async function getDataRequests(): Promise<DataRequest[]> {
   return call<DataRequest[]>('/admin/data-requests');
 }
 
-export async function updateDataRequest(id: string, status: DataRequestStatus, outcomeNote: string): Promise<{ ok: boolean; status: DataRequestStatus }> {
-  return call<{ ok: boolean; status: DataRequestStatus }>(`/admin/data-requests/${encodeURIComponent(id)}`, {
+/** Server menolak status `handled` tanpa `response_channel` (422 `response_evidence_required`). */
+export type DataRequestUpdate =
+  | { status: 'handled'; outcome_note: string; response_channel: string }
+  | { status: Exclude<DataRequestStatus, 'handled'>; outcome_note: string };
+
+export interface DataRequestUpdated {
+  ok: boolean;
+  status: DataRequestStatus;
+  responded_at: string | null;
+  response_channel: string | null;
+}
+
+export async function updateDataRequest(id: string, input: DataRequestUpdate): Promise<DataRequestUpdated> {
+  return call<DataRequestUpdated>(`/admin/data-requests/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: { status, outcome_note: outcomeNote },
+    body: input,
   });
 }
 
