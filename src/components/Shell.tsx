@@ -50,6 +50,12 @@ const PRESS = 'transition-[transform,background-color,color] duration-150 ease-o
 const PRESS_LINK = `${PRESS} motion-safe:active:scale-[0.96]`;
 const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
 
+/* Deretan tautan desktop mulai sm; nav panjang (admin, ±880px) baru muat mulai 60rem, di bawahnya memakai menu ringkas. */
+const DESKTOP_NAV = {
+  short: { fit: 'sm:w-fit', gap: 'sm:gap-5', row: 'sm:w-auto sm:justify-start', block: 'sm:block', flex: 'sm:flex', inlineFlex: 'sm:inline-flex', hidden: 'sm:hidden' },
+  long: { fit: 'min-[60rem]:w-fit', gap: 'min-[60rem]:gap-5', row: 'min-[60rem]:w-auto min-[60rem]:justify-start', block: 'min-[60rem]:block', flex: 'min-[60rem]:flex', inlineFlex: 'min-[60rem]:inline-flex', hidden: 'min-[60rem]:hidden' },
+};
+
 function Wordmark({ to }: { to: string }) {
   const guard = useNavigationGuard();
   return (
@@ -92,6 +98,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement>(null);
+  const bp = DESKTOP_NAV[nav.length > GUEST_NAV.length ? 'long' : 'short'];
 
   useEffect(() => {
     setMenuOpen(false);
@@ -119,8 +126,8 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
 
   return (
     <header className="sticky top-0 z-nav">
-      <div className="relative mx-auto w-[calc(100%-3.5rem)] sm:w-fit">
-        <div className={`relative flex items-center gap-3 bg-dark p-2 sm:gap-5 ${OUTER}`}>
+      <div className={`relative mx-auto w-[calc(100%-3.5rem)] ${bp.fit}`}>
+        <div className={`relative flex items-center gap-3 bg-dark p-2 ${bp.gap} ${OUTER}`}>
           {/* Fillet cekung, path diambil dari SVG nav referensi (20x20 per sudut). */}
           {([-1, 1] as const).map((side) => (
             <span
@@ -133,11 +140,11 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
               </svg>
             </span>
           ))}
-          <div className="flex w-full min-w-0 items-center justify-between gap-5 sm:w-auto sm:justify-start">
+          <div className={`flex w-full min-w-0 items-center justify-between gap-5 ${bp.row}`}>
             <Wordmark to={homeTo} />
 
           {/* Desktop: deretan tautan seperti referensi. */}
-            <nav aria-label="Navigasi utama" className="hidden sm:block">
+            <nav aria-label="Navigasi utama" className={`hidden ${bp.block}`}>
               <ul className="flex items-center gap-1">
                 {nav.map((item) => (
                   <li key={item.to}>
@@ -156,7 +163,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
                 aria-controls="pill-menu"
                 aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
                 onClick={() => setMenuOpen((v) => !v)}
-                className={`inline-flex size-11 items-center justify-center rounded-full text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
+                className={`inline-flex size-11 items-center justify-center rounded-full text-n400 ${bp.hidden} ${PRESS_BUTTON} hover:text-n0`}
               >
                 <svg
                   aria-hidden="true"
@@ -185,7 +192,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
           </div>
 
           {current ? (
-            <div className="hidden shrink-0 items-center gap-1 sm:flex">
+            <div className={`hidden shrink-0 items-center gap-1 ${bp.flex}`}>
               <button
                 type="button"
                 onClick={handleSignOut}
@@ -197,7 +204,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
           ) : guestActions ? (
             <Link
               href={ROUTES.login}
-              className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 sm:inline-flex ${PRESS_LINK}`}
+              className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${bp.inlineFlex} ${PRESS_LINK}`}
             >
               Masuk
             </Link>
@@ -209,7 +216,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
             ref={menuRef}
             id="pill-menu"
             aria-label="Navigasi seluler"
-            className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
+            className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay ${bp.hidden} rounded-[16px] corner-squircle`}
           >
             <ul className="flex flex-col gap-1">
               {nav.map((item) => (

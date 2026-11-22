@@ -422,7 +422,7 @@ export function IntroPage({ token }: { token: string }) {
 
 /* ---------------- Formulir ---------------- */
 
-function QuestionField({
+export function QuestionField({
   q,
   token,
   value,
@@ -444,7 +444,7 @@ function QuestionField({
   const showError = highlightEmpty && empty;
 
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-n200 p-4" aria-describedby={showError ? `err-${q.id}` : undefined}>
+    <fieldset className="flex flex-col gap-3 rounded-md border border-n200 p-4" aria-describedby={showError && q.type === 'likert' ? `err-${q.id}` : undefined}>
       <legend className="px-1 text-body font-bold text-ink">
         {q.order}. {q.label} {q.required && <span className="text-danger">*</span>}
         {q.required && <span className="sr-only"> (wajib)</span>}
@@ -480,7 +480,14 @@ function QuestionField({
           )}
         </div>
       ) : (
-        <Field id={`${token}-${q.id}-text`} label="Jawaban singkat" hint={q.hint ?? 'Opsional.'}>
+        <Field
+          id={`${token}-${q.id}-text`}
+          label="Jawaban singkat"
+          required={q.required}
+          hint={q.hint ?? (q.required ? undefined : 'Opsional.')}
+          error={showError ? 'Item wajib ini belum diisi.' : undefined}
+          announceError={false}
+        >
           {(aria) => (
             <TextArea
               {...aria}
@@ -490,9 +497,6 @@ function QuestionField({
             />
           )}
         </Field>
-      )}
-      {q.type !== 'likert' && showError && (
-        <p id={`err-${q.id}`} role="alert" className="text-caption font-bold text-danger">Item wajib ini belum diisi.</p>
       )}
     </fieldset>
   );

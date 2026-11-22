@@ -79,6 +79,8 @@ export function HomePage() {
   const { state } = useScreenState('home');
   const { session } = useStore();
   const demoVersions = versionsFor('s_demo1');
+  // Tamu menerima bootstrap tanpa survei; panel contoh hanya tampil bila ada versi terbit untuk dibaca.
+  const activeDemo = demoVersions.find((v) => v.status === 'published');
   const scale5 = optionsFor('q_ad01');
   const scale4 = optionsFor('q_p01');
 
@@ -104,7 +106,7 @@ export function HomePage() {
       >
         <div className="flex flex-col gap-16 lg:gap-24">
           {/* Hero */}
-          <section aria-labelledby="hero-title" className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <section aria-labelledby="hero-title" className={`grid gap-10 lg:items-center ${activeDemo ? 'lg:grid-cols-[1.05fr_0.95fr]' : ''}`}>
             <div className="flex min-w-0 flex-col items-start gap-5">
               <p className="font-mono text-caption font-bold tracking-mono text-n600">PEMBUAT SURVEI</p>
               <h1 id="hero-title" className="text-h1 font-bold leading-[1.12] text-ink wrap-anywhere lg:text-[46px]">
@@ -128,6 +130,7 @@ export function HomePage() {
             </div>
 
             {/* Panel produk dari data nyata, bukan tangkapan layar rekaan. */}
+            {activeDemo && (
             <Card className="flex min-w-0 flex-col gap-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -153,10 +156,11 @@ export function HomePage() {
                 </Table>
               </div>
               <p className="text-caption text-muted">
-                {questionsFor(demoVersions.find((v) => v.status === 'published')?.id ?? '').length} item pada versi aktif.
+                {questionsFor(activeDemo.id).length} item pada versi aktif.
                 Formulir yang sudah terbuka tetap memakai versinya sendiri.
               </p>
             </Card>
+            )}
           </section>
 
           {/* Kemampuan inti */}
