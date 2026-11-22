@@ -1,7 +1,6 @@
 import { all, get, nowIso } from './db.ts';
 import type { AccountRow } from './security.ts';
-import { accessibleSurveys, canReadAggregate, surveyProfileFor, type SurveyProfile } from './http.ts';
-import { summaryFor, type VersionSummary } from './summary.ts';
+import { accessibleSurveys, surveyProfileFor, type SurveyProfile } from './http.ts';
 
 interface ProfileRow {
   id: string;
@@ -188,7 +187,6 @@ export interface BootstrapPayload {
   auditLogs: unknown[];
   integrationEvents: unknown[];
   dataRequests: unknown[];
-  summaries: Record<string, VersionSummary>;
   serverTime: string;
 }
 
@@ -223,7 +221,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       auditLogs: [],
       integrationEvents: [],
       dataRequests: [],
-      summaries: {},
       serverTime: nowIso(),
     };
   }
@@ -347,14 +344,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
     ]),
   );
 
-  const summaries: Record<string, VersionSummary> = {};
-  for (const version of versions) {
-    const survey = surveys.find((item) => item.id === version.survey_id);
-    if (survey && (await canReadAggregate(account, survey))) {
-      summaries[version.id] = await summaryFor(version.id);
-    }
-  }
-
   // UI tidak menyusun profil dari fixture: payload membawa profil kebijakan tiap survei.
   const surveyProfiles: Record<string, SurveyProfile> = {};
   for (const survey of surveys) surveyProfiles[survey.id] = await surveyProfileFor(survey);
@@ -388,7 +377,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
     auditLogs,
     integrationEvents: integrationEvents.map((row) => ({ ...row, simulated: boolean(row.simulated) })),
     dataRequests,
-    summaries,
     serverTime: nowIso(),
   };
 }

@@ -35,7 +35,7 @@ async function hydrate(surveyList: BootstrapData['surveys'], mock: TestContext['
     surveys: surveyList,
     versions: surveyList.map((s) => ({ ...version, id: `v_${s.id}`, survey_id: s.id })),
     profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [], invitations: [], publicLinks: [], assignments: [],
-    settings: {}, grants: [], accounts: [], organizations: [], auditLogs: [], integrationEvents: [], dataRequests: [], summaries: {}, serverTime: '2026-11-21T00:00:00Z',
+    settings: {}, grants: [], accounts: [], organizations: [], auditLogs: [], integrationEvents: [], dataRequests: [], serverTime: '2026-11-21T00:00:00Z',
   };
   mock.method(globalThis, 'fetch', async () => Response.json({ data }));
   await refreshBootstrap();

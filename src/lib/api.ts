@@ -97,7 +97,6 @@ export interface BootstrapData {
   auditLogs: AuditLog[];
   integrationEvents: IntegrationEvent[];
   dataRequests: Array<Record<string, unknown>>;
-  summaries: Record<string, unknown>;
   serverTime: string;
 }
 

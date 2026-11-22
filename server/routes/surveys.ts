@@ -755,6 +755,10 @@ async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow
       WHERE r.version_id IN (${versionIds.map(() => '?').join(',')})`,
     ...versionIds,
   );
+  return byResponse(rows);
+}
+
+function byResponse(rows: AnswerDbRow[]): Map<string, AnswerDbRow[]> {
   const map = new Map<string, AnswerDbRow[]>();
   for (const row of rows) {
     const list = map.get(row.response_id) ?? [];
@@ -762,6 +766,18 @@ async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow
     map.set(row.response_id, list);
   }
   return map;
+}
+
+/** Jawaban hanya untuk respons yang sudah dipaginasi, bukan seluruh jawaban versi. */
+async function answersForResponses(responseIds: string[]): Promise<Map<string, AnswerDbRow[]>> {
+  if (responseIds.length === 0) return new Map();
+  const rows = await all<AnswerDbRow>(
+    `SELECT a.response_id, a.question_code, a.option_id, a.value, a.text, a.skipped
+       FROM answers a
+      WHERE a.response_id IN (${responseIds.map(() => '?').join(',')})`,
+    ...responseIds,
+  );
+  return byResponse(rows);
 }
 
 surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Response) => {
@@ -886,7 +902,7 @@ surveysRouter.get('/surveys/:id/responses', async (req: AuthedRequest, res: Resp
       parseLimit(req.query.limit),
       Number.parseInt(typeof req.query.offset === 'string' ? req.query.offset : '0', 10) || 0,
     );
-    const answersByResponse = await answerRows([version.id]);
+    const answersByResponse = await answersForResponses(rows.map((response) => response.id));
     await audit(req, 'Baca jawaban individual', `${survey.id} · v${version.number}`, 'berhasil', { count: rows.length, includeText });
     res.json({
       data: rows.map((response) => ({
