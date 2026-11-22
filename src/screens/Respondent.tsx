@@ -310,7 +310,7 @@ export function IntroPage({ token }: { token: string }) {
               ].map(([term, detail]) => (
                 <div key={term} className="border-b border-n200 pb-3 last:border-0 last:pb-0">
                   <dt className="text-caption font-bold text-muted">{term}</dt>
-                  <dd className="mt-1 text-body-sm text-ink">{detail}</dd>
+                  <dd className="mt-1 break-words text-body-sm text-ink">{detail}</dd>
                 </div>
               ))}
             </dl>
