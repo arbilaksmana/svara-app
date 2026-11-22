@@ -1,5 +1,5 @@
 import { all, get, nowIso } from './db.ts';
-import type { AccountRow } from './security.ts';
+import { redactAuditRow, type AccountRow } from './security.ts';
 import { accessibleSurveys, surveyProfileFor, type SurveyProfile } from './http.ts';
 
 interface ProfileRow {
@@ -320,7 +320,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       : [];
   const auditLogs =
     account.role === 'super_admin'
-      ? await all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')
+      ? (await all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')).map(redactAuditRow)
       : [];
   const integrationEvents =
     account.role === 'super_admin'

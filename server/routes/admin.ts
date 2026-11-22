@@ -3,7 +3,7 @@ import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
 import { legacyProfileExists, NoticeVersionUnavailable, provisionNoticesForNewOrganization } from '../notice-provisioning.ts';
 import type { AuthedRequest } from '../security.ts';
-import { hashPassword, passwordPolicyError, requireRole } from '../security.ts';
+import { hashPassword, passwordPolicyError, redactAuditRow, requireRole, revokeSessionsOnStatusChange } from '../security.ts';
 import {
   ApiError,
   asBoolean,
@@ -107,13 +107,16 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
     if (account.role === 'super_admin' && (role !== 'super_admin' || status !== 'active') && (await activeSuperAdmins()) <= 1) {
       fail(409, 'last_super_admin', 'Tidak dapat menonaktifkan super admin terakhir.');
     }
-    await run(
-      'UPDATE accounts SET role = ?, status = ?, organization_id = ? WHERE id = ?',
-      role,
-      status,
-      organizationId,
-      account.id,
-    );
+    await withTx(async () => {
+      await run(
+        'UPDATE accounts SET role = ?, status = ?, organization_id = ? WHERE id = ?',
+        role,
+        status,
+        organizationId,
+        account.id,
+      );
+      await revokeSessionsOnStatusChange(account.id, account.status, status);
+    });
     await audit(req, 'Ubah akun', account.id, 'berhasil', { role, status, organization_id: organizationId });
     res.json({ data: { ...account, role, status, organization_id: organizationId } });
   } catch (error) {
@@ -454,8 +457,8 @@ adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
 adminRouter.get('/admin/audit', async (req: AuthedRequest, res: Response) => {
   try {
     const limit = parseLimit(req.query.limit, 100, 500);
-    const rows = await all<Record<string, unknown>>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT ?', limit);
-    res.json({ data: rows });
+    const rows = await all<{ object: string; metadata: string | null }>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT ?', limit);
+    res.json({ data: rows.map(redactAuditRow) });
   } catch (error) {
     sendError(res, error);
   }

@@ -123,6 +123,8 @@ scripts/         Smoke test web
 ## Keamanan dan privasi
 
 - Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt` async (threadpool libuv, tidak memblokir event loop), dan header `X-Svara-Client` untuk mutasi. Cookie dengan percent-encoding rusak diabaikan seperti tidak ada sesi, bukan `500`.
+- Menangguhkan akun lewat `PATCH /admin/accounts/:id` atau `PATCH /org/members/:id` menghapus semua sesinya di transaksi yang sama. Mengaktifkan kembali tidak menghidupkan cookie lama; pemilik akun harus masuk ulang.
+- Semua respons `/api` membawa `Cache-Control: no-store` dari satu middleware di `server/app.ts`, termasuk penolakan dan `404`, agar data sesi tidak tersimpan di cache browser atau proxy.
 - Login menolak email yang formatnya tidak valid atau lebih dari 254 karakter dan kata sandi lebih dari 256 karakter dengan `422 validation_error` generik, sebelum rate limit, query akun, hashing, dan audit. Audit login gagal hanya menyimpan email ternormalisasi yang lolos batas itu.
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
 - Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
@@ -131,6 +133,9 @@ scripts/         Smoke test web
 - Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
 - Lingkup `/org/*` selalu diambil dari sesi (`accounts.organization_id`), tidak pernah dari body atau query; akun tanpa organisasi ditolak `403`.
 - Setiap baris audit mencatat `account_id` pelaku dan `organization_id` dari sesi, sehingga baca jawaban individual, ekspor CSV, dan ekspor kodebook dapat ditelusuri per organisasi. `super_admin` tanpa organisasi menulis `organization_id` NULL.
+- Audit `Buat undangan`/`Cabut undangan` mencatat `<survey_id> · <invitation_id>`, bukan kode `UND-...`, karena kode dapat ditukar menjadi token lewat `POST /public/invitations/resolve`. Baris audit lama yang masih memuat kode undangan (`UND-...`/`ORG-...`) disamarkan menjadi `UND-***`/`ORG-***` saat dibaca lewat `/admin/audit`, `/org/audit`, dan bootstrap; isi tabel `audit_logs` tidak diubah.
+- `expires_at` undangan individual harus `YYYY-MM-DD` (berlaku sampai 23:59:59 UTC hari itu) atau tanggal-waktu ISO-8601 berzona (`Z`/`±hh:mm`) di masa depan; nilai lain, termasuk tanggal yang tidak ada seperti `2026-02-30`, ditolak `422 validation_error`. Nilai tersimpan yang tidak dapat diurai diperlakukan kedaluwarsa oleh endpoint publik.
+- Undangan individual yang sudah dipakai tidak dapat dicabut (`409 invitation_used`) dan tetap berstatus `used`, sama dengan kode undangan organisasi; pencabutan ulang undangan yang sudah dicabut tetap `200`.
 - Pemulihan bukti memerlukan kunci idempotensi dan sesi responden yang mengonsumsi persetujuan. Setelah memuat ulang halaman tinjau, sesi itu dapat mengirim ulang jawaban identik dengan kunci yang sama tanpa membuat respons baru; formulir pengisian tetap terkunci.
 - Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
 - Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
@@ -197,7 +202,7 @@ Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yan
 | `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` (`server/routes/org.ts:50-66`) |
 | `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:67-159`) |
 | `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:160-174`) |
-| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor (`server/routes/org.ts:175-199`) |
+| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota (`server/routes/org.ts:175-199`) |
 | `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan (`server/routes/org.ts:200-220`) |
 | `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi, berlaku 14 hari (`server/routes/org.ts:221-257`) |
 | `DELETE /org/invitations/:id` | Mencabut kode yang belum terpakai; kode terpakai ditolak `409 invitation_used`, kode organisasi lain dijawab `404 invitation_not_found`, pencabutan ulang tetap `200` (`server/routes/org.ts:258-291`) |
@@ -269,7 +274,7 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
 | `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
 | `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter selalu memakai alamat koneksi langsung, sehingga klien yang tidak lewat proxy tidak bisa memalsukan identitasnya. Set hanya bila reverse proxy tepercaya mengisi header tersebut |
-| `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` selalu memakai `Secure`; set di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator. `0`/kosong = cookie sesi memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari proxy yang dipercaya lewat `TRUST_PROXY`. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
+| `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` dan cookie responden `svara_respondent` selalu memakai `Secure`; set di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator. `0`/kosong = kedua cookie memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari proxy yang dipercaya lewat `TRUST_PROXY`. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
@@ -296,7 +301,7 @@ pnpm admin:bootstrap
 
 Versi dan waktu persetujuan disimpan di `accounts.consent_version` dan `accounts.consent_accepted_at`, serta metadata audit `Registrasi`. Naikkan `CURRENT_CONSENT_VERSION` di `server/routes/auth.ts` ketika teks kebijakan privasi atau ketentuan layanan berubah; akun lama tetap `NULL` karena dibuat sebelum bukti persetujuan ada.
 
-Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk. Organisasi akun baru hanya dapat ditentukan saat pendaftaran lewat `invite_code`; super admin belum dapat menetapkannya lewat `/admin/accounts`.
+Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk dan sesinya yang sedang berjalan dihapus. Organisasi akun baru hanya dapat ditentukan saat pendaftaran lewat `invite_code`; super admin belum dapat menetapkannya lewat `/admin/accounts`.
 
 ## Basis data dan migrasi
 

@@ -14,6 +14,7 @@ import {
   passwordPolicyError,
   rateLimit,
   requireAuth,
+  secureCookie,
   sessionCookie,
   verifyPassword,
 } from '../security.ts';
@@ -37,14 +38,6 @@ const EMAIL_MAX_LENGTH = 254;
 /** Panjang dicek lebih dulu agar regex tidak pernah menelusuri string raksasa. */
 function validEmail(email: string): boolean {
   return email.length <= EMAIL_MAX_LENGTH && EMAIL_RE.test(email);
-}
-
-/**
- * `COOKIE_SECURE=1` selalu memberi `Secure`. Tanpanya hanya HTTPS terpercaya: `req.secure`
- * membaca X-Forwarded-Proto hanya dari proxy yang dipercaya lewat TRUST_PROXY.
- */
-function isSecure(req: AuthedRequest): boolean {
-  return process.env.COOKIE_SECURE === '1' || req.secure;
 }
 
 async function failLogin(actor: string): Promise<void> {
@@ -97,7 +90,7 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
       throw new ApiError(401, 'invalid_credentials', 'Email atau kata sandi tidak cocok.');
     }
     const session = await createSession(row.id);
-    res.setHeader('Set-Cookie', sessionCookie(session.token, isSecure(req)));
+    res.setHeader('Set-Cookie', sessionCookie(session.token, secureCookie(req)));
     res.setHeader('Cache-Control', 'no-store');
     await run(
       'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -229,7 +222,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     }
 
     const session = await createSession(accountId);
-    res.setHeader('Set-Cookie', sessionCookie(session.token, isSecure(req)));
+    res.setHeader('Set-Cookie', sessionCookie(session.token, secureCookie(req)));
     res.setHeader('Cache-Control', 'no-store');
     res.status(201).json({
       data: {

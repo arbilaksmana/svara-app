@@ -98,6 +98,25 @@ export async function destroySession(token: string): Promise<void> {
   await run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
 }
 
+/**
+ * Perubahan status akun selain aktif→aktif menghapus semua sesinya: saat ditangguhkan, dan saat
+ * diaktifkan kembali agar sesi yang tersisa dari sebelum aturan ini tidak hidup lagi.
+ * Panggil di transaksi yang sama dengan UPDATE status.
+ */
+export async function revokeSessionsOnStatusChange(accountId: string, previous: string, next: string): Promise<void> {
+  if (previous === 'active' && next === 'active') return;
+  await run('DELETE FROM sessions WHERE account_id = ?', accountId);
+}
+
+/**
+ * `COOKIE_SECURE=1` selalu memberi `Secure`. Tanpanya hanya HTTPS terpercaya: `req.secure`
+ * membaca X-Forwarded-Proto hanya dari proxy yang dipercaya lewat TRUST_PROXY.
+ * Dipakai cookie sesi dan cookie responden.
+ */
+export function secureCookie(req: Request): boolean {
+  return process.env.COOKIE_SECURE === '1' || req.secure;
+}
+
 export function sessionCookie(token: string, secure: boolean): string {
   const attrs = [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
@@ -266,6 +285,22 @@ export function trustProxySetting(value: string | undefined): boolean | number |
   if (hops.every((hop) => ALLOWED.has(hop))) return value!.trim();
   console.warn(`[api] TRUST_PROXY tidak dikenal ("${value}"); memakai "loopback".`);
   return 'loopback';
+}
+
+/** Kode undangan survei (UND-...) dan organisasi (ORG-...) yang dapat tertulis di baris audit lama. */
+const INVITATION_CODE = /\b(UND|ORG)-[A-Z0-9_-]+/gi;
+
+/**
+ * Samarkan kode undangan pada `object`/`metadata` audit saat dibaca. Baris baru hanya memuat ID;
+ * baris lama tidak diubah di basis data, jadi semua jalur baca audit wajib melewati fungsi ini.
+ */
+export function redactAuditRow<T extends { object: string; metadata?: string | null }>(row: T): T {
+  const mask = (text: string) => text.replace(INVITATION_CODE, (_code, prefix: string) => `${prefix}-***`);
+  return {
+    ...row,
+    object: mask(row.object),
+    ...(typeof row.metadata === 'string' ? { metadata: mask(row.metadata) } : {}),
+  };
 }
 
 export async function knownAccountEmails(): Promise<string[]> {
