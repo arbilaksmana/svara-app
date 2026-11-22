@@ -397,3 +397,16 @@ test('Publish menolak survei mandiri bila notice platform versinya tidak tersedi
     await run("UPDATE platform_profile SET notice_version = ? WHERE id = 'platform'", original.notice_version);
   }
 });
+
+test('B1: menutup survei tidak gagal karena expires_at tautan yang tak terurai', async () => {
+  const survey = await publishedSurvey(creatorA, 'Survei kepuasan layanan perpustakaan sekolah');
+  const { token } = survey.first.publicLink;
+  await run("UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token = ?", token);
+  const closed = await request(`/surveys/${survey.id}/close`, 'POST', undefined, { Cookie: creatorA });
+  assert.equal(closed.status, 200, JSON.stringify(closed.json));
+  const link = await get<{ status: string; closed_reason: string | null }>(
+    'SELECT status, closed_reason FROM public_links WHERE token = ?',
+    token,
+  );
+  assert.deepEqual(link, { status: 'closed', closed_reason: 'closed' });
+});
