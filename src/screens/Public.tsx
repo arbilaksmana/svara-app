@@ -162,10 +162,10 @@ export function NotFoundPage() {
     <Shell kind="public" title="Halaman tidak ditemukan">
       <Card>
         <p className="text-body text-ink">Halaman yang Anda cari tidak tersedia.</p>
-        <p className="mt-2 text-body-sm text-muted">Gunakan tautan berikut untuk kembali ke alur yang tersedia.</p>
+        <p className="mt-2 text-body-sm text-muted">Periksa kembali alamat tautan. Bila Anda menerima kode undangan survei, buka undangan dengan kode itu.</p>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <ActionLink to={ROUTES.home}>Kembali ke beranda</ActionLink>
-          <ActionLink to={ROUTES.creator} variant="secondary">Daftar survei</ActionLink>
+          <ActionLink to={ROUTES.respondentCode} variant="secondary">Buka undangan</ActionLink>
         </div>
       </Card>
       
