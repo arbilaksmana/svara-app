@@ -9,7 +9,9 @@ import {
   Checkbox,
   Code,
   ConfirmDialog,
+  ErrorState,
   Field,
+  LoadingState,
   SectionTitle,
   Table,
   Td,
@@ -21,19 +23,24 @@ import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
 import {
   ApiError,
-  getOrgAudit,
-  getOrgMembers,
-  getOrgProfile,
   inviteOrgMember,
-  listOrgInvitations,
   revokeOrgInvitation,
   saveOrgProfile,
   setOrgMemberStatus,
   type OrgProfileInput,
 } from '../lib/api';
-import { AGE_CATEGORY_LABEL, CONSENT_MODE_LABEL, INVITATION_STATUS_LABEL, INVITATION_STATUS_TONE, ORGANIZATION_TYPE_LABEL } from '../lib/labels';
+import {
+  ACCOUNT_STATUS_LABEL,
+  AGE_CATEGORY_LABEL,
+  CONSENT_MODE_LABEL,
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+  ORGANIZATION_TYPE_LABEL,
+  ROLE_LABEL,
+} from '../lib/labels';
+import { cancelOrgWorkspaceLoad, loadOrgWorkspace, useStore } from '../lib/store';
 import { formatWIB } from '../lib/summary';
-import type { AgeCategory, ConsentMode, OrgAuditRow, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
+import type { AgeCategory, ConsentMode, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
 
 /** Pesan field per kode validasi server (PRD §1.2). */
 const FIELD_FOR_CODE: Record<string, 'respondent_age_category' | 'consent_mode' | 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact'> = {
@@ -89,42 +96,29 @@ function payloadFrom(form: FormState): OrgProfileInput {
 export function AdminOrgPage() {
   const notify = useToast();
   const { state } = useScreenState('admin-org');
-  const [profile, setProfile] = useState<OrgProfile | null>(null);
-  const [form, setForm] = useState<FormState | null>(null);
+  const { org, orgError } = useStore();
+  const profile = org?.profile ?? null;
+  const [draft, setDraft] = useState<FormState | null>(null);
+  // Formulir mengikuti profil server sampai pengguna mengubahnya.
+  const form = draft ?? (profile ? formFrom(profile) : null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [members, setMembers] = useState<OrgMember[]>([]);
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
-  const [invitations, setInvitations] = useState<OrgInvitation[]>([]);
   const [invitationBusy, setInvitationBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<OrgInvitation | null>(null);
-  const [audit, setAudit] = useState<OrgAuditRow[]>([]);
-
-  const reload = async () => {
-    const [profileResult, memberResult, invitationResult, auditResult] = await Promise.all([
-      getOrgProfile(),
-      getOrgMembers(),
-      listOrgInvitations(),
-      getOrgAudit(),
-    ]);
-    setProfile(profileResult.profile);
-    setForm((current) => current ?? formFrom(profileResult.profile));
-    setMembers(memberResult);
-    setInvitations(invitationResult.invitations);
-    setAudit(auditResult);
-  };
 
   useEffect(() => {
-    void reload().catch((error: unknown) => {
-      notify(error instanceof Error ? error.message : 'Data organisasi gagal dimuat.', 'danger');
-    });
     // Muat sekali saat halaman dibuka; aksi pengguna memuat ulang secara eksplisit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadOrgWorkspace();
+    return cancelOrgWorkspaceLoad;
   }, []);
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((current) => (current ? { ...current, [key]: value } : current));
+    setDraft((current) => {
+      const base = current ?? (profile ? formFrom(profile) : null);
+      return base ? { ...base, [key]: value } : base;
+    });
     setFieldErrors((current) => {
       if (!(key in current)) return current;
       const next = { ...current };
@@ -141,11 +135,10 @@ export function AdminOrgPage() {
     setSaved(false);
     void saveOrgProfile(payloadFrom(form))
       .then((result) => {
-        setProfile(result.profile);
-        setForm(formFrom(result.profile));
+        setDraft(formFrom(result.profile));
         setSaved(true);
         notify('Profil organisasi disimpan.');
-        return reload();
+        return loadOrgWorkspace();
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.code) {
@@ -162,8 +155,8 @@ export function AdminOrgPage() {
     setMemberBusy(member.id);
     void setOrgMemberStatus(member.id, status)
       .then((updated) => {
-        setMembers((current) => current.map((row) => (row.id === updated.id ? updated : row)));
         notify(`Status ${updated.display_name} diperbarui.`);
+        return loadOrgWorkspace();
       })
       .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Status gagal diubah.', 'danger'))
       .finally(() => setMemberBusy(null));
@@ -174,7 +167,7 @@ export function AdminOrgPage() {
     void inviteOrgMember()
       .then(() => {
         notify('Kode undangan organisasi dibuat.');
-        return reload();
+        return loadOrgWorkspace();
       })
       .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Undangan gagal dibuat.', 'danger'))
       .finally(() => setInvitationBusy(false));
@@ -188,7 +181,7 @@ export function AdminOrgPage() {
     void revokeOrgInvitation(target.id)
       .then(() => {
         notify('Kode undangan dicabut.');
-        return reload();
+        return loadOrgWorkspace();
       })
       .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Undangan gagal dicabut.', 'danger'))
       .finally(() => setInvitationBusy(false));
@@ -196,6 +189,24 @@ export function AdminOrgPage() {
 
   const consentMismatch = (form?.respondent_age_category === 'minor' || form?.respondent_age_category === 'mixed')
     && form?.consent_mode === 'self';
+
+  // Galat, memuat, dan data saling eksklusif: kegagalan tidak boleh tampil sebagai organisasi kosong.
+  if (orgError || !org) {
+    return (
+      <Shell kind="admin" title="Organisasi" subtitle="Profil kebijakan, anggota, undangan, dan audit lingkup organisasi Anda.">
+        {orgError ? (
+          <ErrorState
+            title="Data organisasi gagal dimuat"
+            detail={`${orgError} Profil, anggota, undangan, dan log audit tidak ditampilkan sampai data berhasil dimuat.`}
+            action={<Button variant="secondary" onClick={() => void loadOrgWorkspace()}>Coba lagi</Button>}
+          />
+        ) : (
+          <LoadingState label="Memuat data organisasi…" rows={4} />
+        )}
+      </Shell>
+    );
+  }
+  const { members, invitations, audit } = org;
 
   return (
     <Shell kind="admin" title="Organisasi" subtitle="Profil kebijakan, anggota, undangan, dan audit lingkup organisasi Anda.">
@@ -344,8 +355,8 @@ export function AdminOrgPage() {
                   <tr key={member.id}>
                     <Th>{member.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{member.id}</Code></span></Th>
                     <Td>{member.email}</Td>
-                    <Td>{member.role}</Td>
-                    <Td><Badge tone={member.status === 'active' ? 'success' : 'neutral'}>{member.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge></Td>
+                    <Td>{ROLE_LABEL[member.role]}</Td>
+                    <Td><Badge tone={member.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[member.status]}</Badge></Td>
                     <Td>
                       <Button
                         variant="ghost"

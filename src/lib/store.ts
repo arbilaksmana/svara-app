@@ -19,7 +19,7 @@ import {
   organizations,
 } from './fixtures/records';
 import * as api from './api';
-import type { AdminStats, SurveyScope } from './api';
+import type { AdminStats, DataRequest, SurveyScope } from './api';
 import type {
   Account,
   AccessGrant,
@@ -31,6 +31,10 @@ import type {
   IntegrationEvent,
   Invitation,
   Notice,
+  OrgAuditRow,
+  OrgInvitation,
+  OrgMember,
+  OrgProfile,
   PublicLink,
   Question,
   QuestionOption,
@@ -69,6 +73,13 @@ export interface DraftState {
   savedAt: string;
 }
 
+export interface OrgWorkspace {
+  profile: OrgProfile;
+  members: OrgMember[];
+  invitations: OrgInvitation[];
+  audit: OrgAuditRow[];
+}
+
 export interface Snapshot {
   revision: number;
   ready: boolean;
@@ -81,6 +92,10 @@ export interface Snapshot {
   stats: AdminStats | null;
   statsError: string | null;
   notices: Notice[];
+  org: OrgWorkspace | null;
+  orgError: string | null;
+  dataRequests: DataRequest[] | null;
+  dataRequestsError: string | null;
 }
 
 let session: Session | null = null;
@@ -90,6 +105,12 @@ let stats: Snapshot['stats'] = null;
 let statsError: string | null = null;
 /** Nomor permintaan ringkasan terakhir; respons lama tidak boleh menimpa UI. */
 let statsRequest = 0;
+let org: OrgWorkspace | null = null;
+let orgError: string | null = null;
+let orgRequest = 0;
+let dataRequestList: DataRequest[] | null = null;
+let dataRequestsError: string | null = null;
+let dataRequestsRequest = 0;
 let settings: Record<string, SettingsState> = {};
 let grants: Record<string, GrantState> = {};
 let drafts: Record<string, DraftState> = {};
@@ -121,6 +142,10 @@ function buildSnapshot(): Snapshot {
     stats,
     statsError,
     notices: noticeList,
+    org,
+    orgError,
+    dataRequests: dataRequestList,
+    dataRequestsError,
   };
 }
 
@@ -406,6 +431,61 @@ export async function loadAdminStats(): Promise<void> {
 /** Dipanggil saat layar dilepas; respons yang tiba setelahnya tidak boleh mengubah state. */
 export function cancelAdminStatsLoad(): void {
   statsRequest += 1;
+}
+
+/**
+ * Profil, anggota, undangan, dan audit organisasi dimuat sekaligus. Data lama tetap tampil selama
+ * pemuatan ulang; galat disimpan terpisah agar layar menawarkan "Coba lagi", bukan daftar kosong.
+ */
+export async function loadOrgWorkspace(): Promise<void> {
+  const request = ++orgRequest;
+  orgError = null;
+  emit();
+  try {
+    const [profile, members, invitationList, audit] = await Promise.all([
+      api.getOrgProfile(),
+      api.getOrgMembers(),
+      api.listOrgInvitations(),
+      api.getOrgAudit(),
+    ]);
+    if (request !== orgRequest) return;
+    org = { profile: profile.profile, members, invitations: invitationList.invitations, audit };
+  } catch (cause) {
+    if (request !== orgRequest) return;
+    orgError = cause instanceof Error ? cause.message : 'Data organisasi tidak dapat dimuat.';
+  }
+  emit();
+}
+
+/** Dipanggil saat layar organisasi dilepas: respons yang tertunda diabaikan dan data tidak dibawa ke sesi berikutnya. */
+export function cancelOrgWorkspaceLoad(): void {
+  orgRequest += 1;
+  org = null;
+  orgError = null;
+  emit();
+}
+
+export async function loadDataRequests(): Promise<void> {
+  const request = ++dataRequestsRequest;
+  dataRequestsError = null;
+  emit();
+  try {
+    const next = await api.getDataRequests();
+    if (request !== dataRequestsRequest) return;
+    dataRequestList = next;
+  } catch (cause) {
+    if (request !== dataRequestsRequest) return;
+    dataRequestsError = cause instanceof Error ? cause.message : 'Daftar permintaan data tidak dapat dimuat.';
+  }
+  emit();
+}
+
+/** Sama dengan cancelOrgWorkspaceLoad untuk antrean permintaan data super admin. */
+export function cancelDataRequestsLoad(): void {
+  dataRequestsRequest += 1;
+  dataRequestList = null;
+  dataRequestsError = null;
+  emit();
 }
 
 export function setIntegrationNote(note: string): void {

@@ -1,4 +1,4 @@
-import type { AgeCategory, ConsentMode, InvitationStatus, OrganizationType, SurveyStatus, VersionStatus } from './types';
+import type { AccountStatus, AgeCategory, ConsentMode, InvitationStatus, OrganizationType, Role, SurveyStatus, VersionStatus } from './types';
 
 export const STATUS_LABEL: Record<SurveyStatus | VersionStatus, string> = {
   draft: 'Draf',
@@ -36,4 +36,24 @@ export const INVITATION_STATUS_TONE: Record<InvitationStatus, 'success' | 'info'
   used: 'info',
   revoked: 'danger',
   expired: 'warning',
+};
+
+/** Nama aktor mengikuti PRD §3; dipakai daftar akun super admin dan daftar anggota organisasi. */
+export const ROLE_LABEL: Record<Role, string> = {
+  super_admin: 'Super admin',
+  org_admin: 'Admin organisasi',
+  creator: 'Creator',
+};
+
+export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
+  active: 'Aktif',
+  suspended: 'Dinonaktifkan',
+};
+
+/** Sama dengan pilihan formulir permintaan data di /privacy; jenis lain dari server ditampilkan apa adanya. */
+export const DATA_REQUEST_TYPE_LABEL: Partial<Record<string, string>> = {
+  access: 'Akses data',
+  correction: 'Koreksi data',
+  withdrawal: 'Penarikan persetujuan',
+  deletion: 'Penghapusan data',
 };
