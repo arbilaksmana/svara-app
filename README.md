@@ -30,7 +30,7 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 | Area | Isi |
 | --- | --- |
 | Instrumen | Editor pertanyaan Likert, pilihan tunggal, dan isian singkat; kode item unik; validasi sebelum simpan dan sebelum terbit |
-| Versi | Hanya versi terbit terbaru yang menerima kiriman. Tautan umum versi sebelumnya membuka versi terbit terbaru pada survei yang sama |
+| Versi | Hanya versi terbit terbaru yang menerima kiriman. Tautan umum versi sebelumnya membuka versi terbit terbaru pada survei yang sama, kecuali tautan survei yang pernah diarsipkan dan tautan yang sudah ditutup sebelum upgrade (`closed_reason` kosong); keduanya tetap ditutup |
 | Distribusi | Tautan umum dan undangan individual berkode, dengan status, masa berlaku, dan pencabutan |
 | Pengumpulan | Persetujuan tercatat di server, kiriman idempoten, bukti terima yang dapat dibuka kembali |
 | Hasil | Agregat per versi, ekspor CSV, dan codebook per versi |
@@ -76,7 +76,7 @@ Tanpa `SEED_DEMO=1` basis data tetap kosong dan admin pertama dibuat lewat `pnpm
 ## Alur pemakaian
 
 1. Creator menyusun draf instrumen: judul, tujuan, petunjuk, pertanyaan, opsi, dan kode item.
-2. Draf diterbitkan menjadi versi tetap. Tautan umum lama tetap dapat membuka versi terbit terbaru; undangan individual tetap terikat pada versinya.
+2. Draf diterbitkan menjadi versi tetap. Tautan umum lama tetap dapat membuka versi terbit terbaru (kecuali setelah survei diarsipkan); undangan individual tetap terikat pada versinya dan tampil **Ditutup** setelah versinya tidak lagi terbit.
 3. Responden membuka tautan, membaca pemberitahuan, memberi persetujuan, mengisi, lalu menerima bukti kirim.
 4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah.
 5. Publikasi menutup versi terbit sebelumnya. Jika tidak ada versi terbit, tautan umum tidak menerima kiriman baru.
@@ -108,7 +108,7 @@ scripts/         Smoke test web
 ```
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
-- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`017`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
+- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`018`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
 - `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
@@ -186,6 +186,8 @@ Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yan
 
 - Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`noticeVersionFor` dan `surveyProfileFor` di `server/http.ts`; `surveyProfileFor` dipakai detail survei dan bootstrap).
 - `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`noticeVersionFor`, dipanggil `POST /surveys` dan `PUT /surveys/:id` saat draf dibuat).
+- Publish menolak `422 notice_version_unavailable` bila notice versi draf belum tersedia di sumbernya, sehingga tidak ada versi terbit yang tautannya langsung gagal.
+- Migrasi `018_notice_survey_profile_backfill.sql` mengoreksi backfill `013` untuk data hasil upgrade: notice lingkup diisi dari teks yang dulu ditampilkan per survei (`surveys.profile_id`, versi persis atau notice terbaru profil itu) di bawah label `survey_versions.notice_version`; `notice_version` organisasi/platform yang belum dipakai survei diisi dari profil default `POST /surveys`. Sumbernya tercatat di `organization_notice_sources`/`platform_notice_sources` (`survey_profile`); baris yang sudah ada tidak ditimpa, dan survei berprofil tanpa notice tetap gagal-tertutup (`500 notice_version_unavailable`).
 
 ### Siapa boleh membaca jawaban dan teks bebas
 
@@ -194,6 +196,7 @@ Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yan
 - Pemegang grant tetap terikat `survey_settings`: grant `can_read_individual` hanya berlaku bila `allow_individual` aktif, dan grant apa pun memberi baca agregat hanya bila `allow_results` aktif (`canReadIndividual`, `canReadAggregate`).
 - Setiap baca individual dan ekspor dicatat dengan `account_id` pelaku serta `organization_id` sesi, berhasil maupun ditolak (`audit` di `server/http.ts`, diuji di test yang sama).
 - Ekspor CSV memuat baris per responden, jadi memerlukan izin ekspor sekaligus izin baca individual yang berlaku (`canExportIndividual`). Pemegang grant `can_export` tanpa `can_read_individual`, atau dengan `allow_individual` mati, mendapat `403 forbidden_export_individual`; kodebook cukup dengan izin ekspor. Halaman hasil menonaktifkan **Unduh CSV** beserta alasannya untuk akun seperti itu, sementara **Unduh kodebook** tetap aktif.
+- Audit ekspor CSV fail-closed: baris `Mulai ekspor CSV` ditulis sebelum byte pertama dikirim (gagal ditulis → `500` tanpa data), lalu hasil akhir (selesai atau terputus) dicatat sesudahnya. Metadata mencatat nama berkas, kolom, dan header `Accept` permintaan; penerima dan tujuan berkas setelah diunduh tidak dicatat.
 
 ### Permukaan admin organisasi
 
@@ -239,6 +242,9 @@ Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.
 - `respondent_age_category`/`consent_mode` opsional dengan default `adult`/`self`; kombinasi minor/mixed dengan `self` ditolak `422 consent_mode_mismatch` (PRD §1.2).
 - `policy_url`/`terms_url` default ke halaman `/kebijakan-privasi` dan `/ketentuan-layanan`, lalu dapat diubah `org_admin` lewat `PUT /org/profile`.
 - Akun admin hasil onboarding belum mencatat persetujuan kebijakan (`consent_version` NULL) karena belum ada yang menyetujui.
+- Notice awal organisasi disediakan eksplisit dalam transaksi yang sama (`provisionNoticesForNewOrganization` di `server/notice-provisioning.ts`), bukan fallback saat dibaca: tanpa `notice_profile_name` (payload UI), notice platform untuk `notice_version` organisasi disalin ke `organization_notices` (sumber `platform`); dengan `notice_profile_name`, notice profil legacy bernama itu yang disalin (sumber `legacy`). Nama organisasi tidak dicocokkan ke profil legacy.
+- `notice_version` opsional; default mengikuti versi yang berlaku di sumbernya (`platform_profile.notice_version` atau `profiles.notice_version` profil legacy yang dipilih). Versi yang tidak tersedia ditolak `422 notice_version_unavailable` dengan `details.available_platform_versions`, tanpa menyimpan organisasi maupun admin; katalog sumber yang belum dimigrasi menghasilkan `500 notice_catalog_missing`.
+- Log audit `Buat organisasi` juga mencatat `metadata.notice_version`, `metadata.notice_source` (`platform`/`legacy`), dan `metadata.notice_count`.
 - Respons memuat `organization` dan `account` (tanpa hash kata sandi); perubahan dicatat pada log audit `Buat organisasi` dengan `metadata.admin_account_id`.
 
 Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah akunnya dan formulir pembuatan; setelah sukses daftar akun serta opsi organisasi ikut diperbarui lewat `refreshBootstrap`.
@@ -275,11 +281,11 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Batas waktu membuka koneksi |
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
 | `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
-| `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter selalu memakai alamat koneksi langsung, sehingga klien yang tidak lewat proxy tidak bisa memalsukan identitasnya. Set hanya bila reverse proxy tepercaya mengisi header tersebut |
+| `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter memakai alamat yang sama dengan `req.ip`: tanpa `TRUST_PROXY` alamat koneksi; dengan `TRUST_PROXY`, `X-Forwarded-For` ditelusuri dari kanan dan alamat pertama yang tidak dipercaya menjadi identitas klien (entri bukan IP jatuh ke alamat koneksi), sedangkan koneksi langsung dari alamat di luar `TRUST_PROXY` tetap dihitung per koneksi. Rewrite Next hanya mengisi `X-Forwarded-For` bila kosong dan tidak menambahkannya, jadi `TRUST_PROXY=loopback` hanya aman bila ingress di depan Next menambahkan atau menimpa header itu (mis. nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`); tanpa ingress, biarkan kosong |
 | `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` dan cookie responden `svara_respondent` selalu memakai `Secure`; set di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator. `0`/kosong = kedua cookie memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari proxy yang dipercaya lewat `TRUST_PROXY`. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
-| `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
+| `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak. Versi yang pernah terbit (termasuk yang sudah ditutup) tetap terbaca dan respons memuat `survey_version_status`; draf dan survei di luar cakupan organisasi `404` |
 | `INTEGRATION_ORGANIZATION_ID` | kosong | ID organisasi cakupan `INTEGRATION_TOKEN`. Saat startup API, hash token dicatat di `integration_token_scopes` untuk organisasi ini; token tanpa cakupan ditolak `403 forbidden_service_scope` |
 | `DATA_REQUEST_RETENTION_DAYS` | `365` | Masa simpan permintaan data dalam hari (bilangan bulat >= 1) untuk `pnpm retention:data-requests`; nilai tidak valid menghentikan skrip dengan exit code 1 |
 | `EXPORT_BATCH_SIZE` | `500` | Jumlah respons per batch saat ekspor CSV di-stream; hanya dapat menurunkan dari 500 dan dipakai test untuk memaksa banyak batch. Biarkan kosong di deployment |
