@@ -25,29 +25,6 @@ export interface VersionRow {
   closed_at: string | null;
 }
 
-export interface QuestionRow {
-  id: string;
-  version_id: string;
-  code: string;
-  ord: number;
-  type: string;
-  required: number;
-  section: string;
-  label: string;
-  hint: string | null;
-  group_code: string | null;
-  dimension_code: string | null;
-  direction: string | null;
-}
-
-export interface OptionRow {
-  id: string;
-  question_id: string;
-  ord: number;
-  label: string;
-  value: number | null;
-}
-
 export interface GrantRow {
   id: string;
   account_id: string;
@@ -96,14 +73,6 @@ export async function versionById(id: string): Promise<VersionRow | undefined> {
 
 export async function versionsFor(surveyId: string): Promise<VersionRow[]> {
   return all<VersionRow>('SELECT * FROM survey_versions WHERE survey_id = ? ORDER BY number', surveyId);
-}
-
-export async function questionsFor(versionId: string): Promise<QuestionRow[]> {
-  return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord', versionId);
-}
-
-export async function optionsFor(questionId: string): Promise<OptionRow[]> {
-  return all<OptionRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
 }
 
 export async function grantFor(accountId: string, surveyId: string): Promise<GrantRow | undefined> {

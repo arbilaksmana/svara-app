@@ -325,8 +325,11 @@ export async function auditPublic(
 }
 
 export function csvCell(value: unknown, neutralizeFormula = true): string {
+  // Number berhingga selalu ditulis sebagai angka (-1, 2.5, 1e+21) dan tidak bisa menjadi rumus;
+  // hanya teks (termasuk teks "-1") dan nilai non-berhingga yang dinetralisasi.
+  const numeric = typeof value === 'number' && Number.isFinite(value);
   let text = value === null || value === undefined ? '' : String(value);
-  if (neutralizeFormula && /^[=+\-@\t\r]/.test(text)) {
+  if (neutralizeFormula && !numeric && /^[=+\-@\t\r]/.test(text)) {
     // Prefix apostrof agar spreadsheet memperlakukan nilai sebagai teks.
     // Nilai asli di basis data tidak diubah.
     text = `'${text}`;
