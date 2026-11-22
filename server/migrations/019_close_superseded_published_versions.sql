@@ -40,4 +40,10 @@ WITH stale AS (
 )
 UPDATE public_links SET status = 'closed', closed_reason = 'superseded'
  WHERE version_id IN (SELECT id FROM closed_versions) AND status = 'active'
-   AND (expires_at IS NULL OR expires_at::timestamptz >= now());
+   -- CASE menjamin cast hanya dievaluasi untuk nilai yang terurai; nilai tak terurai diperlakukan belum
+   -- kedaluwarsa seperti resolver publik, sehingga satu baris yang diedit manual tidak menggagalkan upgrade.
+   AND CASE
+         WHEN expires_at IS NULL THEN true
+         WHEN pg_input_is_valid(expires_at, 'timestamptz') THEN expires_at::timestamptz >= now()
+         ELSE true
+       END;

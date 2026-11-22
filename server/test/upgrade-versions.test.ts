@@ -465,3 +465,17 @@ test('019 idempoten: dijalankan ulang tidak mengubah apa pun lagi', async () => 
   assert.deepEqual(await migrate(), [MIGRATION_019], 'menerapkan ulang 019');
   assert.deepEqual({ ...(await lifecycle()), ...(await historical()) }, before);
 });
+
+test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', async () => {
+  await resetSchema();
+  await migrate({ to: '009' });
+  await seedMainDeployment();
+  await migrate({ to: '018' });
+  // Data yang pernah diedit manual: tautan survei lain dan tautan versi yang akan ditutup memuat tanggal tak terurai.
+  await sql("UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token = $1", [TOKENS.tunggal]);
+  await sql("UPDATE public_links SET expires_at = '' WHERE token = $1", [TOKENS.layananV1]);
+  assert.deepEqual(await migrate(), [MIGRATION_019], 'migrasi 019 tetap berjalan');
+  assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
+  // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.
+  assert.deepEqual(await linkState(LAYANAN, 1), { status: 'closed', closed_reason: 'superseded' });
+});
