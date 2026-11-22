@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
-import { closeTestDatabase, resetTestDatabase } from './test-db.ts';
+import { closeTestDatabase, indexExists, resetTestDatabase } from './test-db.ts';
 
 const { app } = await import('../app.ts');
-const { all, run } = await import('../db.ts');
+const { all, pool, run, toPgPlaceholders } = await import('../db.ts');
 const { csvCell } = await import('../http.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
@@ -157,4 +157,86 @@ test('L-03: csvCell hanya membebaskan number berhingga; string dan nilai non-ber
   assert.equal(csvCell(-Infinity), "'-Infinity", 'number non-berhingga diperlakukan seperti teks');
   assert.equal(csvCell(-1, false), '-1');
   assert.equal(csvCell('-1', false), '-1', 'neutralizeFormula=false tetap menonaktifkan prefiks');
+});
+
+/** Indeks 017 beserta definisi kanonis Postgres; kolom dan urutan harus cocok dengan query jalur panas. */
+const HOT_PATH_INDEXES: Record<string, string> = {
+  ix_public_links_token_hash: 'CREATE INDEX ix_public_links_token_hash ON public.public_links USING btree (token_hash)',
+  ix_invitations_token_hash: 'CREATE INDEX ix_invitations_token_hash ON public.invitations USING btree (token_hash)',
+  ix_responses_version_submitted:
+    'CREATE INDEX ix_responses_version_submitted ON public.responses USING btree (version_id, submitted_at, id)',
+  ix_audit_org_at:
+    'CREATE INDEX ix_audit_org_at ON public.audit_logs USING btree (organization_id, at DESC, id DESC) WHERE (organization_id IS NOT NULL)',
+};
+
+async function hotPathIndexDefs(): Promise<Record<string, string>> {
+  const rows = await all<{ indexname: string; indexdef: string }>(
+    `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname IN (${Object.keys(HOT_PATH_INDEXES).map(() => '?').join(',')})`,
+    ...Object.keys(HOT_PATH_INDEXES),
+  );
+  return Object.fromEntries(rows.map((row) => [row.indexname, row.indexdef]));
+}
+
+/** Rencana query persis dari kode dengan seq scan, bitmap, dan sort dimahalkan: indeks yang cocok pasti dipilih. */
+async function forcedPlan(sql: string, params: unknown[]): Promise<string> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const setting of ['enable_seqscan', 'enable_bitmapscan', 'enable_sort', 'enable_incremental_sort']) {
+      await client.query(`SET LOCAL ${setting} = off`);
+    }
+    const result = await client.query(`EXPLAIN (FORMAT JSON) ${toPgPlaceholders(sql)}`, params);
+    return JSON.stringify(result.rows[0]['QUERY PLAN']);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+}
+
+test('PERF-07: migrasi membuat indeks jalur panas dengan kolom yang dipakai query', async () => {
+  for (const name of Object.keys(HOT_PATH_INDEXES)) assert.equal(await indexExists(name), true, `${name} belum ada`);
+  assert.deepEqual(await hotPathIndexDefs(), HOT_PATH_INDEXES);
+});
+
+test('PERF-07: query jalur panas dapat dilayani indeks 017 tanpa langkah Sort', async () => {
+  const cases: Array<[string, string, unknown[]]> = [
+    ['ix_public_links_token_hash', 'SELECT * FROM public_links WHERE token_hash = ?', ['a'.repeat(64)]],
+    ['ix_invitations_token_hash', 'SELECT * FROM invitations WHERE token_hash = ?', ['a'.repeat(64)]],
+    [
+      'ix_responses_version_submitted',
+      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id LIMIT ?',
+      ['s_x', 'v_x', 500],
+    ],
+    [
+      'ix_responses_version_submitted',
+      `SELECT * FROM responses
+      WHERE survey_id = ? AND version_id = ? AND (submitted_at, id) > (?, ?)
+      ORDER BY submitted_at, id LIMIT ?`,
+      ['s_x', 'v_x', '2026-11-20T08:00:00.000Z', 'r_x', 500],
+    ],
+    [
+      'ix_responses_version_submitted',
+      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at DESC LIMIT ? OFFSET ?',
+      ['s_x', 'v_x', 100, 0],
+    ],
+    [
+      'ix_audit_org_at',
+      `SELECT id, at, actor, action, object, outcome FROM audit_logs
+        WHERE organization_id = ? ORDER BY at DESC, id DESC LIMIT ?`,
+      ['org_smk', 100],
+    ],
+  ];
+  for (const [index, sql, params] of cases) {
+    const plan = await forcedPlan(sql, params);
+    assert.ok(plan.includes(`"Index Name":"${index}"`), `${index} tidak dipakai: ${plan}`);
+    assert.ok(!/"Node Type":"(Incremental )?Sort"/.test(plan), `masih ada Sort: ${plan}`);
+  }
+});
+
+test('PERF-07: migrasi 017 idempoten saat diterapkan ulang', async () => {
+  const { migrate } = await import('../migrate.ts');
+  assert.deepEqual(await migrate(), [], 'migrasi kedua tidak menerapkan apa pun');
+  await run("DELETE FROM schema_migrations WHERE version = '017_hot_path_indexes.sql'");
+  assert.deepEqual(await migrate(), ['017_hot_path_indexes.sql'], 'IF NOT EXISTS membuat penerapan ulang tidak galat');
+  assert.deepEqual(await hotPathIndexDefs(), HOT_PATH_INDEXES, 'indeks tidak berubah atau berlipat');
 });

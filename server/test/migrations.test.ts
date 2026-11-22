@@ -24,6 +24,8 @@ after(async () => {
   await closeTestDatabase();
 });
 
+const HOT_PATH_INDEXES = ['ix_public_links_token_hash', 'ix_invitations_token_hash', 'ix_responses_version_submitted', 'ix_audit_org_at'];
+
 const VERSIONS = [
   '001_initial.sql',
   '002_operational_indexes.sql',
@@ -41,6 +43,7 @@ const VERSIONS = [
   '014_public_link_close_reason.sql',
   '015_notice_source_catalog.sql',
   '016_data_request_retention.sql',
+  '017_hot_path_indexes.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -62,6 +65,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   await resetSchema();
   assert.deepEqual(await migrate({ to: '001' }), ['001_initial.sql']);
   assert.equal(await indexExists('ix_sessions_expires'), false, 'indeks 002 belum ada');
+  assert.equal(await indexExists('ix_responses_version_submitted'), false, 'indeks 017 belum ada');
 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
@@ -79,6 +83,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
   assert.equal(await indexExists('ux_public_links_survey_version'), true);
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), true, `${name} dibuat oleh 017`);
 
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();
@@ -349,4 +354,35 @@ test('organisasi baru setelah migrasi mendapat notice dari jalur provisioning ya
   } finally {
     await client.end();
   }
+});
+
+test('upgrade 016 → 017 menambah indeks jalur panas tanpa mengubah data dan aman diterapkan ulang', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '016' });
+  await seedUpgradedDeployment();
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), false, `${name} belum ada di 016`);
+
+  assert.deepEqual(await migrate(), ['017_hot_path_indexes.sql']);
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), true, `${name} dibuat oleh 017`);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const link = await client.query<{ id: string }>('SELECT id FROM public_links WHERE token_hash = $1', [
+      createHash('sha256').update('token-nyata').digest('hex'),
+    ]);
+    assert.deepEqual(link.rows, [{ id: 'pl_real' }], 'tautan lama tetap ditemukan lewat token_hash');
+    assert.deepEqual(await migrate(), [], 'migrasi kedua tidak menerapkan ulang 017');
+    await client.query("DELETE FROM schema_migrations WHERE version = '017_hot_path_indexes.sql'");
+    assert.deepEqual(await migrate(), ['017_hot_path_indexes.sql'], 'IF NOT EXISTS: 017 dapat diterapkan ulang tanpa galat');
+    const indexes = await client.query<{ c: number }>(
+      "SELECT COUNT(*)::int AS c FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
+      [HOT_PATH_INDEXES],
+    );
+    assert.equal(indexes.rows[0]?.c, HOT_PATH_INDEXES.length, 'indeks tidak berlipat');
+  } finally {
+    await client.end();
+  }
+  assert.deepEqual(await appliedVersions(), VERSIONS);
 });
