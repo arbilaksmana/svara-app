@@ -121,6 +121,32 @@ function stringOrNull(value: unknown, field: string, max = 2000): string | null 
   return asString(value, field, max);
 }
 
+/** `YYYY-MM-DD`, atau tanggal-waktu ISO-8601 yang wajib berzona (`Z`/`±hh:mm`). */
+const INVITATION_EXPIRY = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2})))?$/;
+const INVITATION_EXPIRY_ERROR = 'Batas waktu undangan harus tanggal YYYY-MM-DD atau tanggal-waktu ISO-8601 dengan zona waktu.';
+
+/**
+ * Batas waktu undangan dinormalisasi ke ISO UTC; tanggal saja berarti akhir hari itu (UTC).
+ * Kosong = tanpa batas. Nilai lain yang bukan tanggal nyata di masa depan ditolak 422, karena
+ * Date.parse memberi NaN (tidak pernah kedaluwarsa) atau menggulirkan tanggal yang tidak ada
+ * (2026-02-30 → 2 Maret, 24:00 → hari berikutnya).
+ */
+function invitationExpiresAt(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  const match = INVITATION_EXPIRY.exec(value);
+  if (!match) fail(422, 'validation_error', INVITATION_EXPIRY_ERROR, { field: 'expires_at' });
+  const part = (index: number) => Number(match[index] ?? 0);
+  const day = new Date(Date.UTC(part(1), part(2) - 1, part(3)));
+  const real =
+    day.getUTCFullYear() === part(1) && day.getUTCMonth() === part(2) - 1 && day.getUTCDate() === part(3) &&
+    part(4) <= 23 && part(5) <= 59 && part(6) <= 59 && part(7) <= 23 && part(8) <= 59;
+  const at = Date.parse(match[4] === undefined ? `${value}T23:59:59.000Z` : value);
+  if (!real || Number.isNaN(at)) fail(422, 'validation_error', INVITATION_EXPIRY_ERROR, { field: 'expires_at' });
+  if (at <= Date.now()) fail(422, 'validation_error', 'Batas waktu undangan harus di masa depan.', { field: 'expires_at' });
+  return new Date(at).toISOString();
+}
+
 function numberOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -639,10 +665,7 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
     if (!published) fail(409, 'no_published_version', 'Terbitkan versi sebelum membuat undangan.');
     const label = asString(req.body?.label ?? '', 'label', 200);
     if (!label) fail(422, 'validation_error', 'Label penugasan wajib diisi.');
-    const expiresAt = typeof req.body?.expires_at === 'string' && req.body.expires_at ? `${req.body.expires_at}T23:59:59.000Z` : null;
-    if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
-      fail(422, 'validation_error', 'Batas waktu undangan harus di masa depan.');
-    }
+    const expiresAt = invitationExpiresAt(req.body?.expires_at);
     const assignmentId = newId('a');
     const invitationId = newId('inv');
     const code = `UND-${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -670,7 +693,8 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
         nowIso(),
       );
     });
-    await audit(req, 'Buat undangan', `${survey.id} · ${code}`, 'berhasil');
+    // Kode undangan dapat ditukar menjadi token lewat resolver publik; audit hanya memuat ID.
+    await audit(req, 'Buat undangan', `${survey.id} · ${invitationId}`, 'berhasil');
     res.status(201).json({
       data: {
         invitation: { id: invitationId, code, assignment_id: assignmentId, version_id: published.id, status: 'active', expires_at: expiresAt },
@@ -686,14 +710,23 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
 surveysRouter.post('/invitations/:id/revoke', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const invitation = await get<{ id: string; survey_id: string; code: string }>(
-      'SELECT id, survey_id, code FROM invitations WHERE id = ?',
+    const invitation = await get<{ id: string; survey_id: string }>(
+      'SELECT id, survey_id FROM invitations WHERE id = ?',
       req.params.id,
     );
     if (!invitation) fail(404, 'invitation_not_found', 'Undangan tidak ditemukan.');
     await requireManageSurvey(req.account, invitation.survey_id);
-    await run("UPDATE invitations SET status = 'revoked', revoked_at = ? WHERE id = ?", nowIso(), invitation.id);
-    await audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.code}`, 'berhasil');
+    // Undangan terpakai tetap 'used' (sama dengan undangan organisasi). Guard di WHERE menutup
+    // balapan dengan kiriman yang mengunci baris undangan dan menandainya used di transaksinya.
+    const revoked = await run(
+      `UPDATE invitations SET status = 'revoked', revoked_at = ?
+        WHERE id = ? AND status <> 'used' AND used_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM responses r WHERE r.assignment_id = invitations.assignment_id)`,
+      nowIso(),
+      invitation.id,
+    );
+    if (revoked === 0) fail(409, 'invitation_used', 'Undangan sudah dipakai dan tidak dapat dicabut.');
+    await audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.id}`, 'berhasil');
     res.json({ data: { ok: true } });
   } catch (error) {
     sendError(res, error);

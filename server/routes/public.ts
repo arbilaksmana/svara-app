@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
-import { clientIp, parseCookies, rateLimit, type AuthedRequest } from '../security.ts';
+import { clientIp, parseCookies, rateLimit, secureCookie, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
@@ -265,6 +265,13 @@ async function noticeForVersion(source: NoticeSource, version: string): Promise<
   return row;
 }
 
+/** NULL = tanpa batas. Nilai yang tidak dapat diurai dianggap sudah lewat (fail-closed), bukan tanpa batas. */
+function invitationExpired(expiresAt: string | null): boolean {
+  if (expiresAt === null) return false;
+  const at = Date.parse(expiresAt);
+  return Number.isNaN(at) || at < Date.now();
+}
+
 async function invitationForToken(token: string): Promise<InvitationRow | undefined> {
   return get<InvitationRow>('SELECT * FROM invitations WHERE token_hash = ?', sha256Hex(token));
 }
@@ -291,7 +298,7 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
     let state = baseState(version, survey);
     if (invitation.status === 'used' || existing) state = 'used';
     else if (invitation.status === 'revoked') state = 'revoked';
-    else if (invitation.status === 'expired' || (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now())) state = 'expired';
+    else if (invitation.status === 'expired' || invitationExpired(invitation.expires_at)) state = 'expired';
     const { questions, options } = await publicQuestions(version.id);
     return {
       kind: 'invitation',
@@ -643,7 +650,7 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
         path: '/api/v1/public/surveys',
         httpOnly: true,
         sameSite: 'lax',
-        secure: process.env.COOKIE_SECURE === '1' || req.secure || req.get('x-forwarded-proto') === 'https',
+        secure: secureCookie(req),
       });
     }
     res.status(201).json({
@@ -715,7 +722,7 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
     );
     if (!invitation) fail(404, 'invitation_not_found', 'Kode undangan tidak dikenal.');
     if (invitation.status !== 'active') fail(409, 'invitation_inactive', 'Undangan ini tidak aktif.');
-    if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
+    if (invitationExpired(invitation.expires_at)) {
       fail(409, 'invitation_expired', 'Undangan ini sudah kedaluwarsa.');
     }
     res.json({ data: { token: invitation.token, url: `/s/${invitation.token}` } });

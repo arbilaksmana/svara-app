@@ -847,6 +847,8 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
   });
   assert.equal(blockedLogin.status, 401);
   await call('/admin/accounts/u_creator_b', { method: 'PATCH', cookie: admin, body: { status: 'active' } });
+  // L-04: penangguhan menghapus semua sesi akun, jadi cookie cache lama tidak berlaku lagi.
+  sessions.delete('creator.b@svara.local');
 
   const before = data<{ grants: Array<{ account_id: string }> }>(
     await call('/bootstrap', { cookie: admin }),
@@ -2093,7 +2095,6 @@ test('Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback
 
 test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organisasi', async () => {
   const orgAdmin = await session('orgadmin@svara.local');
-  const creator = await session('creator.a@svara.local');
   const members = data<{ members: Array<{ id: string; role: string; email: string }> }>(
     await call('/org/members', { cookie: orgAdmin }),
   );
@@ -2142,6 +2143,8 @@ test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organi
     body: { status: 'active' },
   });
   assert.equal(reactivated.status, 200);
+  // L-04: penangguhan menghapus semua sesi akun, jadi cookie cache lama tidak berlaku lagi.
+  sessions.delete('creator.a@svara.local');
 
   // org_admin lain (org_perpus) membuat undangan; kode itu mengikat ke org_perpus, bukan org_smk.
   const orgBCode = await call('/org/invitations', { method: 'POST', cookie: await session('creator.b@svara.local') });
@@ -2222,7 +2225,7 @@ test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organi
   }
 
   // Creator dan org_perpus ditolak di ketiga endpoint.
-  for (const [label, cookie] of [['creator', creator], ['org lain', await session('creator.b@svara.local')]] as const) {
+  for (const [label, cookie] of [['creator', await session('creator.a@svara.local')], ['org lain', await session('creator.b@svara.local')]] as const) {
     for (const [method, path, body] of [
       ['GET', '/org/members', undefined],
       ['PATCH', '/org/members/u_creator_a', { status: 'active' }],

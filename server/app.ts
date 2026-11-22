@@ -38,6 +38,11 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   }
   next();
 });
+// Respons API memuat data sesi atau status token; jangan pernah disimpan cache browser/proxy.
+app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.json({ limit: '512kb' }));
 app.use((req, res, next) => {
   attachSession(req as AuthedRequest, res, next).catch(next);
