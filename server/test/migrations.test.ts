@@ -44,6 +44,7 @@ const VERSIONS = [
   '015_notice_source_catalog.sql',
   '016_data_request_retention.sql',
   '017_hot_path_indexes.sql',
+  '018_notice_survey_profile_backfill.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -197,7 +198,10 @@ test('foreign key dan unique constraint ditegakkan Postgres', async () => {
   }
 });
 
-/** Organisasi + survei terbit + tautan publik pada skema saat ini, pola data produksi tanpa seed demo. */
+/**
+ * Organisasi + survei terbit + tautan publik tanpa seed demo. Nama organisasi sengaja sama dengan profil
+ * legacy agar aturan nama 013 teruji; data main yang namanya tidak cocok diuji di notice-upgrade.test.ts.
+ */
 async function seedUpgradedDeployment(): Promise<void> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
@@ -363,7 +367,7 @@ test('upgrade 016 → 017 menambah indeks jalur panas tanpa mengubah data dan am
   await seedUpgradedDeployment();
   for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), false, `${name} belum ada di 016`);
 
-  assert.deepEqual(await migrate(), ['017_hot_path_indexes.sql']);
+  assert.deepEqual(await migrate(), VERSIONS.slice(16));
   for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), true, `${name} dibuat oleh 017`);
 
   const client = new Client({ connectionString: databaseUrl });
