@@ -2,7 +2,7 @@ import { request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import express, { type Request } from 'express';
+import express from 'express';
 import { app } from '../app.ts';
 import { clientIp, rateLimit, rateLimitBucketCount, trustProxySetting } from '../security.ts';
 
@@ -136,65 +136,94 @@ test('PERF-06 TRUST_PROXY mati: X-Forwarded-For diabaikan (429 hanya untuk IP pa
   }
 });
 
-test('PERF-06 TRUST_PROXY=loopback: proxy loopback dipercaya, klien langsung tidak bisa memalsukan IP limiter', async () => {
-  const trusted = express();
-  trusted.set('trust proxy', trustProxySetting('loopback'));
-  trusted.get('/ip', (req, res) => res.json({ ip: req.ip }));
-  const login = express();
-  login.set('trust proxy', trustProxySetting('loopback'));
-  const attempt = (req: Request, res: Parameters<Parameters<typeof login.post>[1]>[1]) => {
-    // Kunci tetap per rute: hanya identitas socket yang memisahkan klien.
-    const key = `login:${req.path}:${clientIp(req)}`;
-    res.json({ limited: !rateLimit({ key, limit: 2, windowMs: 60_000 }) });
-  };
-  login.post('/login', attempt);
-  login.post('/login-direct', attempt);
-  const upstream = await listen(trusted);
-  const loginUpstream = await listen(login);
-
-  /** Proxy lokal yang meneruskan header X-Forwarded-For milik klien apa adanya. */
-  const proxy = express();
-  proxy.use((req, res) => {
-    const { promise, resolve, reject } = Promise.withResolvers<void>();
-    const target = req.url.startsWith('/login') ? loginUpstream.port : upstream.port;
-    const forwarded = request(
-      {
-        host: '127.0.0.1',
-        port: target,
-        path: req.url,
-        method: req.method,
-        agent: false,
-        headers: { Host: req.headers.host ?? 'perf06.test', 'X-Forwarded-For': req.headers['x-forwarded-for'] ?? '' },
-      },
-      (reply) => {
-        res.statusCode = reply.statusCode ?? 502;
-        reply.pipe(res);
-        reply.on('end', resolve);
-        reply.on('error', reject);
-      },
-    );
-    forwarded.on('error', reject);
-    forwarded.end();
-    return promise;
-  });
-  const front = await listen(proxy);
+/** Jalankan `fn` dengan `trust proxy` app utama seperti `TRUST_PROXY=<value>`, lalu pulihkan. */
+async function withTrustProxy(value: string, fn: (port: number) => Promise<void>): Promise<void> {
+  const trustProxy = app.get('trust proxy');
+  app.set('trust proxy', trustProxySetting(value));
+  const { server, port } = await listen();
   try {
-    // Di belakang proxy loopback, req.ip memakai IP klien dari header.
-    assert.deepEqual((await send(front.port, '/ip', { 'X-Forwarded-For': '198.51.100.7' })).json, { ip: '198.51.100.7' });
-
-    // Limiter memakai alamat koneksi: klien yang sama tertahan di permintaan ketiga.
-    const viaProxy = async (ip: string) =>
-      (await send(front.port, '/login', { 'X-Forwarded-For': ip }, { method: 'POST' })).json?.limited;
-    assert.equal(await viaProxy('198.51.100.7'), false);
-    assert.equal(await viaProxy('198.51.100.7'), false);
-    assert.equal(await viaProxy('198.51.100.7'), true, 'limit+1 untuk klien yang sama');
-    // Klien langsung tanpa hop terpercaya: header palsu tidak memecah penghitung socket.
-    assert.equal((await send(loginUpstream.port, '/login-direct', { 'X-Forwarded-For': '203.0.113.7' }, { method: 'POST' })).json?.limited, false);
-    assert.equal((await send(loginUpstream.port, '/login-direct', { 'X-Forwarded-For': '203.0.113.8' }, { method: 'POST' })).json?.limited, false);
-    assert.equal((await send(loginUpstream.port, '/login-direct', { 'X-Forwarded-For': '203.0.113.9' }, { method: 'POST' })).json?.limited, true, 'IP palsu ketiga tidak memecah penghitung');
+    await fn(port);
   } finally {
-    await close(front.server);
-    await close(loginUpstream.server);
-    await close(upstream.server);
+    await close(server);
+    app.set('trust proxy', trustProxy);
+  }
+}
+
+test('H3 TRUST_PROXY=loopback: klien berbeda di belakang proxy loopback tidak berbagi bucket submit', async () => {
+  await withTrustProxy('loopback', async (port) => {
+    // Submit publik: kunci `submit:<ip>`, limit 40 per 10 menit. Tanpa Idempotency-Key → 422, bukan 429.
+    const submit = async (forwardedFor: string) =>
+      (await send(port, '/api/v1/public/surveys/pl_h3kelas/responses', { 'X-Forwarded-For': forwardedFor }, { method: 'POST', body: {} })).status;
+    const classroom: number[] = [];
+    for (let i = 1; i <= 41; i += 1) classroom.push(await submit(`198.51.100.${i}`));
+    assert.deepEqual(classroom, Array(41).fill(422), '41 responden berbeda lewat proxy yang sama tidak kena 429');
+    const sameClient: number[] = [];
+    for (let i = 0; i < 41; i += 1) sameClient.push(await submit('192.0.2.77'));
+    assert.deepEqual(sameClient.slice(0, 40), Array(40).fill(422));
+    assert.equal(sameClient[40], 429, 'klien yang sama tetap dibatasi pada permintaan ke-41');
+  });
+});
+
+test('H3 TRUST_PROXY=loopback: rantai "<palsu>, <klien asli>" dari proxy tepercaya memakai klien asli', async () => {
+  await withTrustProxy('loopback', async (port) => {
+    // Resolusi kode undangan: kunci `invite-code:<ip>`, limit 20 per 10 menit. Kode tak dikenal → 404.
+    const resolveCode = async (forwardedFor: string) =>
+      (await send(port, '/api/v1/public/invitations/resolve', { 'X-Forwarded-For': forwardedFor }, { method: 'POST', body: { code: 'UND-TIDAK-TERDAFTAR' } }))
+        .status;
+    // Proxy menambahkan alamat yang dilihatnya di kanan; bagian kiri dikirim klien dan bisa dipalsukan.
+    const attacker: number[] = [];
+    for (let i = 1; i <= 21; i += 1) attacker.push(await resolveCode(`203.0.113.${i}, 198.51.100.200`));
+    assert.deepEqual(attacker.slice(0, 20), Array(20).fill(404));
+    assert.equal(attacker[20], 429, 'mengganti alamat palsu di kiri tidak membuka bucket baru');
+    assert.equal(await resolveCode('203.0.113.1, 198.51.100.201'), 404, 'klien asli lain dengan alamat palsu yang sama tidak ikut tertahan');
+  });
+});
+
+test('H3 klien langsung yang bukan proxy tepercaya: X-Forwarded-For diabaikan, limiter tetap per socket', async () => {
+  // Proxy tepercaya hanya di jaringan privat; koneksi dari 127.0.0.1 adalah klien langsung.
+  await withTrustProxy('uniquelocal', async (port) => {
+    // Login: kunci `login:<ip>:<email>`, limit 8 per 15 menit. Akun tidak ada → 401.
+    const statuses: number[] = [];
+    for (let i = 1; i <= 9; i += 1) {
+      const res = await send(
+        port,
+        '/api/v1/auth/login',
+        { 'X-Forwarded-For': `203.0.113.${i}` },
+        { method: 'POST', body: { email: 'tebak-sandi@h3.test', password: 'Coba-Sandi-2026!' } },
+      );
+      statuses.push(res.status);
+    }
+    assert.deepEqual(statuses.slice(0, 8), Array(8).fill(401));
+    assert.equal(statuses[8], 429, 'alamat palsu berbeda dari klien langsung tidak memecah penghitung socket');
+  });
+});
+
+test('H3 clientIp: aturan trust proxy yang sama dengan Express; header kosong/tidak valid → socket', async () => {
+  const probe = express();
+  probe.get('/ip', (req, res) => res.json({ clientIp: clientIp(req) }));
+  const { server, port } = await listen(probe);
+  const cases: { trust: string; forwardedFor?: string; expected: string }[] = [
+    { trust: '', forwardedFor: '198.51.100.7', expected: '127.0.0.1' },
+    { trust: 'loopback', forwardedFor: '198.51.100.7', expected: '198.51.100.7' },
+    { trust: 'loopback', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '198.51.100.7' },
+    { trust: 'loopback', forwardedFor: '198.51.100.7, 127.0.0.1', expected: '198.51.100.7' },
+    { trust: 'loopback', forwardedFor: '198.51.100.7, 10.0.4.2', expected: '10.0.4.2' },
+    { trust: 'loopback, uniquelocal', forwardedFor: '198.51.100.7, 10.0.4.2', expected: '198.51.100.7' },
+    { trust: 'uniquelocal', forwardedFor: '198.51.100.7', expected: '127.0.0.1' },
+    { trust: '1', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '198.51.100.7' },
+    { trust: '2', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '203.0.113.9' },
+    { trust: 'loopback', forwardedFor: 'unknown', expected: '127.0.0.1' },
+    { trust: 'loopback', forwardedFor: '', expected: '127.0.0.1' },
+    { trust: 'loopback', expected: '127.0.0.1' },
+  ];
+  try {
+    for (const { trust, forwardedFor, expected } of cases) {
+      probe.set('trust proxy', trustProxySetting(trust));
+      const headers: Record<string, string> = forwardedFor === undefined ? {} : { 'X-Forwarded-For': forwardedFor };
+      const { json } = await send(port, '/ip', headers);
+      assert.equal(json?.clientIp, expected, `TRUST_PROXY=${JSON.stringify(trust)}, X-Forwarded-For=${JSON.stringify(forwardedFor ?? null)}`);
+    }
+  } finally {
+    await close(server);
   }
 });
