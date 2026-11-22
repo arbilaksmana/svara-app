@@ -233,6 +233,9 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
   const success = logs.find((log) => log.action === 'Ekspor CSV' && log.outcome === 'berhasil' && log.object.startsWith('s_demo1 · v1'));
   assert.ok(success, 'ekspor berhasil harus tercatat di audit');
   const meta = JSON.parse(success.metadata ?? '{}');
-  assert.deepEqual([meta.format, meta.accepts.length, meta.accepts.includes('text/csv'), typeof meta.rows, meta.destination], ['csv', 1, true, 'number', 'download']);
+  assert.deepEqual(
+    [meta.format, meta.filename, meta.columns.includes('respondent_id'), meta.request_accept, typeof meta.rows, 'destination' in meta, 'accepts' in meta],
+    ['csv', 'hasil-s_demo1-v1.csv', true, 'application/json', 'number', false, false],
+  );
   assert.equal(meta.individual, true);
 });

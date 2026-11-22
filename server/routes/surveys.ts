@@ -31,6 +31,7 @@ import {
   surveyProfileFor,
 } from '../http.ts';
 import { summaryFor } from '../summary.ts';
+import { CONTINUABLE_CLOSE_REASONS, requirePublishableNotice } from './public.ts';
 
 type QuestionType = 'likert' | 'short_text' | 'single_choice';
 
@@ -110,8 +111,13 @@ interface AnswerDbRow {
 
 export const surveysRouter = Router();
 
-/** Format ekspor → isi yang boleh diterima klien. Dicatat di audit agar tujuan ekspor terbaca. */
-const EXPORT_ACCEPT: Record<ExportFormat, readonly string[]> = { csv: ['text/csv'], codebook: ['text/csv'] };
+/**
+ * Header Accept permintaan apa adanya (dipotong) untuk audit ekspor. Penerima dan tujuan akhir berkas
+ * setelah diunduh tidak diketahui server, jadi tidak dicatat seolah-olah diketahui.
+ */
+function requestAccept(req: AuthedRequest): string | null {
+  return req.get('accept')?.slice(0, 200) ?? null;
+}
 
 /** Respons per batch ekspor CSV. EXPORT_BATCH_SIZE hanya bisa menurunkannya (test memaksa banyak batch). */
 const EXPORT_BATCH_SIZE = Math.min(500, Math.max(1, Number.parseInt(process.env.EXPORT_BATCH_SIZE ?? '', 10) || 500));
@@ -532,20 +538,26 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
   }
 });
 
-async function closePublishedVersions(surveyId: string, now: string): Promise<Array<{ number: number }>> {
+/** `reason`: 'superseded' saat publish versi baru, 'closed' saat survei ditutup; keduanya boleh di-remap. */
+async function closePublishedVersions(
+  surveyId: string,
+  now: string,
+  reason: (typeof CONTINUABLE_CLOSE_REASONS)[number],
+): Promise<Array<{ number: number }>> {
   return all<{ number: number }>(
     `WITH closed_versions AS (
        UPDATE survey_versions SET status = 'closed', closed_at = ?
        WHERE survey_id = ? AND status = 'published'
        RETURNING id, number
      ), closed_links AS (
-       UPDATE public_links SET status = 'closed', closed_reason = 'superseded'
+       UPDATE public_links SET status = 'closed', closed_reason = ?
        WHERE version_id IN (SELECT id FROM closed_versions) AND status = 'active'
          AND (expires_at IS NULL OR expires_at::timestamptz >= ?::timestamptz)
      )
      SELECT number FROM closed_versions ORDER BY number`,
     now,
     surveyId,
+    reason,
     now,
   );
 }
@@ -577,8 +589,9 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
       }
       const errors = validateForPublish(survey.title, survey.purpose, questions);
       if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
+      await requirePublishableNotice(survey, draft.notice_version);
       const now = nowIso();
-      await closePublishedVersions(survey.id, now);
+      await closePublishedVersions(survey.id, now, 'superseded');
       await run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
       await run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
       const existing = await get<{ token: string }>(
@@ -622,7 +635,7 @@ surveysRouter.post('/surveys/:id/close', async (req: AuthedRequest, res: Respons
     const published = await withTx(async () => {
       await get('SELECT id FROM surveys WHERE id = ? FOR NO KEY UPDATE', survey.id);
       const now = nowIso();
-      const closedVersions = await closePublishedVersions(survey.id, now);
+      const closedVersions = await closePublishedVersions(survey.id, now, 'closed');
       if (closedVersions.length === 0) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
       await run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'closed', now, survey.id);
       return closedVersions;
@@ -646,9 +659,15 @@ surveysRouter.post('/surveys/:id/archive', async (req: AuthedRequest, res: Respo
         now,
         survey.id,
       );
-      // Hanya tautan yang benar-benar terbuka yang ditutup; revoked/expired/used adalah
-      // keputusan eksplisit pengelola atau hasil kedaluwarsa dan tidak boleh ditimpa.
-      await run("UPDATE public_links SET status = 'closed', closed_reason = 'archived' WHERE survey_id = ? AND status = 'active'", survey.id);
+      // Tautan terbuka, dan tautan tertutup yang masih boleh di-remap (superseded/closed), ditandai
+      // 'archived' agar terbit ulang tidak menghidupkannya. revoked/expired/used adalah keputusan
+      // eksplisit pengelola atau hasil kedaluwarsa dan tidak boleh ditimpa.
+      await run(
+        `UPDATE public_links SET status = 'closed', closed_reason = 'archived'
+          WHERE survey_id = ? AND (status = 'active' OR (status = 'closed' AND closed_reason IN (${CONTINUABLE_CLOSE_REASONS.map(() => '?').join(', ')})))`,
+        survey.id,
+        ...CONTINUABLE_CLOSE_REASONS,
+      );
     });
     await audit(req, 'Arsipkan survei', survey.id, 'berhasil');
     res.json({ data: await detailFor(survey.id) });
@@ -855,7 +874,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
         format,
         reason: 'forbidden_export',
-        accepts: [...EXPORT_ACCEPT[format]],
+        request_accept: requestAccept(req),
       });
       fail(403, 'forbidden_export', 'Akun ini tidak memiliki izin ekspor pada survei ini.');
     }
@@ -863,7 +882,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
         format,
         reason: 'forbidden_export_individual',
-        accepts: [...EXPORT_ACCEPT[format]],
+        request_accept: requestAccept(req),
       });
       fail(
         403,
@@ -871,8 +890,6 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
         'Ekspor CSV memuat data per responden; izin membaca jawaban individual atau pengaturan survei menolaknya. Gunakan format=codebook untuk agregat.',
       );
     }
-    // Target ekspor (klien yang meminta) dicatat di setiap hasil agar log audit menjawab "ke mana data ini pergi".
-    const target = { destination: 'download', accepts: [...EXPORT_ACCEPT[format]] };
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
     const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
@@ -895,9 +912,18 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
           }
         }
       }
-      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil', { format, rows: rows.length - 1, includeText, individual: false, ...target });
+      const filename = `kodebook-${survey.id}-v${version.number}.csv`;
+      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil', {
+        format,
+        rows: rows.length - 1,
+        includeText,
+        individual: false,
+        filename,
+        questions: codebookQuestions.map((question) => question.code),
+        request_accept: requestAccept(req),
+      });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="kodebook-${survey.id}-v${version.number}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(csvDocument(rows));
       return;
     }
@@ -914,6 +940,12 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       'submitted_at',
       ...exportQuestions.map((question) => question.code),
     ];
+    const object = `${survey.id} · v${version.number}`;
+    const filename = `hasil-${survey.id}-v${version.number}.csv`;
+    const exported = { filename, columns: header, request_accept: requestAccept(req) };
+    // Fail-closed: jejak audit ditulis sebelum data respons dibaca dan sebelum byte pertama dikirim.
+    // Bila INSERT gagal, galat keluar sebagai 500 JSON tanpa isi CSV. Hasil akhir dicatat terpisah di bawah.
+    await audit(req, 'Mulai ekspor CSV', object, 'berhasil', { format, includeText, individual: true, ...exported });
     // Baris ditulis per batch; header HTTP baru terkirim bersama batch pertama sehingga galat sebelumnya tetap JSON.
     let text = `${CSV_BOM}${csvLine(header)}${CSV_EOL}`;
     let rows = 0;
@@ -945,7 +977,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
         }
         if (!res.headersSent) {
           res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-          res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         }
         const open = text === '' || (await writeCsv(res, text));
         rows += batch.length;
@@ -958,8 +990,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       console.error('[api] ekspor CSV terhenti di tengah aliran', error);
       stopped = 'stream_error';
     }
-    const object = `${survey.id} · v${version.number}`;
-    const metadata = { format, rows, includeText, individual: true, ...target };
+    const metadata = { format, rows, includeText, individual: true, ...exported };
     if (stopped || res.destroyed) {
       // Sebagian baris mungkin sudah keluar; putus koneksi agar klien tidak menganggap berkas lengkap.
       res.destroy();

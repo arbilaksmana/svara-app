@@ -103,7 +103,8 @@ export interface Assignment {
   participant_ref: string;
 }
 
-export type InvitationStatus = 'active' | 'used' | 'revoked' | 'expired';
+/** 'closed' hanya status tampilan undangan survei: versinya sudah tidak terbit (baris DB tetap 'active'). */
+export type InvitationStatus = 'active' | 'used' | 'revoked' | 'expired' | 'closed';
 
 export interface Invitation {
   id: string;
