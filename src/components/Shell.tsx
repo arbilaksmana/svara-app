@@ -56,6 +56,7 @@ function Wordmark({ to }: { to: string }) {
     <Link
       href={to}
       onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
+      aria-label="Svara"
       className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       <BrandMark />
@@ -71,8 +72,8 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
       href={to}
       onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
       aria-current={active ? 'page' : undefined}
-      className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
-        active ? 'text-n0' : 'text-n400 hover:text-n0'
+      className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal ${PRESS_LINK} ${
+        active ? 'text-n0 underline decoration-2 underline-offset-4' : 'text-n400 no-underline hover:text-n0'
       }`}
     >
       {label}
@@ -89,6 +90,8 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
   // Di landing, pengguna dianggap belum masuk walau stor masih menyimpan sesi.
   const current = guestOnly ? null : session;
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -97,7 +100,9 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key !== 'Escape') return;
+      if (menuRef.current?.contains(document.activeElement)) menuButtonRef.current?.focus();
+      setMenuOpen(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -145,6 +150,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
             {/* Mobile: satu pemicu menu, jadi tidak ada tautan yang terpotong. */}
             {(nav.length > 0 || current || guestActions) && (
               <button
+                ref={menuButtonRef}
                 type="button"
                 aria-expanded={menuOpen}
                 aria-controls="pill-menu"
@@ -200,6 +206,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
 
         {menuOpen && (
           <nav
+            ref={menuRef}
             id="pill-menu"
             aria-label="Navigasi seluler"
             className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
@@ -359,7 +366,7 @@ export function Shell({
         <main id="konten-utama" ref={mainRef} tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
           {!hideHeading && (
             <div className="mb-6 flex flex-col gap-2">
-              <h1 className="text-h1 font-bold text-ink">{title}</h1>
+              <h1 className="text-h1 font-bold text-ink wrap-break-word">{title}</h1>
               {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
             </div>
           )}

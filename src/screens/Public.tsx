@@ -239,7 +239,7 @@ function DataRequestForm() {
               {...aria}
               value={type}
               onChange={(event) => setType(event.target.value)}
-              className="min-h-[44px] w-full rounded-md border border-n200 bg-n0 px-3 text-body text-ink"
+              className="min-h-[44px] w-full rounded-md border border-control-border bg-n0 px-3 text-body text-ink"
             >
               <option value="access">Akses data</option>
               <option value="correction">Koreksi data</option>
@@ -269,7 +269,7 @@ function DataRequestForm() {
               value={note}
               onChange={(event) => setNote(event.target.value)}
               rows={3}
-              className="w-full rounded-md border border-n200 bg-n0 px-3 py-2 text-body text-ink"
+              className="w-full rounded-md border border-control-border bg-n0 px-3 py-2 text-body text-ink"
             />
           )}
         </Field>

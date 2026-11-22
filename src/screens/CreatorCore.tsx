@@ -47,7 +47,7 @@ const STATUS_TONE = {
 export function MissingSurvey() {
   return (
     <Card>
-      <h1 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h1>
+      <h2 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h2>
       <p className="mt-2 text-body text-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
       <div className="mt-4"><ActionLink to={ROUTES.creator}>Kembali ke daftar survei</ActionLink></div>
     </Card>

@@ -75,6 +75,8 @@ export function RegisterPage() {
                 </Link>
               </div>
 
+              <h1 className="text-center text-h2 font-bold text-ink">Buat akun</h1>
+
               {state === 'validation' && (
                 <Banner tone="danger" title="Periksa data akun">
                   Lengkapi nama, email, kata sandi, dan persetujuan.

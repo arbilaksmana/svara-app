@@ -173,7 +173,7 @@ export function HomePage() {
                   key={item.title}
                   className={`grid gap-2 py-5 sm:grid-cols-[auto_1fr_auto] sm:items-start sm:gap-6 ${i > 0 ? 'border-t border-n200' : ''}`}
                 >
-                  <span className="font-mono text-caption font-bold tracking-mono text-n400">
+                  <span className="font-mono text-caption font-bold tracking-mono text-n600">
                     {String(i + 1).padStart(2, '0')}
                   </span>
                   <div className="min-w-0">
@@ -225,7 +225,7 @@ export function HomePage() {
             <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {FLOW.map((f, i) => (
                 <li key={f.step} className="flex flex-col gap-2 rounded-lg border border-n200 p-4">
-                  <span className="font-mono text-caption font-bold tracking-mono text-n400">
+                  <span className="font-mono text-caption font-bold tracking-mono text-n600">
                     LANGKAH {i + 1}
                   </span>
                   <p className="text-body font-bold text-ink">{f.step}</p>
