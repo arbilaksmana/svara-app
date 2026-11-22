@@ -353,8 +353,10 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   else if (link.status === 'closed') state = 'closed';
   // Versi terbit saat ini berstatus published, jadi sumber remap wajib sudah tidak terbit; arsip menutup
   // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa. Hanya tautan
-  // yang ditutup dengan alasan yang boleh dilanjutkan yang di-remap: 'archived' dan NULL (pra-014,
-  // asal penutupan tidak diketahui) tetap 'closed'.
+  // berstatus 'closed' dengan alasan di CONTINUABLE_CLOSE_REASONS ('superseded' dan 'closed') yang
+  // di-remap; komentar migrasi 014 ("remap hanya 'superseded'") mendahului alasan 'closed'. Alasan
+  // 'archived', NULL (ditutup sebelum 014, asal penutupan tidak diketahui), dan tautan yang masih
+  // 'active' pada versi yang tidak lagi terbit tetap 'closed'.
   if (
     version.status !== 'published' &&
     link.status === 'closed' &&

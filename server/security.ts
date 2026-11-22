@@ -241,9 +241,12 @@ export function rateLimitBucketCount(): number {
 
 /**
  * Identitas klien untuk limiter: `req.ip`, yaitu fungsi `trust proxy` Express dari TRUST_PROXY.
- * Tanpa TRUST_PROXY hasilnya alamat socket. Dengan TRUST_PROXY, proxy-addr menelusuri
- * X-Forwarded-For dari kanan hanya selama hop sebelumnya dipercaya dan berhenti di alamat pertama
- * yang tidak dipercaya; socket yang bukan proxy tepercaya (klien langsung) dipakai apa adanya.
+ * Tanpa TRUST_PROXY hasilnya alamat socket. TRUST_PROXY hanya berisi jaringan bernama
+ * (lihat trustProxySetting): proxy-addr menelusuri X-Forwarded-For dari kanan selama hop sebelumnya
+ * berada di jaringan itu dan berhenti di alamat pertama di luarnya, sedangkan koneksi langsung dari
+ * luar jaringan itu dihitung per socket. Header dari proxy di jaringan itu dipakai apa adanya, jadi
+ * identitas ini hanya bisa dipercaya bila proxy tersebut menambahkan atau menimpa X-Forwarded-For;
+ * rewrite Next meneruskan header klien tanpa mengubahnya.
  * Entri header yang bukan alamat IP (mis. "unknown") jatuh ke alamat socket.
  */
 export function clientIp(req: Request): string {
@@ -275,20 +278,20 @@ export function rateLimit(options: { key: string; limit: number; windowMs: numbe
 
 /**
  * Nilai `trust proxy` Express dari TRUST_PROXY. Mati secara default: header proxy
- * tanpa konfigurasi bisa dipalsukan klien. `true` tanpa batas ditolak, diganti `loopback`.
+ * tanpa konfigurasi bisa dipalsukan klien. Hanya jaringan bernama yang diterima. `true`, rentang IP,
+ * dan jumlah hop ditolak dan diganti `loopback`; jumlah hop mempercayai socket dari alamat mana pun,
+ * sehingga klien yang menjangkau API langsung bisa memilih identitasnya lewat X-Forwarded-For.
  */
-export function trustProxySetting(value: string | undefined): boolean | number | string {
+export function trustProxySetting(value: string | undefined): false | string {
   const raw = (value ?? '').trim().toLowerCase();
   if (!raw || raw === 'false' || raw === '0') return false;
-  if (/^\d+$/.test(raw)) return Math.max(1, Number(raw));
-  const hops = raw.split(',').map((hop) => hop.trim()).filter(Boolean);
-  if (hops.every((hop) => /^\d+$/.test(hop))) {
-    // Daftar hop count dibaca Express sebagai string satu elemen "a, b", bukan angka.
-    return hops.map((hop) => String(Math.max(1, Number(hop)))).join(',');
-  }
+  const names = raw.split(',').map((name) => name.trim()).filter(Boolean);
   const ALLOWED = new Set(['loopback', 'linklocal', 'uniquelocal']);
-  if (hops.every((hop) => ALLOWED.has(hop))) return value!.trim();
-  console.warn(`[api] TRUST_PROXY tidak dikenal ("${value}"); memakai "loopback".`);
+  if (names.length > 0 && names.every((name) => ALLOWED.has(name))) return names.join(', ');
+  const reason = names.some((name) => /^\d+$/.test(name))
+    ? 'berisi jumlah hop yang mempercayai koneksi dari alamat mana pun'
+    : 'tidak dikenal';
+  console.warn(`[api] TRUST_PROXY ${reason} ("${value}"); memakai "loopback".`);
   return 'loopback';
 }
 

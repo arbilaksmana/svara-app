@@ -30,7 +30,7 @@ Repo ini memuat kode lengkap yang bisa dijalankan sendiri: UI Next.js, API Expre
 | Area | Isi |
 | --- | --- |
 | Instrumen | Editor pertanyaan Likert, pilihan tunggal, dan isian singkat; kode item unik; validasi sebelum simpan dan sebelum terbit |
-| Versi | Hanya versi terbit terbaru yang menerima kiriman. Tautan umum versi sebelumnya membuka versi terbit terbaru pada survei yang sama, kecuali tautan survei yang pernah diarsipkan dan tautan yang sudah ditutup sebelum upgrade (`closed_reason` kosong); keduanya tetap ditutup |
+| Versi | Hanya versi terbit terbaru yang menerima kiriman. Tautan umum yang ditutup karena versi baru terbit atau karena survei ditutup membuka versi terbit terbaru pada survei yang sama. Tautan survei yang pernah diarsipkan, tautan yang dicabut atau kedaluwarsa, dan tautan yang ditutup sebelum migrasi 014 tanpa alasan tercatat (`closed_reason` kosong) tetap ditutup |
 | Distribusi | Tautan umum dan undangan individual berkode, dengan status, masa berlaku, dan pencabutan |
 | Pengumpulan | Persetujuan tercatat di server, kiriman idempoten, bukti terima yang dapat dibuka kembali |
 | Hasil | Agregat per versi, ekspor CSV, dan codebook per versi |
@@ -76,7 +76,7 @@ Tanpa `SEED_DEMO=1` basis data tetap kosong dan admin pertama dibuat lewat `pnpm
 ## Alur pemakaian
 
 1. Creator menyusun draf instrumen: judul, tujuan, petunjuk, pertanyaan, opsi, dan kode item.
-2. Draf diterbitkan menjadi versi tetap. Tautan umum lama tetap dapat membuka versi terbit terbaru (kecuali setelah survei diarsipkan); undangan individual tetap terikat pada versinya dan tampil **Ditutup** setelah versinya tidak lagi terbit.
+2. Draf diterbitkan menjadi versi tetap. Tautan umum versi sebelumnya membuka versi terbit terbaru, kecuali tautan survei yang pernah diarsipkan, tautan yang dicabut atau kedaluwarsa, dan tautan yang ditutup sebelum migrasi 014 tanpa alasan; undangan individual tetap terikat pada versinya dan tampil **Ditutup** setelah versinya tidak lagi terbit.
 3. Responden membuka tautan, membaca pemberitahuan, memberi persetujuan, mengisi, lalu menerima bukti kirim.
 4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah.
 5. Publikasi menutup versi terbit sebelumnya. Jika tidak ada versi terbit, tautan umum tidak menerima kiriman baru.
@@ -281,8 +281,8 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Batas waktu membuka koneksi |
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
 | `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
-| `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter memakai alamat yang sama dengan `req.ip`: tanpa `TRUST_PROXY` alamat koneksi; dengan `TRUST_PROXY`, `X-Forwarded-For` ditelusuri dari kanan dan alamat pertama yang tidak dipercaya menjadi identitas klien (entri bukan IP jatuh ke alamat koneksi), sedangkan koneksi langsung dari alamat di luar `TRUST_PROXY` tetap dihitung per koneksi. Rewrite Next hanya mengisi `X-Forwarded-For` bila kosong dan tidak menambahkannya, jadi `TRUST_PROXY=loopback` hanya aman bila ingress di depan Next menambahkan atau menimpa header itu (mis. nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`); tanpa ingress, biarkan kosong |
-| `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` dan cookie responden `svara_respondent` selalu memakai `Secure`; set di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator. `0`/kosong = kedua cookie memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari proxy yang dipercaya lewat `TRUST_PROXY`. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
+| `TRUST_PROXY` | kosong (mati) | Jaringan proxy yang header `X-Forwarded-For`/`X-Forwarded-Proto`-nya dipercaya untuk `req.ip` (identitas klien limiter) dan `req.secure`. Kosong/`0` = mati: header diabaikan dan limiter menghitung per alamat koneksi. Nilai yang diterima: `loopback`, `linklocal`, `uniquelocal`, atau gabungan koma (`loopback, uniquelocal`). Jumlah hop (`1`, `2`), `true`/`*`, dan rentang IP tidak diterima: API mencetak peringatan saat start dan memakai `loopback`, karena jumlah hop mempercayai koneksi dari alamat mana pun. Isi hanya bila ingress tepercaya di depan API menambahkan atau menimpa `X-Forwarded-For` dan `X-Forwarded-Proto`. Rewrite Next dan jalur compose web→api tidak melakukannya; tanpa ingress seperti itu, biarkan kosong dan pakai `COOKIE_SECURE=1` untuk HTTPS. Lihat [Header proxy dan `TRUST_PROXY`](#header-proxy-dan-trust_proxy) |
+| `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` dan cookie responden `svara_respondent` selalu memakai `Secure`. Set `1` di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator atau rewrite Next; inilah cara yang benar bila `TRUST_PROXY` kosong. `0`/kosong = kedua cookie memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari ingress di jaringan `TRUST_PROXY`. Jangan mengisi `TRUST_PROXY` hanya demi `X-Forwarded-Proto` bila tidak ada ingress yang menambahkan atau menimpa header proxy, karena klien lalu bisa memalsukan `X-Forwarded-For` untuk limiter. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak. Versi yang pernah terbit (termasuk yang sudah ditutup) tetap terbaca dan respons memuat `survey_version_status`; draf dan survei di luar cakupan organisasi `404` |
@@ -398,6 +398,24 @@ Pisahkan trafik di reverse proxy/load balancer:
 | semua path lain | Next.js (`web:3000`) |
 
 Dengan pembagian ini Next tidak memproksikan API di produksi. Rewrite `/api/:path*` tetap ada untuk pengembangan dan deployment satu-origin; jangan mengandalkannya sebagai jalur produksi.
+
+### Header proxy dan `TRUST_PROXY`
+
+Express membaca `X-Forwarded-For` dan `X-Forwarded-Proto` hanya dari koneksi yang alamatnya ada di jaringan `TRUST_PROXY`, lalu memakai isi header itu apa adanya. `X-Forwarded-For` ditelusuri dari kanan, dan alamat pertama di luar jaringan itu menjadi identitas klien limiter (entri yang bukan alamat IP jatuh ke alamat koneksi). Koneksi langsung dari luar jaringan itu tetap dihitung per koneksi.
+
+Karena itu `TRUST_PROXY` hanya aman bila semua trafik ke API melewati ingress tepercaya yang menambahkan atau menimpa kedua header. Rewrite Next tidak melakukannya: Next meneruskan `X-Forwarded-For` dan `X-Forwarded-Proto` dari klien apa adanya dan tidak menambahkan alamat yang dilihatnya. Dengan `TRUST_PROXY=loopback` di belakang rewrite Next, atau `uniquelocal` di belakang container web Docker Compose, satu klien bisa mengganti `X-Forwarded-For` di setiap permintaan dan tidak pernah kena batas percobaan masuk.
+
+| Jalur ke API | `TRUST_PROXY` |
+| --- | --- |
+| Klien terhubung langsung ke API | kosong |
+| Rewrite Next tanpa ingress (`pnpm dev`, `pnpm start`, Docker Compose web→api) | kosong |
+| Ingress tepercaya → API, atau ingress → Next → API, dengan API menerima koneksi dari host yang sama | `loopback` |
+| Ingress tepercaya → API, atau ingress → web → API, di jaringan privat seperti jaringan Docker Compose | `uniquelocal` |
+
+- Di setiap deployment HTTPS set `COOKIE_SECURE=1`, apa pun nilai `TRUST_PROXY`.
+- Ingress paling depan sebaiknya menimpa header, mis. nginx `proxy_set_header X-Forwarded-For $remote_addr;` dan `proxy_set_header X-Forwarded-Proto $scheme;`. Bila ingress hanya menambahkan (`$proxy_add_x_forwarded_for`), klien yang alamatnya juga berada di jaringan `TRUST_PROXY`, mis. klien intranet dengan `uniquelocal`, ikut dianggap proxy dan bisa memalsukan alamatnya.
+- Tanpa ingress, semua klien yang lewat rewrite Next berbagi satu alamat di limiter, mis. kiriman publik 40 per 10 menit untuk seluruh kelas. Mengisi `TRUST_PROXY` untuk memisahkannya justru membuka pemalsuan di atas; pasang ingress bila limiter perlu menghitung per klien.
+- `docker-compose.yml` tidak meneruskan `TRUST_PROXY` ke service `api`. Tambahkan sendiri hanya setelah ingress seperti di atas terpasang.
 
 ## Akun dan tautan demo
 

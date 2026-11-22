@@ -45,7 +45,7 @@ import {
 } from '../lib/store';
 import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
 import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
-import type { OrganizationType } from '../lib/types';
+import type { AuditOutcome, OrganizationType } from '../lib/types';
 
 /* ---------------- Ringkasan ---------------- */
 
@@ -622,6 +622,13 @@ export function AdminAccountsPage() {
 
 /* ---------------- Log audit ---------------- */
 
+const AUDIT_OUTCOME_TONE: Record<AuditOutcome, 'success' | 'danger' | 'warning' | 'info'> = {
+  berhasil: 'success',
+  ditolak: 'danger',
+  gagal: 'warning',
+  dimulai: 'info',
+};
+
 export function AdminAuditPage() {
   const { state } = useScreenState('admin-audit');
   useEffect(() => {
@@ -651,7 +658,7 @@ export function AdminAuditPage() {
                   <Td>{log.action}</Td>
                   <Td><Code>{log.object}</Code></Td>
                   <Td>
-                    <Badge tone={log.outcome === 'berhasil' ? 'success' : log.outcome === 'ditolak' ? 'danger' : 'warning'}>
+                    <Badge tone={AUDIT_OUTCOME_TONE[log.outcome]}>
                       {log.outcome}
                     </Badge>
                   </Td>
