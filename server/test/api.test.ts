@@ -163,7 +163,6 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   const creatorA = await session('creator.a@svara.local');
   const bootstrapA = data<{
     surveys: Array<{ id: string }>;
-    summaries: Record<string, unknown>;
     accounts: Array<unknown>;
   }>(await call('/bootstrap', { cookie: creatorA }));
   const idsA = bootstrapA.surveys.map((survey) => survey.id).sort();
@@ -176,7 +175,6 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   const admin = await session('admin@svara.local');
   const bootstrapAdmin = data<{
     surveys: Array<unknown>;
-    summaries: Record<string, unknown>;
     accounts: Array<unknown>;
     auditLogs: Array<unknown>;
   }>(await call('/bootstrap', { cookie: admin }));

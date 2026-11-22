@@ -109,7 +109,7 @@ scripts/         Smoke test web
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
 - `server/migrations/` berisi skema 21 tabel dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum.
-- `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/bootstrap` untuk guard peran di server component.
+- `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
 - `src/components/ui.tsx` memuat primitif bersama: `Field` dengan `aria-invalid`/`aria-describedby`, `ActionLink` dengan `disabledReason`, `ConfirmDialog` berbasis `<dialog>` native, dan `Toast` dengan `role="alert"` untuk galat.
@@ -258,7 +258,7 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | --- | --- | --- |
 | `PORT` | `3000` web, `3001` API | Port HTTP per layanan |
 | `HOST` | `127.0.0.1` | Alamat bind API |
-| `API_INTERNAL_URL` | `http://127.0.0.1:3001` | Basis URL bootstrap untuk guard server component |
+| `API_INTERNAL_URL` | `http://127.0.0.1:3001` | Basis URL `/auth/me` untuk guard server component |
 | `API_ORIGIN` | `http://127.0.0.1:3001` | Target rewrite `/api/:path*`; dibekukan saat `next build` |
 | `API_ORIGIN_BUILD` | `http://api:3001` | Nilai `API_ORIGIN` untuk build image web Docker Compose |
 | `DATABASE_URL` | wajib | Koneksi PostgreSQL runtime; tidak ada fallback SQLite |
