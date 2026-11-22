@@ -40,7 +40,7 @@ export function LoginPage() {
   return (
     <Shell kind="public" title="Masuk ke workspace" chromeless>
       <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
-        <div className="relative z-10 flex flex-col bg-n0 lg:rounded-tr-lg lg:rounded-br-lg">
+        <div className="relative z-10 flex min-w-0 flex-col bg-n0 lg:rounded-tr-lg lg:rounded-br-lg">
           <div className="flex flex-1 flex-col justify-center px-5 pb-12 pt-6 sm:px-8 lg:px-14">
             <div className="mx-auto flex w-full max-w-[360px] flex-col gap-7">
               <div className="flex justify-center">
@@ -57,7 +57,7 @@ export function LoginPage() {
         conflictTo={ROUTES.creator}
       >
               <div className="flex flex-col gap-5">
-            <h1 className="text-center text-h2 font-bold text-ink">Masuk ke workspace</h1>
+            <h1 className="text-center text-h2 font-bold text-ink wrap-break-word">Masuk ke workspace</h1>
             {state === 'success' && <SuccessBanner title="Berhasil masuk">Sesi Anda aktif pada peramban ini.</SuccessBanner>}
             {state === 'validation' && <ValidationSummary items={['Email wajib diisi.', 'Kata sandi wajib diisi.']} />}
             {state === 'expired' && <Banner tone="warning" title="Sesi berakhir">Silakan masuk kembali untuk melanjutkan.</Banner>}

@@ -272,7 +272,7 @@ export function AdminAccountsPage() {
                       value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                      className="min-h-[44px] rounded-sm border border-control-border bg-n0 px-2 text-body-sm text-ink"
                     >
                       <option value="creator">creator</option>
                       <option value="org_admin">org_admin</option>
@@ -285,7 +285,7 @@ export function AdminAccountsPage() {
                       value={a.organization_id ?? ''}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
                       onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] max-w-[12rem] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                      className="min-h-[44px] max-w-[12rem] rounded-sm border border-control-border bg-n0 px-2 text-body-sm text-ink"
                     >
                       <option value="">Tanpa organisasi</option>
                       {organizations.map((organization) => (
@@ -327,7 +327,7 @@ export function AdminAccountsPage() {
                       value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                      className="min-h-[44px] w-full rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
                       <option value="creator">creator</option>
                       <option value="org_admin">org_admin</option>
@@ -341,7 +341,7 @@ export function AdminAccountsPage() {
                       value={a.organization_id ?? ''}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
                       onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                      className="min-h-[44px] w-full rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
                       <option value="">Tanpa organisasi</option>
                       {organizations.map((organization) => (
@@ -504,7 +504,7 @@ export function AdminAccountsPage() {
                     aria-label="Akun untuk cakupan baru"
                     value={scopeAccount}
                     onChange={(event) => setScopeAccount(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                   >
                     <option value="">Pilih akun</option>
                     {accounts.filter((a) => a.role !== 'super_admin').map((a) => (
@@ -518,7 +518,7 @@ export function AdminAccountsPage() {
                     aria-label="Survei untuk cakupan baru"
                     value={scopeSurvey}
                     onChange={(event) => setScopeSurvey(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                   >
                     {surveys.map((survey) => (
                       <option key={survey.id} value={survey.id}>{survey.title}</option>
@@ -852,7 +852,7 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
             aria-label={`Status permintaan ${request.id}`}
             value={status}
             onChange={(event) => setStatus(event.target.value as DataRequestStatus)}
-            className="min-h-[44px] rounded-md border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+            className="min-h-[44px] rounded-md border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
           >
             {Object.entries(REQUEST_LABELS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>

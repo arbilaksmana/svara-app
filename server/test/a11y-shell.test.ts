@@ -1,6 +1,6 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime.js';
@@ -10,7 +10,7 @@ import { TextArea } from '../../src/components/ui.tsx';
 import { ToastProvider } from '../../src/components/Toast.tsx';
 import { PreviewPage } from '../../src/screens/CreatorCore.tsx';
 import { HomePage } from '../../src/screens/Landing.tsx';
-import { PrivacyPage } from '../../src/screens/Public.tsx';
+import { LoginPage, PrivacyPage } from '../../src/screens/Public.tsx';
 import { RegisterPage } from '../../src/screens/Register.tsx';
 import { refreshBootstrap } from '../../src/lib/store.ts';
 import type { BootstrapData } from '../../src/lib/api.ts';
@@ -113,7 +113,7 @@ test('UIX-22: halaman survei tidak ditemukan memiliki tepat satu h1', () => {
 });
 
 test('UIX-12: tautan beranda di header tetap bernama pada breakpoint mobile', () => {
-  const html = render(createElement(Shell, { kind: 'public', title: 'Uji' }, 'isi'));
+  const html = render(createElement(Shell, { kind: 'public', title: 'Uji', children: 'isi' }));
   const header = /<header\b[\s\S]*?<\/header>/.exec(html)?.[0] ?? '';
   const home = [...header.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a).find((a) => a.includes('/favicon.svg'));
   assert.ok(home, 'Header harus merender tautan beranda bermerek');
@@ -137,6 +137,63 @@ test('UIX-14: batas select, textarea, dan input memakai token dengan kontras ≥
   }
 });
 
+/** Tag pembuka JSX sampai `>` penutupnya; `=>` di dalam `{...}` tidak dianggap akhir tag. */
+function jsxOpeningTag(source: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    else if (ch === '"' && depth === 0) i = source.indexOf('"', i + 1);
+    else if (ch === '>' && depth === 0) return source.slice(start, i + 1);
+  }
+  throw new Error(`Tag tidak tertutup di posisi ${start}`);
+}
+
+/** Kelas statis dari `className="..."` atau ``className={`...`}``; interpolasi `${...}` diabaikan. */
+function staticClassName(tag: string): string {
+  const at = tag.indexOf('className=');
+  if (at < 0) return '';
+  const value = tag.slice(at + 'className='.length);
+  if (value.startsWith('"')) return value.slice(1, value.indexOf('"', 1));
+  let depth = 0;
+  const end = [...value].findIndex((ch) => (depth += ch === '{' ? 1 : ch === '}' ? -1 : 0) === 0);
+  return [...value.slice(0, end + 1).matchAll(/`([^`]*)`|'([^']*)'|"([^"]*)"/g)]
+    .map(([, tpl, single, double]) => (tpl ?? single ?? double ?? '').replace(/\$\{[^}]*\}/g, ' '))
+    .join(' ');
+}
+
+function sourceFiles(dir: URL): URL[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory()
+    ? sourceFiles(new URL(`${entry.name}/`, dir))
+    : entry.name.endsWith('.tsx') ? [new URL(entry.name, dir)] : []);
+}
+
+test('UIX-14: semua select, textarea, dan input di src memakai token batas dengan kontras ≥ 3:1', () => {
+  const root = new URL('../../src/', import.meta.url);
+  const checked = new Map<string, number>();
+  for (const file of sourceFiles(root)) {
+    const source = readFileSync(file, 'utf8');
+    const name = file.pathname.slice(root.pathname.length);
+    for (const match of source.matchAll(/<(?:select|textarea|input)\b/g)) {
+      const tag = jsxOpeningTag(source, match.index);
+      const line = source.slice(0, match.index).split('\n').length;
+      const base = `class="${staticClassName(tag).split(/\s+/).filter((utility) => utility && !utility.includes(':')).join(' ')}"`;
+      const border = colorToken(base, 'border');
+      if (!border) continue;
+      const background = colorToken(base, 'bg') ?? 'canvas';
+      const ratio = contrast(border, background);
+      assert.ok(ratio >= 3, `${name}:${line} batas ${border} di atas ${background} hanya ${ratio.toFixed(2)}:1 (butuh ≥ 3:1)`);
+      checked.set(name, (checked.get(name) ?? 0) + 1);
+    }
+  }
+  const minimums = [['screens/Admin.tsx', 7], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2], ['components/ui.tsx', 2]] as const;
+  for (const [file, minimum] of minimums) {
+    const found = checked.get(file) ?? 0;
+    assert.ok(found >= minimum, `Pemindaian harus memeriksa ≥ ${minimum} kontrol bertoken batas di ${file}, ditemukan ${found}`);
+  }
+});
+
 test('UIX-15: anotasi langkah di landing memakai token teks dengan kontras ≥ 4,5:1', () => {
   const html = render(createElement(HomePage));
   const annotations = [...html.matchAll(/<span\b[^>]*>(?:LANGKAH (?:<!-- -->)?\d|0\d)<\/span>/g)].map(([span]) => span);
@@ -149,19 +206,27 @@ test('UIX-15: anotasi langkah di landing memakai token teks dengan kontras ≥ 4
   }
 });
 
+const WRAPS = /^(?:wrap-anywhere|wrap-break-word|break-words|break-all)$/;
+
 test('UIX-16: judul halaman di shell boleh patah baris agar tidak terpotong pada teks 200%', () => {
-  const html = render(createElement(Shell, { kind: 'public', title: 'Survei Kebiasaan Membaca Perpustakaan' }, 'isi'));
+  const html = render(createElement(Shell, { kind: 'public', title: 'Survei Kebiasaan Membaca Perpustakaan', children: 'isi' }));
   const heading = /<h1\b[^>]*>Survei Kebiasaan Membaca Perpustakaan<\/h1>/.exec(html)?.[0];
   assert.ok(heading, 'Shell harus merender judul sebagai h1');
-  assert.ok(
-    classes(heading).some((name) => /^(?:wrap-anywhere|wrap-break-word|break-words|break-all)$/.test(name)),
-    `Judul harus memakai overflow-wrap agar kata panjang tidak terpotong: ${heading}`,
-  );
+  assert.ok(classes(heading).some((name) => WRAPS.test(name)), `Judul harus memakai overflow-wrap agar kata panjang tidak terpotong: ${heading}`);
+});
+
+test('UIX-16: heading landing dan halaman masuk boleh patah baris pada teks 200%', () => {
+  const headings = [render(createElement(HomePage)), render(createElement(LoginPage), '/auth/login')]
+    .flatMap((html) => [...html.matchAll(/<h[12]\b[^>]*>/g)].map(([tag]) => tag));
+  assert.equal(headings.length, 8, 'Landing (h1 + 6 h2) dan halaman masuk (h1) harus diperiksa');
+  for (const tag of headings) {
+    assert.ok(classes(tag).some((name) => WRAPS.test(name)), `Heading harus memakai overflow-wrap: ${tag}`);
+  }
 });
 
 test('UIX-25: item navigasi desktop aktif memakai aria-current dan penanda selain warna', async (t) => {
   await signInAs('super_admin', t.mock);
-  const html = render(createElement(Shell, { kind: 'admin', title: 'Ringkasan' }, 'isi'), '/admin');
+  const html = render(createElement(Shell, { kind: 'admin', title: 'Ringkasan', children: 'isi' }), '/admin');
   const nav = /<nav\b[^>]*aria-label="Navigasi utama"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? '';
   const links = [...nav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
   assert.ok(links.length > 1, 'Navigasi admin harus memuat beberapa item');

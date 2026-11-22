@@ -107,7 +107,7 @@ export function HomePage() {
           <section aria-labelledby="hero-title" className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
             <div className="flex min-w-0 flex-col items-start gap-5">
               <p className="font-mono text-caption font-bold tracking-mono text-n600">PEMBUAT SURVEI</p>
-              <h1 id="hero-title" className="text-h1 font-bold leading-[1.12] text-ink lg:text-[46px]">
+              <h1 id="hero-title" className="text-h1 font-bold leading-[1.12] text-ink wrap-anywhere lg:text-[46px]">
                 Susun instrumen sekali.
                 <span className="block text-n600">Terbitkan per versi.</span>
               </h1>
@@ -162,7 +162,7 @@ export function HomePage() {
           {/* Kemampuan inti */}
           <section aria-labelledby="kemampuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="kemampuan" className="text-h2 font-bold text-ink">Yang membedakan dari formulir biasa</h2>
+              <h2 id="kemampuan" className="text-h2 font-bold text-ink wrap-anywhere">Yang membedakan dari formulir biasa</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Empat hal yang dipakai setiap hari oleh pengelola survei.
               </p>
@@ -189,7 +189,7 @@ export function HomePage() {
           {/* Jalur data dan persetujuan */}
           <section aria-labelledby="persetujuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="persetujuan" className="text-h2 font-bold text-ink">Persetujuan mengikuti profil deployment</h2>
+              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti profil deployment</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Satu profil organisasi menentukan teks notice dan syarat persetujuan. Tidak ada asumsi sektor di dalam kode.
               </p>
@@ -221,7 +221,7 @@ export function HomePage() {
 
           {/* Alur kerja */}
           <section aria-labelledby="alur" className="flex flex-col gap-4">
-            <h2 id="alur" className="text-h2 font-bold text-ink">Dari instrumen kosong ke hasil terbaca</h2>
+            <h2 id="alur" className="text-h2 font-bold text-ink wrap-anywhere">Dari instrumen kosong ke hasil terbaca</h2>
             <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {FLOW.map((f, i) => (
                 <li key={f.step} className="flex flex-col gap-2 rounded-lg border border-n200 p-4">
@@ -239,7 +239,7 @@ export function HomePage() {
           {/* Dua bentuk skala */}
           <section aria-labelledby="contoh" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="contoh" className="text-h2 font-bold text-ink">Satu aplikasi, dua bentuk skala</h2>
+              <h2 id="contoh" className="text-h2 font-bold text-ink wrap-anywhere">Satu aplikasi, dua bentuk skala</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Jumlah titik dan label diatur per pertanyaan. Skala 5 titik menyediakan jawaban tengah, skala 4 titik
                 memaksa peserta memilih arah.
@@ -281,7 +281,7 @@ export function HomePage() {
 
           {/* FAQ */}
           <section aria-labelledby="faq" className="flex flex-col gap-4">
-            <h2 id="faq" className="text-h2 font-bold text-ink">Pertanyaan yang sering muncul</h2>
+            <h2 id="faq" className="text-h2 font-bold text-ink wrap-anywhere">Pertanyaan yang sering muncul</h2>
             <div className="flex flex-col">
               {FAQ.map((item, i) => (
                 <details key={item.q} className={`group py-4 ${i > 0 ? 'border-t border-n200' : ''}`}>
@@ -298,7 +298,7 @@ export function HomePage() {
 
           {/* Penutup */}
           <section aria-labelledby="penutup" className="flex flex-col items-start gap-4 rounded-lg border border-n200 bg-n50 p-6 lg:p-8">
-            <h2 id="penutup" className="text-h2 font-bold text-ink">Siap menyusun instrumen pertama?</h2>
+            <h2 id="penutup" className="text-h2 font-bold text-ink wrap-anywhere">Siap menyusun instrumen pertama?</h2>
             <p className="max-w-[60ch] text-body text-muted">
               Masuk sebagai pengelola untuk membuat draf, atau isi contoh formulir lebih dulu untuk melihat alur responden.
             </p>

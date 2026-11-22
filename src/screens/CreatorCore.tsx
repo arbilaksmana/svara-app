@@ -155,7 +155,7 @@ export function CreatorListPage() {
                 id="filter-status"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as typeof filter)}
-                className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
               >
                 <option value="semua">Semua</option>
                 <option value="draft">Draf</option>
@@ -172,7 +172,7 @@ export function CreatorListPage() {
                   value={scope}
                   onChange={(e) => setScopeChoice(e.target.value as SurveyScope)}
                   aria-describedby="new-survey-scope-hint"
-                  className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                  className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                 >
                   <option value="organization">Organisasi</option>
                   <option value="individual">Individu</option>
