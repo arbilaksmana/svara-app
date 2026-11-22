@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual, type BinaryLike } from 'node:crypto';
+import { isIP } from 'node:net';
 import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import { all, get, nowIso, run } from './db.ts';
@@ -239,12 +240,16 @@ export function rateLimitBucketCount(): number {
 }
 
 /**
- * Identitas klien untuk limiter: alamat socket, bukan `req.ip`. proxy-addr 2.0.8
- * tidak berhenti di socket yang dipercaya (loopback), sehingga klien langsung masih
- * bisa memalsukan X-Forwarded-For lewat `req.ip`/`req.ips`; socket tidak bisa dipalsukan.
+ * Identitas klien untuk limiter: `req.ip`, yaitu fungsi `trust proxy` Express dari TRUST_PROXY.
+ * Tanpa TRUST_PROXY hasilnya alamat socket. Dengan TRUST_PROXY, proxy-addr menelusuri
+ * X-Forwarded-For dari kanan hanya selama hop sebelumnya dipercaya dan berhenti di alamat pertama
+ * yang tidak dipercaya; socket yang bukan proxy tepercaya (klien langsung) dipakai apa adanya.
+ * Entri header yang bukan alamat IP (mis. "unknown") jatuh ke alamat socket.
  */
 export function clientIp(req: Request): string {
-  return req.socket.remoteAddress ?? 'unknown';
+  const socket = req.socket.remoteAddress ?? 'unknown';
+  const ip = req.ip;
+  return ip && isIP(ip) ? ip : socket;
 }
 
 /** Pembatas percobaan di memori proses; cukup untuk satu instans lokal. */
