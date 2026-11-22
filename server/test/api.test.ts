@@ -1134,7 +1134,7 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
     await stored.query(
       `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, organization_id)
        VALUES ('u_orgbaru_creator', $1, 'Kreator Baru', 'creator', 'active', $2, $3, $4)`,
-      [creatorEmail, hashPassword('SvaraDemo123!'), new Date().toISOString(), result.organization.id],
+      [creatorEmail, await hashPassword('SvaraDemo123!'), new Date().toISOString(), result.organization.id],
     );
     const creatorCookie = await login(creatorEmail);
     const ownSurvey = data<{ survey: { id: string } }>(await call('/surveys', {

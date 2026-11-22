@@ -237,7 +237,7 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
         accountId,
         adminEmail,
         adminName,
-        hashPassword(adminPassword),
+        await hashPassword(adminPassword),
         createdAt,
         organizationId,
       );

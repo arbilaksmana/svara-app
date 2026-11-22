@@ -122,7 +122,8 @@ scripts/         Smoke test web
 
 ## Keamanan dan privasi
 
-- Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt`, dan header `X-Svara-Client` untuk mutasi.
+- Sesi cookie HttpOnly dengan TTL, hash kata sandi `scrypt` async (threadpool libuv, tidak memblokir event loop), dan header `X-Svara-Client` untuk mutasi. Cookie dengan percent-encoding rusak diabaikan seperti tidak ada sesi, bukan `500`.
+- Login menolak email yang formatnya tidak valid atau lebih dari 254 karakter dan kata sandi lebih dari 256 karakter dengan `422 validation_error` generik, sebelum rate limit, query akun, hashing, dan audit. Audit login gagal hanya menyimpan email ternormalisasi yang lolos batas itu.
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
 - Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
 - Persetujuan mengizinkan satu respons final dalam 24 jam. Retry identik dari sesi yang sama tetap mengembalikan bukti yang sama. Jika persetujuan lama belum dipakai saat migrasi `012`, responden harus mencatat persetujuan baru; migrasi tidak mengubah bukti kiriman lama.
@@ -268,7 +269,7 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
 | `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
 | `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter selalu memakai alamat koneksi langsung, sehingga klien yang tidak lewat proxy tidak bisa memalsukan identitasnya. Set hanya bila reverse proxy tepercaya mengisi header tersebut |
-| `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
+| `COOKIE_SECURE` | `0` | `1` = cookie sesi `svara_session` selalu memakai `Secure`; set di setiap deployment HTTPS, termasuk di belakang reverse proxy/TLS terminator. `0`/kosong = cookie sesi memakai `Secure` hanya bila `req.secure` benar: TLS langsung ke API, atau `X-Forwarded-Proto: https` dari proxy yang dipercaya lewat `TRUST_PROXY`. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
