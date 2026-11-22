@@ -279,7 +279,7 @@ export function rateLimit(options: { key: string; limit: number; windowMs: numbe
 /**
  * Nilai `trust proxy` Express dari TRUST_PROXY. Mati secara default: header proxy
  * tanpa konfigurasi bisa dipalsukan klien. Hanya jaringan bernama yang diterima. `true`, rentang IP,
- * dan jumlah hop ditolak dan diganti `loopback`; jumlah hop mempercayai socket dari alamat mana pun,
+ * dan jumlah hop ditolak dan trust proxy dimatikan (gagal-tertutup); jumlah hop mempercayai socket dari alamat mana pun,
  * sehingga klien yang menjangkau API langsung bisa memilih identitasnya lewat X-Forwarded-For.
  */
 export function trustProxySetting(value: string | undefined): false | string {
@@ -291,8 +291,8 @@ export function trustProxySetting(value: string | undefined): false | string {
   const reason = names.some((name) => /^\d+$/.test(name))
     ? 'berisi jumlah hop yang mempercayai koneksi dari alamat mana pun'
     : 'tidak dikenal';
-  console.warn(`[api] TRUST_PROXY ${reason} ("${value}"); memakai "loopback".`);
-  return 'loopback';
+  console.warn(`[api] TRUST_PROXY ${reason} ("${value}"); trust proxy dimatikan.`);
+  return false;
 }
 
 /** Kode undangan survei (UND-...) dan organisasi (ORG-...) yang dapat tertulis di baris audit lama. */

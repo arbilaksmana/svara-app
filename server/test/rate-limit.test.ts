@@ -84,17 +84,17 @@ test('PERF-06 trustProxySetting: default mati dan nilai tak dikenal dibatasi', (
   assert.equal(trustProxySetting('0'), false);
   assert.equal(trustProxySetting('loopback'), 'loopback');
   assert.equal(trustProxySetting('loopback, linklocal'), 'loopback, linklocal');
-  assert.equal(trustProxySetting('true'), 'loopback');
-  assert.equal(trustProxySetting('*'), 'loopback');
-  assert.equal(trustProxySetting('10.0.0.0/8'), 'loopback', 'rentang IP tidak didukung; jatuh ke loopback');
+  assert.equal(trustProxySetting('true'), false);
+  assert.equal(trustProxySetting('*'), false);
+  assert.equal(trustProxySetting('10.0.0.0/8'), false, 'B4: rentang IP tidak didukung; trust proxy mati');
 });
 
-test('N1 trustProxySetting: jumlah hop tidak diterima diam-diam, jatuh ke loopback dengan peringatan', () => {
+test('N1/B4 trustProxySetting: jumlah hop tidak diterima diam-diam, trust proxy mati dengan peringatan', () => {
   const warn = mock.method(console, 'warn', () => {});
   try {
     for (const value of ['1', ' 2 ', '1,2', '1, loopback']) {
       warn.mock.resetCalls();
-      assert.equal(trustProxySetting(value), 'loopback', `TRUST_PROXY=${JSON.stringify(value)}`);
+      assert.equal(trustProxySetting(value), false, `TRUST_PROXY=${JSON.stringify(value)}`);
       assert.equal(warn.mock.callCount(), 1, `TRUST_PROXY=${JSON.stringify(value)} memberi peringatan`);
       assert.match(String(warn.mock.calls[0]?.arguments[0]), /jumlah hop/);
     }
@@ -228,9 +228,9 @@ test('H3 clientIp: aturan trust proxy yang sama dengan Express; header kosong/ti
     { trust: 'loopback', forwardedFor: '198.51.100.7, 10.0.4.2', expected: '10.0.4.2' },
     { trust: 'loopback, uniquelocal', forwardedFor: '198.51.100.7, 10.0.4.2', expected: '198.51.100.7' },
     { trust: 'uniquelocal', forwardedFor: '198.51.100.7', expected: '127.0.0.1' },
-    // Jumlah hop diperlakukan seperti `loopback`: hanya hop terakhir dari socket loopback yang dipercaya.
-    { trust: '1', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '198.51.100.7' },
-    { trust: '2', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '198.51.100.7' },
+    // B4: jumlah hop tidak didukung; trust proxy mati sehingga header diabaikan dan socket yang dipakai.
+    { trust: '1', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '127.0.0.1' },
+    { trust: '2', forwardedFor: '203.0.113.9, 198.51.100.7', expected: '127.0.0.1' },
     { trust: 'loopback', forwardedFor: 'unknown', expected: '127.0.0.1' },
     { trust: 'loopback', forwardedFor: '', expected: '127.0.0.1' },
     { trust: 'loopback', expected: '127.0.0.1' },
@@ -315,10 +315,12 @@ test('N1 clientIp untuk setiap bentuk TRUST_PROXY yang didokumentasikan, per top
     linklocal: { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '172.18.0.3', linklocalIngress: '198.51.100.7' },
     uniquelocal: { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '198.51.100.7', linklocalIngress: 'fe80::1' },
     'loopback, uniquelocal': { direct: '203.0.113.50', loopbackIngress: '198.51.100.7', privateIngress: '198.51.100.7', linklocalIngress: 'fe80::1' },
-    // Jumlah hop mempercayai socket apa pun; tidak didukung dan diperlakukan seperti `loopback`.
-    '1': { direct: '203.0.113.50', loopbackIngress: '198.51.100.7', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
-    '2': { direct: '203.0.113.50', loopbackIngress: '198.51.100.7', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
-    '1,2': { direct: '203.0.113.50', loopbackIngress: '198.51.100.7', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
+    // B4: jumlah hop mempercayai socket apa pun; tidak didukung, trust proxy mati (sama dengan kosong).
+    '1': { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
+    '2': { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
+    '1,2': { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
+    // B4: nilai tak dikenal juga mematikan trust proxy, bukan jatuh ke `loopback`.
+    'true': { direct: '203.0.113.50', loopbackIngress: '127.0.0.1', privateIngress: '172.18.0.3', linklocalIngress: 'fe80::1' },
   };
   const probe = express();
   const failures: string[] = [];
