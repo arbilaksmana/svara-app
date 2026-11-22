@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 import { ApiError, adminCreateOrganization, type NewOrganizationInput } from '../../src/lib/api.ts';
@@ -421,4 +423,121 @@ test('galat notice onboarding memakai ApiError: versi tanpa notice platform 422 
       catalog[0]!.created_at,
     ]);
   }
+});
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const BOOTSTRAP_SCRIPT = fileURLToPath(new URL('../scripts/bootstrap-admin.ts', import.meta.url));
+
+/** `pnpm admin:bootstrap` apa adanya (tsx server/scripts/bootstrap-admin.ts) pada basis data uji. */
+function runAdminBootstrap(email: string) {
+  return spawnSync(process.execPath, ['--import', 'tsx', BOOTSTRAP_SCRIPT], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      BOOTSTRAP_ADMIN_EMAIL: email,
+      BOOTSTRAP_ADMIN_NAME: 'Pengelola Utama',
+      BOOTSTRAP_ADMIN_PASSWORD: PASSWORD,
+    },
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+}
+
+const NOTICE_TEXT_COLUMNS = [
+  'purpose', 'data_categories', 'module15_usage', 'retention_text', 'recipients', 'contact', 'rights',
+  'child_data_text', 'cross_border_text',
+] as const;
+
+test('instalasi tanpa seed sebelum bootstrap: galat onboarding menyebut organisasi dan notice platform, bukan survei', async () => {
+  await resetTestDatabase();
+  await sql(
+    `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at)
+     VALUES ('u_root', 'root@yayasan.example.org', 'Root', 'super_admin', 'active', $1, '2026-11-22T00:00:00.000Z')`,
+    [await hashPassword(PASSWORD)],
+  );
+  const admin = await login('root@yayasan.example.org');
+  const body = uiOrganizationInput('Yayasan Tanpa Profil', 'admin.tanpa.profil@example.org');
+  const response = await request('/admin/organizations', 'POST', body, { Cookie: admin });
+  assert.equal(response.status, 409, JSON.stringify(response.json));
+  assert.equal(response.json.code, 'notice_source_missing');
+  assert.doesNotMatch(response.json.error ?? '', /survei/i, `pesan: ${response.json.error}`);
+  assert.match(response.json.error ?? '', /organisasi/i);
+  assert.match(response.json.error ?? '', /profil platform/i);
+  assert.match(response.json.error ?? '', /pnpm admin:bootstrap/);
+  assert.deepEqual(await sql('SELECT id FROM organizations'), [], 'organisasi tidak tersisa');
+
+  // Instalasi yang super_admin-nya dibuat bootstrap versi lama: bootstrap ulang tetap mengisi profil platform.
+  const accounts = await sql('SELECT * FROM accounts ORDER BY id');
+  const rerun = runAdminBootstrap('root@yayasan.example.org');
+  assert.equal(rerun.status, 0, `admin:bootstrap: ${rerun.stderr}`);
+  assert.match(rerun.stdout, /profil platform awal dibuat/);
+  assert.match(rerun.stdout, /akun tidak diubah/);
+  assert.deepEqual(await sql('SELECT * FROM accounts ORDER BY id'), accounts, 'akun super_admin tidak diubah');
+  const { result } = await createOrganizationFromUi(admin, body);
+  assert.equal(result.organization.name, 'Yayasan Tanpa Profil');
+});
+
+test('instalasi tanpa seed: pnpm admin:bootstrap menyiapkan profil + notice platform templat, lalu onboarding dari UI 201', async () => {
+  await resetTestDatabase();
+  const bootstrap = runAdminBootstrap('root@yayasan.example.org');
+  assert.equal(bootstrap.status, 0, `admin:bootstrap: ${bootstrap.stderr}`);
+
+  const admin = await login('root@yayasan.example.org');
+  const input = uiOrganizationInput('Yayasan Pertama Mandiri', 'admin.pertama@example.org');
+  const { result, sent } = await createOrganizationFromUi(admin, input);
+  assert.deepEqual(sent, input, 'body yang dikirim klien UI');
+  assert.equal(result.organization.name, 'Yayasan Pertama Mandiri');
+  assert.equal(result.account.display_name, 'Admin Organisasi Baru');
+  assert.equal(result.account.role, 'org_admin');
+
+  const [platformNotice] = await sql<Record<string, string>>(
+    `SELECT pn.version, ${NOTICE_TEXT_COLUMNS.map((column) => `pn.${column}`).join(', ')}
+       FROM platform_notices pn JOIN platform_profile pp ON pp.notice_version = pn.version`,
+  );
+  assert.ok(platformNotice, 'bootstrap membuat notice platform untuk platform_profile.notice_version');
+  for (const column of NOTICE_TEXT_COLUMNS) {
+    const text = platformNotice[column]!;
+    assert.match(text, /^\[Templat awal: wajib ditinjau pengelola platform; bukan teks hukum final\]/, `${column}: ${text}`);
+    assert.doesNotMatch(text, /wali|orang tua|anak/i, `${column} tidak berteks wali/anak: ${text}`);
+  }
+  assert.deepEqual(
+    await sql('SELECT notice_version FROM organizations WHERE id = $1', [result.organization.id]),
+    [{ notice_version: platformNotice.version }],
+  );
+  const organizationNotices = await sql<Record<string, string>>(
+    `SELECT version, ${NOTICE_TEXT_COLUMNS.join(', ')} FROM organization_notices WHERE organization_id = $1`,
+    [result.organization.id],
+  );
+  assert.deepEqual(organizationNotices, [platformNotice], 'notice awal organisasi = salinan notice platform templat');
+
+  // Halaman /admin/platform membaca dan menyimpan profil yang dibuat bootstrap.
+  const profile = await request('/admin/platform-profile', 'GET', undefined, { Cookie: admin });
+  assert.equal(profile.status, 200, JSON.stringify(profile.json));
+  assert.equal((profile.json.data as { profile: { organization_type: string } }).profile.organization_type, 'platform');
+  const audit = await sql<{ action: string; actor: string }>(
+    "SELECT action, actor FROM audit_logs WHERE action IN ('Bootstrap profil platform', 'Bootstrap admin') ORDER BY action",
+  );
+  assert.deepEqual(audit, [
+    { action: 'Bootstrap admin', actor: 'system' },
+    { action: 'Bootstrap profil platform', actor: 'system' },
+  ]);
+});
+
+test('pnpm admin:bootstrap diulang tidak menimpa profil atau notice platform yang sudah ditinjau pengelola', async () => {
+  await sql("UPDATE platform_notices SET purpose = 'Tujuan yang sudah ditinjau pengelola'");
+  await sql("UPDATE platform_profile SET organization_name = 'Yayasan Pengelola Platform'");
+  const snapshot = async () => ({
+    profile: await sql('SELECT * FROM platform_profile'),
+    notices: await sql('SELECT * FROM platform_notices ORDER BY version'),
+    accounts: await sql('SELECT id, email, role FROM accounts ORDER BY id'),
+  });
+  const before = await snapshot();
+  const again = runAdminBootstrap('root@yayasan.example.org');
+  assert.equal(again.status, 0, `admin:bootstrap ulang: ${again.stderr}`);
+  assert.deepEqual(await snapshot(), before);
+  assert.equal(
+    (await sql<{ count: number }>("SELECT COUNT(*)::int AS count FROM audit_logs WHERE action = 'Bootstrap profil platform'"))[0]!.count,
+    1,
+  );
 });

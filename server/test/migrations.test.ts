@@ -45,6 +45,7 @@ const VERSIONS = [
   '016_data_request_retention.sql',
   '017_hot_path_indexes.sql',
   '018_notice_survey_profile_backfill.sql',
+  '019_close_superseded_published_versions.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
