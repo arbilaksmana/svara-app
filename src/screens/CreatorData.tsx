@@ -340,6 +340,13 @@ export function ResultsPage({ id }: { id: string }) {
   const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
   const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
+  // CSV memuat baris per responden: server mensyaratkan izin ekspor dan izin baca individual (canExportIndividual).
+  const csvAllowed = exportAllowed && (isOwner || individualAllowed);
+  const csvBlockedReason = !exportAllowed || csvAllowed
+    ? null
+    : myGrants.some((grant) => grants[grant.id]?.read)
+      ? 'Pengaturan survei belum mengizinkan petugas berizin membaca jawaban individual, jadi CSV per responden tidak dapat diunduh. Kodebook tetap dapat diunduh.'
+      : 'CSV memuat jawaban per responden dan memerlukan izin membaca jawaban individual. Administrator dapat memberikan izin itu; kodebook tetap dapat diunduh.';
 
   const loadResponses = () => {
     setResponsesBusy(true);
@@ -563,6 +570,10 @@ export function ResultsPage({ id }: { id: string }) {
               <Banner tone="info" title="Izin ekspor diperlukan">
                 Akun ini belum memiliki izin ekspor pada survei ini. Administrator dapat memberikan izin ekspor terpisah.
               </Banner>
+            ) : csvBlockedReason ? (
+              <Banner tone="info" title="Hanya kodebook yang dapat diunduh">
+                <span id="alasan-csv-nonaktif">{csvBlockedReason}</span>
+              </Banner>
             ) : (
               <Banner tone="info" title="Ekspor diizinkan">
                 CSV UTF-8 per versi dan kodebook. Nama tidak masuk ekspor standar; token tidak pernah diekspor.
@@ -571,7 +582,8 @@ export function ResultsPage({ id }: { id: string }) {
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="secondary"
-                disabled={!exportAllowed || denied || !summary || summary.total === 0 || loading || busy}
+                disabled={!csvAllowed || denied || !summary || summary.total === 0 || loading || busy}
+                aria-describedby={!denied && csvBlockedReason ? 'alasan-csv-nonaktif' : undefined}
                 loading={busy}
                 onClick={() => {
                   setBusy(true);

@@ -43,7 +43,7 @@ import {
   setIntegrationNote,
   useStore,
 } from '../lib/store';
-import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
 import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
 import type { OrganizationType } from '../lib/types';
 
@@ -827,11 +827,62 @@ const REQUEST_LABELS: Record<DataRequestStatus, string> = {
   rejected: 'Ditolak',
 };
 
+/** Kanal yang dipakai pengelola untuk membalas pemohon; server mencatatnya sebagai jejak balasan `response_channel`. */
+const RESPONSE_CHANNEL_LABELS: Record<string, string> = {
+  email: 'Email',
+  phone: 'Telepon',
+  messaging: 'Pesan singkat (SMS/WhatsApp)',
+  letter: 'Surat',
+  in_person: 'Tatap muka',
+};
+
+const CHANNEL_REQUIRED = 'Pilih kanal yang dipakai untuk membalas pemohon. Kanal ini dicatat sebagai bukti bahwa permintaan sudah dibalas.';
+
 function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () => void }) {
   const [status, setStatus] = useState<DataRequestStatus>(request.status);
   const [note, setNote] = useState(request.outcome_note ?? '');
+  const [channel, setChannel] = useState(request.response_channel ?? '');
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const notify = useToast();
+  const fieldId = `request-${request.id}`;
+  const channelId = `${fieldId}-channel`;
+  // Kanal tersimpan di luar daftar (mis. teks bebas lewat API) tetap dapat dipilih agar simpan ulang tidak menggantinya.
+  const storedChannel = request.response_channel;
+  const channelOptions = storedChannel && !Object.hasOwn(RESPONSE_CHANNEL_LABELS, storedChannel)
+    ? [[storedChannel, storedChannel], ...Object.entries(RESPONSE_CHANNEL_LABELS)]
+    : Object.entries(RESPONSE_CHANNEL_LABELS);
+
+  const save = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaveError(null);
+    setChannelError(null);
+    if (status === 'handled' && !channel) {
+      setChannelError(CHANNEL_REQUIRED);
+      document.getElementById(channelId)?.focus();
+      return;
+    }
+    const outcomeNote = note.trim();
+    setBusy(true);
+    void updateDataRequest(
+      request.id,
+      status === 'handled' ? { status, outcome_note: outcomeNote, response_channel: channel } : { status, outcome_note: outcomeNote },
+    )
+      .then(() => {
+        notify('Permintaan data diperbarui. Log audit mencatat tindakan ini.');
+        onSaved();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === 'response_evidence_required') {
+          setChannelError(CHANNEL_REQUIRED);
+          document.getElementById(channelId)?.focus();
+          return;
+        }
+        setSaveError(error instanceof Error ? error.message : 'Permintaan data gagal diperbarui.');
+      })
+      .finally(() => setBusy(false));
+  };
 
   return (
     <li className="flex flex-col gap-3 rounded-md border border-n200 p-4">
@@ -856,47 +907,73 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
           <dd className="min-w-0 break-words text-ink">{request.note ?? '—'}</dd>
         </div>
       </dl>
-      <div className="grid gap-3 sm:grid-cols-[12rem_1fr] sm:items-end">
-        <label className="flex flex-col gap-1 text-caption font-bold text-muted">
-          Status
-          <select
-            aria-label={`Status permintaan ${request.id}`}
-            value={status}
-            onChange={(event) => setStatus(event.target.value as DataRequestStatus)}
-            className="min-h-[44px] rounded-md border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
-          >
-            {Object.entries(REQUEST_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
+      <form className="flex flex-col gap-3" noValidate onSubmit={save}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field id={`${fieldId}-status`} label="Status">
+            {(aria) => (
+              <select
+                {...aria}
+                aria-label={`Status permintaan ${request.id}`}
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value as DataRequestStatus);
+                  setChannelError(null);
+                }}
+                className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
+              >
+                {Object.entries(REQUEST_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            )}
+          </Field>
+          {status === 'handled' && (
+            <Field
+              id={channelId}
+              label="Kanal balasan"
+              required
+              hint="Cara Anda membalas pemohon."
+              error={channelError ?? undefined}
+            >
+              {(aria) => (
+                <select
+                  {...aria}
+                  aria-label={`Kanal balasan permintaan ${request.id}`}
+                  value={channel}
+                  onChange={(event) => {
+                    setChannel(event.target.value);
+                    setChannelError(null);
+                  }}
+                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink aria-invalid:border-2 aria-invalid:border-danger"
+                >
+                  <option value="">Pilih kanal</option>
+                  {channelOptions.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          <div className="sm:col-span-2">
+            <Field id={`${fieldId}-note`} label="Catatan hasil">
+              {(aria) => (
+                <TextInput
+                  {...aria}
+                  aria-label={`Catatan hasil permintaan ${request.id}`}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </div>
+        {saveError && <ErrorState title="Perubahan belum tersimpan" detail={saveError} />}
         <div>
-          <TextInput
-            aria-label={`Catatan hasil permintaan ${request.id}`}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="Catatan hasil"
-          />
-          <Button
-            variant="secondary"
-            className="mt-2"
-            loading={busy}
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void updateDataRequest(request.id, status, note.trim())
-                .then(() => {
-                  notify('Permintaan data diperbarui. Log audit mencatat tindakan ini.');
-                  onSaved();
-                })
-                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Permintaan gagal diperbarui.', 'danger'))
-                .finally(() => setBusy(false));
-            }}
-          >
+          <Button type="submit" variant="secondary" loading={busy} disabled={busy}>
             Simpan
           </Button>
         </div>
-      </div>
+      </form>
     </li>
   );
 }

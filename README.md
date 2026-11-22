@@ -108,7 +108,7 @@ scripts/         Smoke test web
 ```
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
-- `server/migrations/` berisi skema 21 tabel dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum.
+- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`017`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
 - `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
@@ -130,6 +130,7 @@ scripts/         Smoke test web
 - Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
 - Persetujuan mengizinkan satu respons final dalam 24 jam. Retry identik dari sesi yang sama tetap mengembalikan bukti yang sama. Jika persetujuan lama belum dipakai saat migrasi `012`, responden harus mencatat persetujuan baru; migrasi tidak mengubah bukti kiriman lama.
 - Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
+- Permintaan data dari formulir publik di `/privacy` tercatat `pending`. `PATCH /admin/data-requests/:id` menolak status `handled` tanpa `response_channel` (`422 response_evidence_required`); kanal balasan, `responded_by`, dan `responded_at` menjadi jejak bahwa pemohon sudah dibalas. Di `/admin/requests`, status **Selesai** meminta kanal balasan sebelum disimpan, dan kanal yang sudah tersimpan tetap terpilih saat baris dibuka lagi.
 - Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
 - Lingkup `/org/*` selalu diambil dari sesi (`accounts.organization_id`), tidak pernah dari body atau query; akun tanpa organisasi ditolak `403`.
 - Setiap baris audit mencatat `account_id` pelaku dan `organization_id` dari sesi, sehingga baca jawaban individual, ekspor CSV, dan ekspor kodebook dapat ditelusuri per organisasi. `super_admin` tanpa organisasi menulis `organization_id` NULL.
@@ -144,21 +145,21 @@ scripts/         Smoke test web
 
 Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
 
-- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `respondent_age_category`, `consent_mode`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql:5-16`, `server/migrations/006_organization_profile.sql:4-5`).
-- `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql:18-30`).
-- `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql:32-33`).
+- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `respondent_age_category`, `consent_mode`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/006_organization_profile.sql`).
+- `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql`).
+- `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql`).
 
 ### Lingkup survei saat dibuat
 
-`POST /surveys` menerima `owner_scope`: `individual` atau `organization`; nilai lain ditolak `422` dan nilai kosong berarti `individual` (`server/routes/surveys.ts:309-313`). Hanya `creator` yang boleh membuat survei (`server/routes/surveys.ts:306`).
+`POST /surveys` (`server/routes/surveys.ts`) menerima `owner_scope`: `individual` atau `organization`; nilai lain, termasuk string kosong, ditolak `422`, dan tanpa `owner_scope` berarti `individual`. Hanya `creator` yang boleh membuat survei; peran lain ditolak `403 forbidden_role`.
 
-- `individual` menyimpan `surveys.organization_id = NULL`; survei menjadi milik pembuatnya (`server/routes/surveys.ts:318`).
-- `organization` menyalin `accounts.organization_id` akun pembuat ke survei; akun tanpa organisasi ditolak `403` (`server/routes/surveys.ts:315-318`).
-- `surveys.profile_id` tetap wajib dan masih merujuk baris `profiles` sintetis (`server/routes/surveys.ts:319-328`). Kebijakan yang dipakai survei dibaca dari `organization_id`, bukan dari `profile_id`.
+- `individual` menyimpan `surveys.organization_id = NULL`; survei menjadi milik pembuatnya.
+- `organization` menyalin `accounts.organization_id` akun pembuat ke survei; akun tanpa organisasi ditolak `403 forbidden_scope`.
+- `surveys.profile_id` tetap wajib dan masih merujuk baris `profiles` sintetis. Kebijakan yang dipakai survei dibaca dari `organization_id`, bukan dari `profile_id`.
 
-Di UI, `/creator` menampilkan kontrol "Lingkup" di samping tombol "Buat draf baru" hanya bila akun terikat organisasi, dan nilai awalnya `organization`; akun tanpa organisasi tidak melihat kontrol itu dan selalu membuat survei individu. Pilihan itu dikirim sebagai `owner_scope`, dan baris survei menampilkan "Lingkup organisasi" atau "Lingkup individu" (`src/screens/CreatorCore.tsx:167-184`, `src/lib/api.ts:163-167`).
+Di UI, `/creator` menampilkan kontrol "Lingkup" di samping tombol "Buat draf baru" hanya bila akun terikat organisasi, dan nilai awalnya `organization`; akun tanpa organisasi tidak melihat kontrol itu dan selalu membuat survei individu. Pilihan itu dikirim sebagai `owner_scope`, dan baris survei menampilkan "Lingkup organisasi" atau "Lingkup individu" (`CreatorListPage` di `src/screens/CreatorCore.tsx`, `createSurvey` di `src/lib/api.ts`).
 
-Apa artinya untuk visibilitas (`server/http.ts:108-144`):
+Apa artinya untuk visibilitas (`canManageSurvey` dan `accessibleSurveys` di `server/http.ts`):
 
 | Akun | Daftar survei | Mengelola |
 | --- | --- | --- |
@@ -167,7 +168,7 @@ Apa artinya untuk visibilitas (`server/http.ts:108-144`):
 | `creator` | Survei miliknya dan survei yang diberi grant ke akun itu | Survei miliknya saja; grant tidak memberi hak kelola |
 | Selain itu | Survei yang diberi grant | Tidak ada, hanya grant |
 
-Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`server/http.ts:108-116`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
+Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`canManageSurvey`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
 
 `GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
 
@@ -183,54 +184,55 @@ Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yan
 
 ### Sumber kebijakan dan notice
 
-- Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`server/http.ts:191-201`, `server/http.ts:218-234`, dipakai `server/routes/surveys.ts:158`).
-- `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`server/routes/surveys.ts:329-330`).
+- Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`noticeVersionFor` dan `surveyProfileFor` di `server/http.ts`; `surveyProfileFor` dipakai detail survei dan bootstrap).
+- `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`noticeVersionFor`, dipanggil `POST /surveys` dan `PUT /surveys/:id` saat draf dibuat).
 
 ### Siapa boleh membaca jawaban dan teks bebas
 
-- Pemilik survei dan `org_admin` organisasi survei itu membaca penuh: jawaban individual, teks bebas, agregat, ekspor, dan kodebook (`server/http.ts:169-184`).
-- `super_admin` tidak otomatis membaca jawaban individual; tanpa grant permintaan ditolak `403` (`server/http.ts:170-174`, diuji di `server/test/api.test.ts:1026-1029`).
-- Pemegang grant tetap terikat `survey_settings`: grant `can_read_individual` hanya berlaku bila `allow_individual` aktif, dan grant `can_read_aggregate` hanya berlaku bila `allow_results` aktif (`server/http.ts:154-178`).
-- Setiap baca individual dan ekspor dicatat dengan `account_id` pelaku serta `organization_id` sesi, berhasil maupun ditolak (`server/http.ts:297-305`, diuji di `server/test/api.test.ts:1030-1054`).
+- Pemilik survei dan `org_admin` organisasi survei itu membaca penuh: jawaban individual, teks bebas, agregat, ekspor, dan kodebook (`canManageSurvey`, dipakai `canReadIndividual`, `canExport`, dan `canReadFreeText` di `server/http.ts`).
+- `super_admin` tidak otomatis membaca jawaban individual; tanpa grant permintaan ditolak `403` (`canReadIndividual` tidak punya jalur `super_admin`; diuji di test "Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi" pada `server/test/api.test.ts`).
+- Pemegang grant tetap terikat `survey_settings`: grant `can_read_individual` hanya berlaku bila `allow_individual` aktif, dan grant apa pun memberi baca agregat hanya bila `allow_results` aktif (`canReadIndividual`, `canReadAggregate`).
+- Setiap baca individual dan ekspor dicatat dengan `account_id` pelaku serta `organization_id` sesi, berhasil maupun ditolak (`audit` di `server/http.ts`, diuji di test yang sama).
+- Ekspor CSV memuat baris per responden, jadi memerlukan izin ekspor sekaligus izin baca individual yang berlaku (`canExportIndividual`). Pemegang grant `can_export` tanpa `can_read_individual`, atau dengan `allow_individual` mati, mendapat `403 forbidden_export_individual`; kodebook cukup dengan izin ekspor. Halaman hasil menonaktifkan **Unduh CSV** beserta alasannya untuk akun seperti itu, sementara **Unduh kodebook** tetap aktif.
 
 ### Permukaan admin organisasi
 
-`/admin/org` adalah satu layar untuk `org_admin`: profil organisasi, anggota dan suspend, kode undangan creator beserta pencabutannya, dan log audit organisasi (`src/app/admin/org/page.tsx:10-14`, `src/screens/Org.tsx:366-410`). Semua endpoint memakai awalan `/api/v1` dan hanya menerima `org_admin` yang terikat organisasi:
+`/admin/org` adalah satu layar untuk `org_admin`: profil organisasi, anggota dan suspend, kode undangan creator beserta pencabutannya, dan log audit organisasi (`src/app/admin/org/page.tsx`, `AdminOrgPage` di `src/screens/Org.tsx`). Semua endpoint ada di `server/routes/org.ts`, memakai awalan `/api/v1`, dan hanya menerima `org_admin` yang terikat organisasi:
 
 | Endpoint | Perilaku |
 | --- | --- |
-| `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` (`server/routes/org.ts:50-66`) |
-| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` (`server/routes/org.ts:67-159`) |
-| `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` (`server/routes/org.ts:160-174`) |
-| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota (`server/routes/org.ts:175-199`) |
-| `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan (`server/routes/org.ts:200-220`) |
-| `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi, berlaku 14 hari (`server/routes/org.ts:221-257`) |
-| `DELETE /org/invitations/:id` | Mencabut kode yang belum terpakai; kode terpakai ditolak `409 invitation_used`, kode organisasi lain dijawab `404 invitation_not_found`, pencabutan ulang tetap `200` (`server/routes/org.ts:258-291`) |
-| `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 (`server/routes/org.ts:292-307`) |
+| `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` |
+| `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` |
+| `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota |
+| `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan |
+| `POST /org/invitations` | Membuat satu kode `ORG-...` sekali pakai untuk organisasi sesi, berlaku 14 hari |
+| `DELETE /org/invitations/:id` | Mencabut kode yang belum terpakai; kode terpakai ditolak `409 invitation_used`, kode organisasi lain dijawab `404 invitation_not_found`, pencabutan ulang tetap `200` |
+| `GET /org/audit` | Baris audit organisasi tanpa metadata mentah; `limit` 1-500, default 100 |
 
-Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body atau query, dan akun tanpa organisasi ditolak `403` sebelum data apa pun disentuh (`server/routes/org.ts:151-156`).
+Lingkup organisasi diambil dari sesi lewat `requireOrgScope`, bukan dari body atau query, dan akun tanpa organisasi ditolak `403` sebelum data apa pun disentuh.
 
 ### Onboarding creator lewat kode undangan organisasi
 
-1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual; setiap kode berlaku tepat 14 hari sejak dibuat (`expires_at` wajib terisi, termasuk untuk baris lama yang di-backfill migrasi 009) dan dapat dicabut dari tabel undangan sebelum terpakai (`server/routes/org.ts:221-291`).
-2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`src/screens/Register.tsx:103`, `src/screens/Register.tsx:185`).
-3. `POST /auth/register` mencari kode lalu menolak `422 invalid_invite_code` bila kode asing, sudah dipakai, dicabut, atau kedaluwarsa — alasan spesifik tidak dibocorkan (`server/routes/auth.ts:147-159`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama; guard `WHERE` menutup balapan dengan pencabutan (`server/routes/auth.ts:162-192`).
+1. `org_admin` membuat kode di `/admin/org` lewat `POST /org/invitations` dan membagikannya secara manual; setiap kode berlaku tepat 14 hari sejak dibuat (`expires_at` wajib terisi, termasuk untuk baris lama yang di-backfill migrasi 009) dan dapat dicabut dari tabel undangan sebelum terpakai (`DELETE /org/invitations/:id`).
+2. Pendaftar mengisi kolom "Kode undangan organisasi" di `/auth/register`; UI mengirimnya sebagai `invite_code` (`RegisterPage` di `src/screens/Register.tsx`).
+3. `POST /auth/register` mencari kode lalu menolak `422 invalid_invite_code` bila kode asing, sudah dipakai, dicabut, atau kedaluwarsa — alasan spesifik tidak dibocorkan (`server/routes/auth.ts`). Akun baru berperan `creator` dengan `organization_id` dari undangan, lalu kode ditandai terpakai di transaksi yang sama; guard `WHERE` menutup balapan dengan pencabutan.
 4. Tanpa `invite_code`, akun dibuat tanpa organisasi.
 
 ### Menetapkan lingkup akun
 
-`super_admin` menetapkan organisasi sebuah akun lewat `PATCH /admin/accounts/:id` dengan `organization_id` berupa id organisasi atau `null` (`server/routes/admin.ts:85-116`). Aturannya:
+`super_admin` menetapkan organisasi sebuah akun lewat `PATCH /admin/accounts/:id` dengan `organization_id` berupa id organisasi atau `null` (`server/routes/admin.ts`). Aturannya:
 
 - id yang tidak ada di `organizations` ditolak `422 unknown_organization`;
 - `org_admin` tanpa organisasi ditolak `422 organization_required`, karena guard `/org/*` membaca `accounts.organization_id`;
 - akun `super_admin` tidak boleh terikat organisasi: `422 super_admin_scope`, termasuk saat akun berorganisasi dipromosikan;
-- setiap perubahan dicatat pada log audit dengan `metadata.organization_id` (`server/routes/admin.ts:115`).
+- setiap perubahan dicatat pada log audit dengan `metadata.organization_id`.
 
-Di `/admin/accounts`, kolom "Organisasi" memuat daftar dari `bootstrap.organizations` yang hanya dikirim ke `super_admin` (`server/bootstrap.ts:317-321`), dan pemilih peran kini mencakup `org_admin` (`src/screens/Admin.tsx:206-236`). Memindahkan akun tidak mengubah `surveys.organization_id` yang sudah ada: survei tetap milik organisasi tempat ia dibuat.
+Di `/admin/accounts`, kolom "Organisasi" memuat daftar dari `bootstrap.organizations` yang hanya dikirim ke `super_admin` (`buildBootstrap` di `server/bootstrap.ts`), dan pemilih peran kini mencakup `org_admin` (`AdminAccountsPage` di `src/screens/Admin.tsx`). Memindahkan akun tidak mengubah `surveys.organization_id` yang sudah ada: survei tetap milik organisasi tempat ia dibuat.
 
 ### Membuat organisasi baru
 
-Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.ts:132`): organisasi dan admin pertamanya dibuat dalam satu transaksi, sehingga tidak ada organisasi tanpa pengelola. Body wajib memuat `name`, `organization_type` (`school` atau `organization`), dan `admin` berisi `display_name`, `email`, serta `password`.
+Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.ts`): organisasi dan admin pertamanya dibuat dalam satu transaksi, sehingga tidak ada organisasi tanpa pengelola. Body wajib memuat `name`, `organization_type` (`school` atau `organization`), dan `admin` berisi `display_name`, `email`, serta `password`.
 
 - `organization_type` selain dua nilai itu ditolak `422 validation_error`; `admin.password` mengikuti kebijakan yang sama dengan pendaftaran (`422 weak_password`).
 - Email yang sudah terdaftar ditolak `409 email_taken`; untuk akun lama, tautkan lewat `PATCH /admin/accounts/:id`.
@@ -243,7 +245,7 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 
 ### Profil platform
 
-`platform_profile` dipakai survei dan akun tanpa organisasi, dan `super_admin` mengubahnya lewat `/admin/platform` (`src/app/admin/platform/page.tsx`). Endpoint-nya ada di router admin sehingga otomatis hanya untuk `super_admin` (`server/routes/admin.ts:45`):
+`platform_profile` dipakai survei dan akun tanpa organisasi, dan `super_admin` mengubahnya lewat `/admin/platform` (`src/app/admin/platform/page.tsx`). Endpoint-nya ada di router admin sehingga otomatis hanya untuk `super_admin` (`requireRole(['super_admin'])` pada `adminRouter` di `server/routes/admin.ts`):
 
 | Endpoint | Perilaku |
 | --- | --- |
@@ -254,7 +256,7 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 
 ### Belum tersedia
 
-- `org_admin` belum dapat mengubah peran anggota, hanya status creator (`server/routes/org.ts:175-199`).
+- `org_admin` belum dapat mengubah peran anggota, hanya status creator (`PATCH /org/members/:id`).
 
 ## Konfigurasi
 
@@ -278,6 +280,9 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
 | `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak |
+| `INTEGRATION_ORGANIZATION_ID` | kosong | ID organisasi cakupan `INTEGRATION_TOKEN`. Saat startup API, hash token dicatat di `integration_token_scopes` untuk organisasi ini; token tanpa cakupan ditolak `403 forbidden_service_scope` |
+| `DATA_REQUEST_RETENTION_DAYS` | `365` | Masa simpan permintaan data dalam hari (bilangan bulat >= 1) untuk `pnpm retention:data-requests`; nilai tidak valid menghentikan skrip dengan exit code 1 |
+| `EXPORT_BATCH_SIZE` | `500` | Jumlah respons per batch saat ekspor CSV di-stream; hanya dapat menurunkan dari 500 dan dipakai test untuk memaksa banyak batch. Biarkan kosong di deployment |
 | `SEED_DEMO` | `0` | Harus `1` untuk memuat data demo; ditolak saat `NODE_ENV=production` |
 | `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis; hanya dipakai bila `SEED_DEMO=1` |
 | `AC15_ADMIN_DATABASE_URL` | `DATABASE_URL` | Koneksi berizin `CREATE DATABASE` untuk demo AC15 |
@@ -301,7 +306,7 @@ pnpm admin:bootstrap
 
 Versi dan waktu persetujuan disimpan di `accounts.consent_version` dan `accounts.consent_accepted_at`, serta metadata audit `Registrasi`. Naikkan `CURRENT_CONSENT_VERSION` di `server/routes/auth.ts` ketika teks kebijakan privasi atau ketentuan layanan berubah; akun lama tetap `NULL` karena dibuat sebelum bukti persetujuan ada.
 
-Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk dan sesinya yang sedang berjalan dihapus. Organisasi akun baru hanya dapat ditentukan saat pendaftaran lewat `invite_code`; super admin belum dapat menetapkannya lewat `/admin/accounts`.
+Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban. Super admin mengatur peran, status, dan grant lewat `/admin/accounts`; akun yang disuspend tidak dapat masuk dan sesinya yang sedang berjalan dihapus. Organisasi akun baru ditentukan saat pendaftaran lewat `invite_code`, atau kemudian oleh super admin lewat kolom "Organisasi" di `/admin/accounts` (lihat "Menetapkan lingkup akun").
 
 ## Basis data dan migrasi
 
@@ -311,6 +316,7 @@ Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban
 - `SEED_DEMO=1 pnpm db:reset` menghapus schema `public`, menerapkan semua migrasi, lalu memuat data sintetis.
 - `pnpm test` memakai basis data uji terpisah (`TEST_DATABASE_URL`), me-reset schema, lalu menjalankan migrasi.
 - Migrasi yang mengubah checksum yang sudah tercatat ditolak; buat file migrasi baru, jangan edit yang sudah dirilis.
+- `pnpm retention:data-requests` menganonimkan permintaan data yang lebih tua dari `DATA_REQUEST_RETENTION_DAYS` (default 365 hari): `contact` diganti `anon:<hash>`, `note` dikosongkan, dan `anonymized_at` diisi; `id`, `type`, `status`, dan `created_at` dipertahankan. Baris yang sudah dianonimkan tidak disentuh lagi, jadi skrip aman dijalankan berulang. Skrip belum dijadwalkan otomatis; jalankan dari penjadwal deployment.
 - Masa berlaku kode undangan organisasi (`organization_invitations.expires_at`) wajib terisi sejak `009_organization_invitation_expiry_backfill.sql`. Migrasi itu mengisi baris lama dengan `created_at + 14 hari` (ISO-8601 UTC) lalu memasang `NOT NULL`; tidak ada lagi kode tanpa batas.
 - Data SQLite lama tidak diimpor otomatis. Ekspor/impor data nyata harus jadi prosedur terpisah dengan verifikasi.
 
@@ -400,14 +406,14 @@ Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. S
 | `admin@svara.local` | super_admin | Tidak ada | Operasional; tidak otomatis boleh membaca jawaban |
 | `suspended@svara.local` | creator (suspended) | Tidak ada | Ditolak saat masuk |
 
-Organisasi sintetis (`server/seed-data.ts:30-33`):
+Organisasi sintetis (`seedDemoIfEmpty` di `server/seed-data.ts`):
 
 | ID | Nama | Tipe | Kategori usia | Mode persetujuan | Notice |
 | --- | --- | --- | --- | --- | --- |
 | `org_smk` | SMK Nusantara (sintetis) | `school` | `minor` | `guardian` | `1.2` |
 | `org_perpus` | Perpustakaan Kota (sintetis) | `organization` | `adult` | `self` | `1.2` |
 
-`platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'` (`server/seed-data.ts:48-62`). Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus` (`server/seed-data.ts:234`), jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
+`platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 
 - `link-umum-demo`: survei SMK, mode wali, pemberitahuan sintetis.
 - `link-umum-perpus`: survei perpustakaan, persetujuan diri.
