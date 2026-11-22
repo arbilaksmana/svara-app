@@ -278,7 +278,7 @@ export function actorFor(req: AuthedRequest): string {
   return req.account?.id ?? 'publik';
 }
 
-type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
+type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal' | 'dimulai';
 
 /** Audit hanya menyimpan metadata operasional; token, kata sandi, dan jawaban tidak boleh masuk. */
 async function insertAudit(

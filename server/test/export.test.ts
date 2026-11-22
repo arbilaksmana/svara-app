@@ -234,8 +234,12 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
   assert.ok(success, 'ekspor berhasil harus tercatat di audit');
   const meta = JSON.parse(success.metadata ?? '{}');
   assert.deepEqual(
-    [meta.format, meta.filename, meta.columns.includes('respondent_id'), meta.request_accept, typeof meta.rows, 'destination' in meta, 'accepts' in meta],
-    ['csv', 'hasil-s_demo1-v1.csv', true, 'application/json', 'number', false, false],
+    [meta.format, meta.filename, typeof meta.rows, meta.individual, 'columns' in meta, 'destination' in meta, 'accepts' in meta],
+    ['csv', 'hasil-s_demo1-v1.csv', 'number', true, false, false, false],
   );
-  assert.equal(meta.individual, true);
+  // Kolom dan Accept dicatat sekali, di baris mulai yang ditulis sebelum byte pertama; baris itu tidak mengklaim selesai.
+  const started = logs.find((log) => log.action === 'Mulai ekspor CSV' && log.object.startsWith('s_demo1 · v1'));
+  assert.equal(started?.outcome, 'dimulai');
+  const startedMeta = JSON.parse(started?.metadata ?? '{}');
+  assert.deepEqual([startedMeta.columns.includes('respondent_id'), startedMeta.request_accept], [true, 'application/json']);
 });

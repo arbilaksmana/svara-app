@@ -237,7 +237,7 @@ function exportColumns(includeText: boolean): string[] {
   ];
 }
 
-/** Unduhan via node:http tanpa header Accept, jadi `request_accept` tercatat null; tujuan/penerima tidak diklaim. */
+/** Metadata baris hasil akhir ekspor; kolom dan Accept hanya dicatat di baris 'Mulai ekspor CSV'. */
 function auditMetadata(rows: number, includeText: boolean, reason?: string): string {
   return JSON.stringify({
     format: 'csv',
@@ -245,8 +245,6 @@ function auditMetadata(rows: number, includeText: boolean, reason?: string): str
     includeText,
     individual: true,
     filename: `hasil-${surveyId}-v1.csv`,
-    columns: exportColumns(includeText),
-    request_accept: null,
     ...(reason ? { reason } : {}),
   });
 }
@@ -526,7 +524,7 @@ test('M6: audit ekspor ditulis sebelum byte pertama dan hanya memuat yang diketa
   const object = `${surveyId} · v1`;
   const startedBy = async (actor: string) => {
     const row = await get<{ metadata: string }>(
-      "SELECT metadata FROM audit_logs WHERE action = 'Mulai ekspor CSV' AND outcome = 'berhasil' AND actor = ? AND object = ? ORDER BY at DESC LIMIT 1",
+      "SELECT metadata FROM audit_logs WHERE action = 'Mulai ekspor CSV' AND outcome = 'dimulai' AND actor = ? AND object = ? ORDER BY at DESC LIMIT 1",
       actor,
       object,
     );
@@ -573,4 +571,36 @@ test('M6: audit ekspor ditulis sebelum byte pertama dan hanya memuat yang diketa
     const keys = Object.keys(JSON.parse(metadata ?? '{}') as object);
     assert.ok(!keys.includes('destination') && !keys.includes('accepts'), `tujuan/penerima tidak diklaim: ${metadata}`);
   }
+});
+
+test('Std-3: ekspor CSV mencatat satu baris selesai; baris mulai berstatus dimulai, kolom dan Accept dicatat sekali', async () => {
+  // Header Accept dari klien tidak tepercaya dan bisa sangat panjang; audit hanya menyimpan 200 karakter pertama.
+  const accept = `text/csv;q=1.0, ${Array.from({ length: 12 }, (_, index) => `application/x-svara-tambahan-${index};q=0.${index % 9}`).join(', ')}`;
+  assert.ok(accept.length > 300, `Accept uji harus melebihi batas (${accept.length} karakter)`);
+  const admin = await login('admin@svara.local');
+  const since = new Date().toISOString();
+  const result = await download(ownerCookie, { Accept: accept });
+  assert.equal(result.status, 200, result.body.toString('utf8'));
+  const total = (await get<{ count: number }>('SELECT COUNT(*)::int AS count FROM responses WHERE version_id = ?', versionId))?.count;
+
+  const audit = await api<{ data: Array<{ actor: string; action: string; object: string; outcome: string; at: string; metadata: string | null }> }>(
+    '/admin/audit?limit=500',
+    { cookie: admin },
+  );
+  const rows = audit.data
+    .filter((row) => row.actor === 'u_creator_a' && row.object === `${surveyId} · v1` && row.at >= since)
+    .map((row) => ({ action: row.action, outcome: row.outcome, metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown> }));
+  assert.deepEqual(
+    rows.map(({ action, outcome }) => `${action}: ${outcome}`).sort(),
+    ['Ekspor CSV: berhasil', 'Mulai ekspor CSV: dimulai'],
+    'baris mulai tidak boleh mengklaim berhasil sebelum ekspor selesai; tepat satu baris berhasil',
+  );
+  const started = rows.find((row) => row.action === 'Mulai ekspor CSV')!.metadata;
+  const finished = rows.find((row) => row.action === 'Ekspor CSV')!.metadata;
+  // Kolom dan Accept dicatat di baris mulai, yang pasti ada sebelum byte pertama terkirim; baris akhir mencatat hasilnya.
+  assert.deepEqual(started.columns, exportColumns(true));
+  assert.equal(typeof started.request_accept, 'string');
+  assert.equal((started.request_accept as string).length, 200, 'Accept dipotong pada 200 karakter');
+  assert.ok(accept.startsWith(started.request_accept as string), 'potongan Accept adalah awal header asli');
+  assert.deepEqual(finished, { format: 'csv', rows: total, includeText: true, individual: true, filename: `hasil-${surveyId}-v1.csv` });
 });

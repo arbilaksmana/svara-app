@@ -942,10 +942,17 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
     ];
     const object = `${survey.id} · v${version.number}`;
     const filename = `hasil-${survey.id}-v${version.number}.csv`;
-    const exported = { filename, columns: header, request_accept: requestAccept(req) };
     // Fail-closed: jejak audit ditulis sebelum data respons dibaca dan sebelum byte pertama dikirim.
-    // Bila INSERT gagal, galat keluar sebagai 500 JSON tanpa isi CSV. Hasil akhir dicatat terpisah di bawah.
-    await audit(req, 'Mulai ekspor CSV', object, 'berhasil', { format, includeText, individual: true, ...exported });
+    // Bila INSERT gagal, galat keluar sebagai 500 JSON tanpa isi CSV. Baris ini berstatus 'dimulai' dan
+    // satu-satunya yang memuat kolom dan Accept; hasil akhir dan jumlah baris dicatat terpisah di bawah.
+    await audit(req, 'Mulai ekspor CSV', object, 'dimulai', {
+      format,
+      includeText,
+      individual: true,
+      filename,
+      columns: header,
+      request_accept: requestAccept(req),
+    });
     // Baris ditulis per batch; header HTTP baru terkirim bersama batch pertama sehingga galat sebelumnya tetap JSON.
     let text = `${CSV_BOM}${csvLine(header)}${CSV_EOL}`;
     let rows = 0;
@@ -990,7 +997,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       console.error('[api] ekspor CSV terhenti di tengah aliran', error);
       stopped = 'stream_error';
     }
-    const metadata = { format, rows, includeText, individual: true, ...exported };
+    const metadata = { format, rows, includeText, individual: true, filename };
     if (stopped || res.destroyed) {
       // Sebagian baris mungkin sudah keluar; putus koneksi agar klien tidak menganggap berkas lengkap.
       res.destroy();

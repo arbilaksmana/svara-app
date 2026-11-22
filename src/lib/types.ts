@@ -181,7 +181,7 @@ export interface ConsentRecord {
   guardian_evidence_ref: string | null;
 }
 
-export type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
+export type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal' | 'dimulai';
 
 export interface AuditLog {
   id: string;
