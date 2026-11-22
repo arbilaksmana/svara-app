@@ -31,9 +31,20 @@ import { accounts, accessGrants, auditLogs, integrationEvents, organizations } f
 import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
-import { cancelAdminStatsLoad, loadAdminStats, loadBootstrap, replayEvent, refreshBootstrap, saveGrants, setIntegrationNote, useStore } from '../lib/store';
-import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
-import { ORGANIZATION_TYPE_LABEL } from '../lib/labels';
+import {
+  cancelAdminStatsLoad,
+  cancelDataRequestsLoad,
+  loadAdminStats,
+  loadBootstrap,
+  loadDataRequests,
+  replayEvent,
+  refreshBootstrap,
+  saveGrants,
+  setIntegrationNote,
+  useStore,
+} from '../lib/store';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
 import type { OrganizationType } from '../lib/types';
 
 /* ---------------- Ringkasan ---------------- */
@@ -274,9 +285,9 @@ export function AdminAccountsPage() {
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] rounded-sm border border-control-border bg-n0 px-2 text-body-sm text-ink"
                     >
-                      <option value="creator">creator</option>
-                      <option value="org_admin">org_admin</option>
-                      <option value="admin">admin</option>
+                      <option value="creator">{ROLE_LABEL.creator}</option>
+                      <option value="org_admin">{ROLE_LABEL.org_admin}</option>
+                      <option value="admin">{ROLE_LABEL.super_admin}</option>
                     </select>
                   </Td>
                   <Td>
@@ -293,7 +304,7 @@ export function AdminAccountsPage() {
                       ))}
                     </select>
                   </Td>
-                  <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge></Td>
+                  <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[a.status]}</Badge></Td>
                   <Td>{accessGrants.filter((g) => g.account_id === a.id).length} grant</Td>
                   <Td>
                     <Button
@@ -318,7 +329,7 @@ export function AdminAccountsPage() {
                       <p className="text-body font-bold text-ink">{a.display_name}</p>
                       <p className="font-mono text-annotation tracking-mono text-muted"><Code>{a.id}</Code></p>
                     </div>
-                    <Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge>
+                    <Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[a.status]}</Badge>
                   </div>
                   <label className="flex flex-col gap-1 text-caption font-bold text-muted">
                     Peran
@@ -329,9 +340,9 @@ export function AdminAccountsPage() {
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
                       className="min-h-[44px] w-full rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
-                      <option value="creator">creator</option>
-                      <option value="org_admin">org_admin</option>
-                      <option value="admin">admin</option>
+                      <option value="creator">{ROLE_LABEL.creator}</option>
+                      <option value="org_admin">{ROLE_LABEL.org_admin}</option>
+                      <option value="admin">{ROLE_LABEL.super_admin}</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 text-caption font-bold text-muted">
@@ -659,7 +670,7 @@ export function AdminAuditPage() {
           </Panel>
           <div className="flex flex-wrap gap-3">
             <ActionLink to={ROUTES.adminIntegration} variant="secondary">Lihat event integrasi</ActionLink>
-            <ActionLink to={ROUTES.creatorResults('s_demo1')} variant="secondary">Kembali ke hasil</ActionLink>
+            <ActionLink to={ROUTES.admin} variant="secondary">Kembali ke ringkasan</ActionLink>
           </div>
         </div>
       </StateView>
@@ -787,7 +798,7 @@ export function AdminIntegrationPage() {
             </p>
             <div className="flex flex-wrap gap-3">
               <ActionLink to={ROUTES.respondentIntro('link-umum-demo')}>Buka alur responden mandiri</ActionLink>
-              <ActionLink to={ROUTES.creatorResults('s_demo1')} variant="secondary">Lihat ringkasan</ActionLink>
+              <ActionLink to={ROUTES.admin} variant="secondary">Lihat ringkasan operasional</ActionLink>
               <ActionLink to={ROUTES.adminAudit} variant="secondary">Lihat log audit</ActionLink>
             </div>
           </Card>
@@ -834,7 +845,7 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
       <dl className="flex flex-col gap-2 text-body-sm">
         <div className="flex flex-wrap gap-x-3">
           <dt className="font-bold text-muted">Jenis</dt>
-          <dd className="text-ink">{request.type}</dd>
+          <dd className="text-ink">{DATA_REQUEST_TYPE_LABEL[request.type] ?? request.type}</dd>
         </div>
         <div className="flex flex-wrap gap-x-3">
           <dt className="font-bold text-muted">Kontak</dt>
@@ -892,23 +903,12 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
 
 export function AdminRequestsPage() {
   const { state } = useScreenState('admin-requests');
-  const [rows, setRows] = useState<DataRequest[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const { dataRequests: rows, dataRequestsError: error } = useStore();
 
   useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    void getDataRequests()
-      .then((data) => { if (!cancelled) setRows(data); })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setRows([]);
-          setError(err instanceof Error ? err.message : 'Permintaan data gagal dimuat.');
-        }
-      });
-    return () => { cancelled = true; };
-  }, [reloadKey]);
+    void loadDataRequests();
+    return cancelDataRequestsLoad;
+  }, []);
 
   return (
     <Shell kind="admin" title="Permintaan data" subtitle="Verifikasi pemohon dan tindak lanjuti akses, koreksi, penarikan, atau penghapusan tanpa membuka jawaban.">
@@ -917,17 +917,22 @@ export function AdminRequestsPage() {
           <Banner tone="info" title="Verifikasi sebelum tindakan">
             Kontak pada permintaan belum otomatis terverifikasi. Jangan memuat jawaban individual di halaman ini; catat hanya status dan ringkasan tindakan.
           </Banner>
-          {error && <Banner tone="danger" title="Daftar permintaan gagal dimuat">{error}</Banner>}
           <Card className="flex flex-col gap-3">
             <SectionTitle>Daftar permintaan</SectionTitle>
-            {rows === null ? (
+            {error ? (
+              <ErrorState
+                title="Daftar permintaan gagal dimuat"
+                detail={`${error} Antrean tidak ditampilkan sampai data berhasil dimuat.`}
+                action={<Button variant="secondary" onClick={() => void loadDataRequests()}>Coba lagi</Button>}
+              />
+            ) : rows === null ? (
               <p role="status" className="text-body-sm text-muted">Memuat permintaan…</p>
             ) : rows.length === 0 ? (
               <p className="text-body-sm text-muted">Belum ada permintaan data.</p>
             ) : (
               <ul className="flex flex-col gap-3">
                 {rows.map((request) => (
-                  <RequestRow key={request.id} request={request} onSaved={() => setReloadKey((value) => value + 1)} />
+                  <RequestRow key={request.id} request={request} onSaved={() => void loadDataRequests()} />
                 ))}
               </ul>
             )}

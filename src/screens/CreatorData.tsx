@@ -12,6 +12,7 @@ import {
   Code,
   ConfirmDialog,
   Divider,
+  EmptyState,
   Field,
   Label,
   Muted,
@@ -192,9 +193,9 @@ export function SharePage({ id }: { id: string }) {
                     <span className="mt-1 block font-mono text-caption text-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
                   </Td>
                   <Td><Badge tone={INVITATION_STATUS_TONE[i.status]}>{INVITATION_STATUS_LABEL[i.status]}</Badge></Td>
-                  <Td>{i.expires_at ? i.expires_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{i.used_at ? i.used_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{i.revoked_at ? i.revoked_at.slice(0, 10) : 'Belum ada'}</Td>
+                  <Td>{i.expires_at ? formatWIB(i.expires_at) : 'Belum ada'}</Td>
+                  <Td>{i.used_at ? formatWIB(i.used_at) : 'Belum ada'}</Td>
+                  <Td>{i.revoked_at ? formatWIB(i.revoked_at) : 'Belum ada'}</Td>
                   <Td>
                     {i.status === 'active' ? (
                       <button
@@ -292,7 +293,7 @@ export function ResultsPage({ id }: { id: string }) {
   const survey = findSurvey(id);
   const versionList = versionsFor(id);
   const selectableVersions = versionList.filter((version) => version.status !== 'draft');
-  const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? versionList[0]?.id ?? '';
+  const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? '';
   const [versionId, setVersionId] = useState(fallbackVersion);
   useEffect(() => {
     if (versionId && versionList.some((version) => version.id === versionId)) return;
@@ -339,7 +340,6 @@ export function ResultsPage({ id }: { id: string }) {
   const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
   const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
-  const availableVersions = selectableVersions.length > 0 ? selectableVersions : versionList;
 
   const loadResponses = () => {
     setResponsesBusy(true);
@@ -361,6 +361,33 @@ export function ResultsPage({ id }: { id: string }) {
           <p className="mt-2 text-body text-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
           <div className="mt-4"><ActionLink to={ROUTES.creator}>Kembali ke daftar survei</ActionLink></div>
         </Card>
+      </Shell>
+    );
+  }
+
+  // Draf tidak menerima kiriman; tanpa versi terbit tidak ada selector, ringkasan, atau ekspor yang bisa dipakai.
+  if (selectableVersions.length === 0) {
+    return (
+      <Shell kind="creator" title="Hasil per versi" subtitle="Distribusi jawaban per versi. Opsi tanpa pemilih tetap ditampilkan sebagai nol.">
+        <StateView
+          routeId="creator-results"
+          state={state}
+          emptyTitle="Belum ada versi diterbitkan"
+          emptyDetail="Hasil hanya tersedia setelah versi diterbitkan."
+          permissionDetail="Unduhan jawaban individual memerlukan izin ekspor terpisah."
+        >
+          <div className="flex flex-col gap-5">
+            <SurveyNav id={id} />
+            <EmptyState
+              title="Belum ada versi diterbitkan"
+              action={isOwner ? <ActionLink to={ROUTES.creatorPublish(id)}>Lanjut ke publikasi</ActionLink> : undefined}
+            >
+              {isOwner
+                ? 'Hasil dan ekspor tersedia setelah versi diterbitkan. Terbitkan draf dari halaman publikasi untuk mulai menerima jawaban.'
+                : 'Hasil dan ekspor tersedia setelah pemilik survei menerbitkan versi.'}
+            </EmptyState>
+          </div>
+        </StateView>
       </Shell>
     );
   }
@@ -395,7 +422,7 @@ export function ResultsPage({ id }: { id: string }) {
                   }}
                   className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                 >
-                  {availableVersions.map((v) => (
+                  {selectableVersions.map((v) => (
                     <option key={v.id} value={v.id}>Versi {v.number} · {STATUS_LABEL[v.status]}</option>
                   ))}
                 </select>
@@ -755,8 +782,8 @@ export function HistoryPage({ id }: { id: string }) {
                 <tr key={v.id}>
                   <Th><Code>v{v.number}</Code></Th>
                   <Td><Badge tone={v.status === 'published' ? 'success' : v.status === 'closed' ? 'warning' : 'neutral'}>{STATUS_LABEL[v.status]}</Badge></Td>
-                  <Td>{v.published_at ? v.published_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{v.closed_at ? v.closed_at.slice(0, 10) : 'Belum ada'}</Td>
+                  <Td>{v.published_at ? formatWIB(v.published_at) : 'Belum ada'}</Td>
+                  <Td>{v.closed_at ? formatWIB(v.closed_at) : 'Belum ada'}</Td>
                   <Td>{questionsFor(v.id).length}</Td>
                 </tr>
               ))}

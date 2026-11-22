@@ -16,6 +16,7 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
 import { ORGANIZATION_TYPE_LABEL } from '../lib/labels';
+import { formatWIB } from '../lib/summary';
 import { getPlatformProfile, savePlatformProfile, type PlatformProfileInput } from '../lib/api';
 import type { OrganizationType, PlatformProfile } from '../lib/types';
 
@@ -210,7 +211,7 @@ export function AdminPlatformPage() {
               <Button onClick={onSave} loading={busy} disabled={!form || busy}>Simpan profil</Button>
               {profile && (
                 <p className="text-caption text-muted">
-                  Versi notice <Code>{profile.notice_version}</Code> · diperbarui {profile.updated_at.slice(0, 10)}
+                  Versi notice <Code>{profile.notice_version}</Code> · diperbarui {formatWIB(profile.updated_at)}
                 </p>
               )}
             </div>

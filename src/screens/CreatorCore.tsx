@@ -29,13 +29,13 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor } from '../lib/fixtures/surveys';
+import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
 import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
-import { createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
+import { allPublicLinks, createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -232,11 +232,11 @@ export function CreatorListPage() {
                     <tr key={s.id}>
                       <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block text-caption text-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {s.updated_at.slice(0, 10)}</span>
+                        <span className="mt-1 block text-caption text-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {formatWIB(s.updated_at)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>
-                      <Td>{s.updated_at.slice(0, 10)}</Td>
+                      <Td>{formatWIB(s.updated_at)}</Td>
                       <Td>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           {canManage && <PlainLink to={link(ROUTES.creatorEdit(s.id))}>Buka editor</PlainLink>}
@@ -916,6 +916,11 @@ export function PublishPage({ id }: { id: string }) {
   const [publishedToken, setPublishedToken] = useState<string | null>(null);
   const draft = draftVersionFor(id);
   const hasDraft = Boolean(draft);
+  const published = publishedVersionFor(id);
+  // Tautan aktif versi terbit dibaca dari bootstrap agar kontrol berbagi tetap ada setelah halaman dimuat ulang.
+  const shareToken = publishedToken
+    ?? allPublicLinks().find((item) => item.survey_id === id && item.version_id === published?.id && item.status === 'active')?.token
+    ?? null;
   const version = draft ?? editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
   const duplicateCodes = items
@@ -1024,16 +1029,16 @@ export function PublishPage({ id }: { id: string }) {
                 {publishedToken ? 'Versi sudah diterbitkan' : hasDraft ? 'Terbitkan versi' : 'Tidak ada draf'}
               </Button>
               <ActionLink to={ROUTES.creatorEdit(id)} variant="secondary">Kembali ke editor</ActionLink>
-              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!publishedToken}>
+              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!shareToken && !published} disabledReason="Terbitkan satu versi terlebih dahulu">
                 Kelola tautan
               </ActionLink>
             </div>
             <p className="text-caption text-muted">
               {session ? `Diterbitkan oleh ${session.name}. ` : ''}Perubahan isi setelah terbit memerlukan versi baru.
             </p>
-            {publishedToken && (
-              <Banner tone="success" title="Tautan responden">
-                <PlainLink to={ROUTES.respondentIntro(publishedToken)}>/s/{publishedToken}</PlainLink>
+            {shareToken && (
+              <Banner tone={publishedToken ? 'success' : 'info'} title="Tautan responden">
+                <PlainLink to={ROUTES.respondentIntro(shareToken)}>/s/{shareToken}</PlainLink>
                 <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Buka halaman pembagian</ActionLink></div>
               </Banner>
             )}
