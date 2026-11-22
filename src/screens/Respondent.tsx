@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shell } from '../components/Shell';
 import {
@@ -32,7 +32,16 @@ import { ROUTES } from '../lib/routes';
 import { useToast } from '../components/Toast';
 import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
-import { useDraft } from '../lib/draft';
+import {
+  completeSubmission,
+  readConsent,
+  readReceipt,
+  saveReceipt,
+  submissionKey,
+  useDraft,
+  writeConsent,
+  type StoredReceipt,
+} from '../lib/draft';
 import {
   ApiError,
   createConsent,
@@ -48,70 +57,6 @@ import {
 const INVITE_LABEL_ID: Record<string, string> = {
   active: 'Aktif', used: 'Terpakai', revoked: 'Dicabut', expired: 'Kedaluwarsa',
 };
-
-const CONSENT_PREFIX = 'svara.consent.';
-const IDEMPOTENCY_PREFIX = 'svara.idempotency.';
-const RECEIPT_DATA_KEY = 'svara.receipt.data.v1';
-const RECEIPT_KEY_KEY = 'svara.receipt.key.v1';
-
-function readConsent(token: string): ConsentPayload | null {
-  try {
-    const raw = sessionStorage.getItem(CONSENT_PREFIX + token);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ConsentPayload;
-    if (!parsed.respondent_click || !parsed.consent_id) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeConsent(
-  token: string,
-  consentId: string,
-  guardianRequired: boolean,
-  guardianEvidenceRef: string | null,
-  basis: string,
-  noticeVersion: string,
-): ConsentPayload {
-  const consent: ConsentPayload = {
-    consent_id: consentId,
-    respondent_click: true,
-    basis,
-    notice_version: noticeVersion,
-    guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
-    guardian_evidence_ref: guardianRequired ? guardianEvidenceRef : null,
-  };
-  try {
-    sessionStorage.setItem(CONSENT_PREFIX + token, JSON.stringify(consent));
-  } catch {
-    // Persetujuan tetap divalidasi server saat pengiriman.
-  }
-  return consent;
-}
-
-function submissionKey(token: string, versionNumber: number, retryOnly: boolean): string | null {
-  const key = `${IDEMPOTENCY_PREFIX}${token}.${versionNumber}`;
-  try {
-    const existing = sessionStorage.getItem(key);
-    if (existing) return existing;
-    if (retryOnly) return null;
-    const created = crypto.randomUUID();
-    sessionStorage.setItem(key, created);
-    return created;
-  } catch {
-    return retryOnly ? null : crypto.randomUUID();
-  }
-}
-
-function storedReceipt(): ReceiptData | null {
-  try {
-    const raw = sessionStorage.getItem(RECEIPT_DATA_KEY);
-    return raw ? (JSON.parse(raw) as ReceiptData) : null;
-  } catch {
-    return null;
-  }
-}
 
 interface PublicPage {
   token: string;
@@ -173,18 +118,79 @@ function PublicLoading() {
   );
 }
 
-function PublicLoadError({ error }: { error: Error }) {
-  const notFound = error instanceof ApiError && error.status === 404;
-  const blockedState = error instanceof ApiError && error.status === 409
-    ? ({ link_revoked: 'revoked', link_expired: 'expired' } as const)[error.code as 'link_revoked' | 'link_expired']
-    : undefined;
+interface LoadFailure {
+  title: string;
+  detail: string;
+  retry?: boolean;
+  blockedState?: 'closed' | 'expired' | 'revoked';
+  next?: 'intro' | 'receipt';
+}
+
+const BLOCKED_CODES: Record<string, LoadFailure['blockedState']> = {
+  link_revoked: 'revoked',
+  link_expired: 'expired',
+  submission_revoked: 'revoked',
+  submission_expired: 'expired',
+  submission_closed: 'closed',
+};
+
+const CONSENT_CODES = new Set([
+  'consent_required', 'consent_context_mismatch', 'consent_already_used', 'consent_expired', 'guardian_evidence_required',
+]);
+
+/** UIX-07: hanya gangguan jaringan atau server sementara yang ditawari "Coba lagi"; status tautan final tidak. */
+function loadFailure(error: Error): LoadFailure {
+  if (!(error instanceof ApiError) || error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500) {
+    return {
+      title: 'Gangguan koneksi atau server',
+      detail: 'Periksa koneksi internet Anda, lalu coba lagi.',
+      retry: true,
+    };
+  }
+  if (error.status === 404) {
+    return {
+      title: 'Tautan tidak dikenal',
+      detail: 'Alamat ini tidak cocok dengan survei mana pun. Periksa kembali tautannya atau minta tautan baru dari pengelola survei.',
+    };
+  }
+  const blockedState = BLOCKED_CODES[error.code];
+  if (blockedState) {
+    return { title: 'Tautan sudah tidak aktif', detail: 'Tautan ini tidak lagi menerima jawaban baru.', blockedState };
+  }
+  if (error.code === 'submission_used') {
+    return {
+      title: 'Undangan individual sudah dipakai',
+      detail: 'Satu undangan hanya menerima satu respons final.',
+      next: 'receipt',
+    };
+  }
+  if (CONSENT_CODES.has(error.code)) {
+    return {
+      title: 'Persetujuan perlu dicatat ulang',
+      detail: 'Persetujuan untuk sesi ini tidak berlaku lagi. Buka pengantar, baca pemberitahuan, lalu setujui kembali untuk melanjutkan.',
+      next: 'intro',
+    };
+  }
+  return {
+    title: 'Tautan tidak dapat dibuka',
+    detail: 'Tautan ini tidak dapat dipakai saat ini. Hubungi pengelola survei bila Anda yakin tautannya benar.',
+  };
+}
+
+export function PublicLoadError({ token, error, onRetry }: { token: string; error: Error; onRetry: () => void }) {
+  const failure = loadFailure(error);
   return (
-    <Shell kind="respondent" title="Tautan tidak dapat dibuka">
+    <Shell kind="respondent" title={failure.retry ? 'Survei belum dapat dimuat' : 'Tautan tidak dapat dibuka'}>
       <Card>
-        <p className="text-body font-bold text-ink">{notFound ? 'Tautan tidak dikenal' : blockedState ? 'Tautan sudah tidak aktif' : 'Tautan gagal dimuat'}</p>
-        <p className="mt-2 text-body-sm text-muted">{error.message}</p>
-        {blockedState && <div className="mt-4"><BlockedNotice state={blockedState} /></div>}
+        <div role="alert">
+          <p className="text-body font-bold text-ink">{failure.title}</p>
+          <p className="mt-2 text-body-sm text-muted">{failure.detail}</p>
+        </div>
+        {failure.blockedState && <div className="mt-4"><BlockedNotice state={failure.blockedState} /></div>}
         <div className="mt-4 flex flex-wrap gap-3">
+          {failure.retry && <Button onClick={onRetry}>Coba lagi</Button>}
+          {failure.next === 'intro' && <ActionLink to={ROUTES.respondentIntro(token)}>Buka pengantar</ActionLink>}
+          {failure.next === 'receipt' && <ActionLink to={ROUTES.respondentReceipt(token)}>Lihat bukti pengiriman</ActionLink>}
           <ActionLink to={ROUTES.home} variant="secondary">Kembali ke beranda</ActionLink>
         </div>
       </Card>
@@ -255,7 +261,7 @@ export function IntroPage({ token }: { token: string }) {
   const [consentError, setConsentError] = useState<string | null>(null);
 
   if (loading) return <PublicLoading />;
-  if (loadError) return <PublicLoadError error={loadError} />;
+  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
   if (!ctx) return <MissingToken />;
   const { survey, version, isPublicLink, invitation, notice, guardianRequired } = ctx;
   const effectiveState = state === 'default' ? serverState(ctx) : state;
@@ -375,7 +381,14 @@ export function IntroPage({ token }: { token: string }) {
                 setConsentError(null);
                 void createConsent(token, ctx.consent_version, guardianRequired ? guardianRef.trim() : null)
                   .then((record) => {
-                    writeConsent(token, record.consent_id, guardianRequired, guardianRequired ? guardianRef.trim() : null, record.basis, record.notice_version);
+                    writeConsent(token, {
+                      consent_id: record.consent_id,
+                      respondent_click: true,
+                      basis: record.basis,
+                      notice_version: record.notice_version,
+                      guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
+                      guardian_evidence_ref: guardianRequired ? guardianRef.trim() : null,
+                    });
                     router.push(ROUTES.respondentForm(token));
                   })
                   .catch((error: unknown) => {
@@ -486,11 +499,11 @@ function QuestionField({
 }
 
 export function FormPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token, 'form');
+  const { ctx, loading, loadError, reload } = usePublicPage(token, 'form');
   const { state, link } = useScreenState('respondent-form');
   const router = useRouter();
   const items = ctx ? [...ctx.questions].sort((a, b) => a.order - b.order) : [];
-  const { draft, setOption, setText } = useDraft(`${token}.${ctx?.version.number ?? ''}`, items.map((q) => q.code));
+  const { draft, setOption, setText } = useDraft(token, ctx?.version.number ?? null, items.map((q) => q.code));
   const [checked, setChecked] = useState(false);
   const summaryRef = useRef<HTMLDivElement>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
@@ -518,7 +531,7 @@ export function FormPage({ token }: { token: string }) {
   ).length;
 
   if (loading) return <PublicLoading />;
-  if (loadError) return <PublicLoadError error={loadError} />;
+  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
   if (!ctx) return <MissingToken />;
   if (!consentReady) return <PublicLoading />;
   const { survey, version, isPublicLink } = ctx;
@@ -624,12 +637,12 @@ export function FormPage({ token }: { token: string }) {
 /* ---------------- Tinjau ---------------- */
 
 export function ReviewPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token, 'review');
+  const { ctx, loading, loadError, reload } = usePublicPage(token, 'review');
   const notify = useToast();
   const { state, link } = useScreenState('respondent-review');
   const router = useRouter();
   const items = ctx ? [...ctx.questions].sort((a, b) => a.order - b.order) : [];
-  const { draft } = useDraft(`${token}.${ctx?.version.number ?? ''}`, items.map((q) => q.code));
+  const { draft } = useDraft(token, ctx?.version.number ?? null, items.map((q) => q.code));
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
@@ -655,7 +668,7 @@ export function ReviewPage({ token }: { token: string }) {
   const emptyCount = rows.filter((r) => r.empty).length;
 
   if (loading) return <PublicLoading />;
-  if (loadError) return <PublicLoadError error={loadError} />;
+  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
   if (!ctx) return <MissingToken />;
   if (!consentReady) return <PublicLoading />;
   const { survey, version } = ctx;
@@ -688,12 +701,7 @@ export function ReviewPage({ token }: { token: string }) {
     });
     void submitResponse(token, key, consent.consent_id, answers)
       .then((receipt) => {
-        try {
-          sessionStorage.setItem(RECEIPT_DATA_KEY, JSON.stringify(receipt));
-          sessionStorage.setItem(RECEIPT_KEY_KEY, key);
-        } catch {
-          // Bukti tetap dapat dipulihkan selama sesi ini lewat kunci idempotensi.
-        }
+        completeSubmission(token, receipt, key);
         notify('Jawaban terkirim. Bukti pengiriman siap dilihat.');
         router.push(link(ROUTES.respondentReceipt(token)));
       })
@@ -823,47 +831,58 @@ export function ReviewPage({ token }: { token: string }) {
 /* ---------------- Bukti ---------------- */
 
 export function ReceiptPage({ token }: { token: string }) {
-  const { ctx, loading, loadError } = usePublicPage(token);
+  const { ctx, loading, loadError, reload } = usePublicPage(token);
+  const [stored, setStored] = useState<StoredReceipt | null | undefined>(undefined);
+
+  useEffect(() => {
+    setStored(readReceipt(token));
+  }, [token]);
+
+  if (loading || stored === undefined) return <PublicLoading />;
+  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
+  if (!ctx) return <MissingToken />;
+  return <ReceiptView key={token} token={token} ctx={ctx} stored={stored} />;
+}
+
+/** Halaman bukti untuk satu token; `stored` adalah bukti token ini yang tersimpan di tab, bila ada. */
+export function ReceiptView({ token, ctx, stored }: { token: string; ctx: PublicContextData; stored: StoredReceipt | null }) {
   const notify = useToast();
   const { state, link } = useScreenState('respondent-receipt');
-  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
-  const [storedKey, setStoredKey] = useState('');
+  const [receipt, setReceipt] = useState<ReceiptData | null>(stored?.receipt ?? null);
+  const [storedKey, setStoredKey] = useState(stored?.key ?? '');
   const [retried, setRetried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [recoverId, setRecoverId] = useState('');
+  const [recoverKey, setRecoverKey] = useState('');
+  const [recoverChecked, setRecoverChecked] = useState(false);
 
-  useEffect(() => {
-    setReceipt(storedReceipt());
-    try {
-      setStoredKey(sessionStorage.getItem(RECEIPT_KEY_KEY) ?? '');
-    } catch {
-      setStoredKey('');
-    }
-  }, []);
-
-  if (loading) return <PublicLoading />;
-  if (loadError) return <PublicLoadError error={loadError} />;
-  if (!ctx) return <MissingToken />;
-
-  const onRetry = () => {
-    if (!receipt || !storedKey) {
-      setRetryError('Bukti asli tidak tersedia di perangkat ini. Hubungi pengelola dengan ID bukti Anda.');
-      return;
-    }
+  const recover = (responseId: string, key: string) => {
     setBusy(true);
     setRetryError(null);
-    void getReceipt(token, receipt.response_id, storedKey)
+    void getReceipt(token, responseId, key)
       .then((next) => {
+        saveReceipt(token, next, key);
         setReceipt(next);
+        setStoredKey(key);
         setRetried(true);
         notify('Bukti yang sama berhasil dipulihkan.');
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Bukti gagal dipulihkan.';
+        // Server hanya memulihkan bukti untuk sesi browser yang mencatat persetujuannya.
+        const message = error instanceof ApiError && error.status === 404
+          ? 'ID bukti dan kunci pengiriman tidak cocok dengan pengiriman dari browser ini.'
+          : error instanceof Error ? error.message : 'Bukti gagal dipulihkan.';
         setRetryError(message);
         notify(message, 'danger');
       })
       .finally(() => setBusy(false));
+  };
+
+  const onRecover = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRecoverChecked(true);
+    if (recoverId.trim() && recoverKey.trim()) recover(recoverId.trim(), recoverKey.trim());
   };
 
   return (
@@ -910,8 +929,8 @@ export function ReceiptPage({ token }: { token: string }) {
               </>
             ) : (
               <p className="text-body-sm text-muted">
-                Bukti tidak ditemukan di perangkat ini. Bila jawaban sudah terkirim, buka kembali tautan yang sama
-                atau hubungi pengelola dengan ID bukti yang Anda simpan.
+                Bukti untuk tautan ini tidak tersimpan di tab ini. Bila jawaban sudah terkirim dan Anda mencatat ID bukti
+                serta kunci pengiriman dari halaman bukti, pulihkan bukti di bawah.
               </p>
             )}
             <p className="text-caption text-muted">
@@ -919,23 +938,52 @@ export function ReceiptPage({ token }: { token: string }) {
             </p>
           </Card>
 
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Retry setelah waktu tunggu</SectionTitle>
-            <p className="text-body-sm text-muted">
-              Bila jaringan gagal sesudah commit, klien mengirim ulang dengan kunci yang sama dan menerima bukti yang sama.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <Button variant="secondary" onClick={onRetry} disabled={state === 'loading' || busy || !receipt} loading={busy}>
-                {retried ? 'Bukti sama dipulihkan' : 'Pulihkan bukti'}
-              </Button>
-              <ActionLink to={ROUTES.respondentIntro(token)} variant="secondary">Kembali ke pengantar</ActionLink>
-            </div>
-            {retried && receipt && (
-              <Banner tone="success" title="Bukti identik">
-                <Code>{receipt.response_id}</Code> dikembalikan tanpa membuat respons kedua.
-              </Banner>
-            )}
-          </Card>
+          {receipt ? (
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Retry setelah waktu tunggu</SectionTitle>
+              <p className="text-body-sm text-muted">
+                Bila jaringan gagal sesudah commit, klien mengirim ulang dengan kunci yang sama dan menerima bukti yang sama.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Button variant="secondary" onClick={() => recover(receipt.response_id, storedKey)} disabled={state === 'loading' || busy} loading={busy}>
+                  {retried ? 'Bukti sama dipulihkan' : 'Pulihkan bukti'}
+                </Button>
+                <ActionLink to={ROUTES.respondentIntro(token)} variant="secondary">Kembali ke pengantar</ActionLink>
+              </div>
+              {retried && (
+                <Banner tone="success" title="Bukti identik">
+                  <Code>{receipt.response_id}</Code> dikembalikan tanpa membuat respons kedua.
+                </Banner>
+              )}
+            </Card>
+          ) : (
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Pulihkan bukti</SectionTitle>
+              <p className="text-body-sm text-muted">
+                Pemulihan hanya berhasil di browser yang sama dengan yang dipakai saat mengirim, sebelum browser itu ditutup.
+                Pemulihan tidak membuat respons baru.
+              </p>
+              <form className="flex flex-col gap-3" noValidate onSubmit={onRecover}>
+                <Field id="receipt-response-id" label="ID bukti" required error={recoverChecked && !recoverId.trim() ? 'Isi ID bukti.' : undefined}>
+                  {(aria) => (
+                    <TextInput {...aria} value={recoverId} onChange={(e) => setRecoverId(e.target.value)} autoComplete="off" spellCheck={false} />
+                  )}
+                </Field>
+                <Field id="receipt-key" label="Kunci pengiriman" required error={recoverChecked && !recoverKey.trim() ? 'Isi kunci pengiriman.' : undefined}>
+                  {(aria) => (
+                    <TextInput {...aria} value={recoverKey} onChange={(e) => setRecoverKey(e.target.value)} autoComplete="off" spellCheck={false} />
+                  )}
+                </Field>
+                <div className="flex flex-wrap gap-3">
+                  <Button type="submit" variant="secondary" loading={busy}>Pulihkan bukti</Button>
+                  <ActionLink to={ROUTES.respondentIntro(token)} variant="secondary">Kembali ke pengantar</ActionLink>
+                </div>
+              </form>
+              <p className="text-caption text-muted">
+                Bila pemulihan gagal, hubungi pengelola survei{ctx.notice.contact ? `: ${ctx.notice.contact}` : ' melalui kontak pada pemberitahuan survei.'}
+              </p>
+            </Card>
+          )}
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Setelah pengiriman</SectionTitle>
