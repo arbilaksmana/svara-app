@@ -208,9 +208,10 @@ test('Archive hanya menutup tautan active; close tidak menghidupkan revoked', as
     f.id,
   );
   assert.deepEqual(closed.map(({ status }) => status), ['closed', 'closed']);
+  // Tautan v1 yang sudah superseded ikut ditandai 'archived' agar terbit ulang tidak menghidupkannya.
   assert.deepEqual(
     closed.map(({ closed_reason }) => closed_reason).sort(),
-    ['archived', 'superseded'],
+    ['archived', 'archived'],
   );
 
   // public_links tidak punya status 'used' (tautan terpakai tetap 'active'); 'used' diuji terpisah.
@@ -233,16 +234,18 @@ test('Archive hanya menutup tautan active; close tidak menghidupkan revoked', as
   }
 });
 
-test('closed tanpa reason dari publish tetap di-remap, tetapi arsip/revoked tidak', async () => {
+test('Tautan closed tanpa closed_reason (data pra-014) tetap closed setelah terbit ulang', async () => {
   const f = await fixture();
   const { token } = f.first.publicLink;
   await f.setStatus(f.first.version.id, 'closed');
   await f.publishNew();
-  // Baris 'closed' tanpa alasan berasal dari data pra-014 dan baru ditutup oleh publish: perilaku
-  // remap 3c9b72c dipertahankan. Yang dilarang adalah resurrect tautan revoked/archived.
+  // Remap ke versi terbaru baru ada sejak 3c9b72c di branch ini dan belum pernah dideploy. Di main,
+  // tautan 'closed' tidak pernah menyajikan versi lain, dan baris NULL di data main berasal dari
+  // close/archive. NULL tetap 'closed' mempertahankan perilaku main dan gagal-tertutup; BF-04 berlaku
+  // untuk tautan yang ditutup kode baru dengan closed_reason 'superseded' (dan 'closed' dari close).
   const response = await request(`/public/surveys/${token}`);
   const data = response.json.data as { state: string; canSubmit: boolean; version: { number: number } };
-  assert.equal(data.state, 'active');
-  assert.equal(data.canSubmit, true);
-  assert.equal(data.version.number, 2);
+  assert.equal(data.state, 'closed');
+  assert.equal(data.canSubmit, false);
+  assert.equal(data.version.number, 1);
 });

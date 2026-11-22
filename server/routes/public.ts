@@ -245,24 +245,38 @@ async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
   return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
 }
 
+async function noticeRow(source: NoticeSource, version: string): Promise<PolicyNotice | undefined> {
+  return source.source === 'organization'
+    ? get<PolicyNotice>(
+        'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
+        source.id,
+        version,
+      )
+    : get<PolicyNotice>('SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1', version);
+}
+
 /**
  * Notice harus persis versi yang tercatat pada versi survei. Bila versi itu tidak ada,
  * permintaan gagal (fail closed) alih-alih menampilkan notice versi lain.
  */
 async function noticeForVersion(source: NoticeSource, version: string): Promise<PolicyNotice> {
-  const row =
-    source.source === 'organization'
-      ? await get<PolicyNotice>(
-          'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
-          source.id,
-          version,
-        )
-      : await get<PolicyNotice>(
-          'SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1',
-          version,
-        );
+  const row = await noticeRow(source, version);
   if (!row) fail(500, 'notice_version_unavailable', 'Pemberitahuan versi yang diperlukan survei tidak tersedia.');
   return row;
+}
+
+/**
+ * Dipanggil publish dengan pembaca yang sama dengan endpoint publik, agar tidak ada versi terbit
+ * yang tautannya langsung gagal 500. Sumber kebijakan yang hilang tetap 409 `policy_source_missing`.
+ */
+export async function requirePublishableNotice(survey: SurveyRow, version: string): Promise<void> {
+  if (!(await noticeRow(await noticeSourceFor(survey), version))) {
+    fail(
+      422,
+      'notice_version_unavailable',
+      `Pemberitahuan privasi versi ${version} untuk survei ini belum tersedia, sehingga tautannya tidak dapat dibuka responden. Minta admin melengkapinya sebelum menerbitkan.`,
+    );
+  }
 }
 
 /** NULL = tanpa batas. Nilai yang tidak dapat diurai dianggap sudah lewat (fail-closed), bukan tanpa batas. */
@@ -279,6 +293,13 @@ async function invitationForToken(token: string): Promise<InvitationRow | undefi
 async function linkForToken(token: string): Promise<LinkRow | undefined> {
   return get<LinkRow>('SELECT * FROM public_links WHERE token_hash = ?', sha256Hex(token));
 }
+
+/**
+ * `public_links.closed_reason` yang boleh dilayani ulang ke versi terbit terbaru (BF-04): ditutup oleh
+ * versi baru ('superseded') atau oleh penutupan survei ('closed'). Arsip menulis 'archived' dan tidak
+ * pernah dihidupkan lagi.
+ */
+export const CONTINUABLE_CLOSE_REASONS = ['superseded', 'closed'] as const;
 
 function baseState(version: VersionRow, survey: SurveyRow): 'active' | 'closed' | 'expired' | 'revoked' | 'used' {
   if (survey.status !== 'published' || version.status !== 'published') return 'closed';
@@ -331,8 +352,17 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   if (expired) state = 'expired';
   else if (link.status === 'closed') state = 'closed';
   // Versi terbit saat ini berstatus published, jadi sumber remap wajib sudah tidak terbit; arsip menutup
-  // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa.
-  if (version.status !== 'published' && link.status !== 'expired' && !expired && survey.status === 'published' && survey.current_version_id !== version.id) {
+  // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa. Hanya tautan
+  // yang ditutup dengan alasan yang boleh dilanjutkan yang di-remap: 'archived' dan NULL (pra-014,
+  // asal penutupan tidak diketahui) tetap 'closed'.
+  if (
+    version.status !== 'published' &&
+    link.status === 'closed' &&
+    CONTINUABLE_CLOSE_REASONS.some((reason) => reason === link.closed_reason) &&
+    !expired &&
+    survey.status === 'published' &&
+    survey.current_version_id !== version.id
+  ) {
     // The survey's current_version_id can point to a draft instead of the published version.
     const latest = await get<VersionRow>(
       `SELECT * FROM survey_versions

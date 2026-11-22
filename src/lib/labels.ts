@@ -29,13 +29,15 @@ export const INVITATION_STATUS_LABEL: Record<InvitationStatus, string> = {
   used: 'Terpakai',
   revoked: 'Dicabut',
   expired: 'Kedaluwarsa',
+  closed: 'Ditutup',
 };
 
-export const INVITATION_STATUS_TONE: Record<InvitationStatus, 'success' | 'info' | 'danger' | 'warning'> = {
+export const INVITATION_STATUS_TONE: Record<InvitationStatus, 'success' | 'info' | 'danger' | 'warning' | 'neutral'> = {
   active: 'success',
   used: 'info',
   revoked: 'danger',
   expired: 'warning',
+  closed: 'neutral',
 };
 
 /** Nama aktor mengikuti PRD §3; dipakai daftar akun super admin dan daftar anggota organisasi. */

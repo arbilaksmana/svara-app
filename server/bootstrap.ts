@@ -264,6 +264,9 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
   const manageableSurveyIds = surveys
     .filter((survey) => account.role === 'super_admin' || survey.owner_id === account.id)
     .map((survey) => survey.id);
+  const versionStatus = new Map(versions.map((row) => [row.id, row.status]));
+  // Status tampilan saja (baris DB tidak diubah), urutannya sama dengan formulir publik: kedaluwarsa
+  // didahulukan, lalu 'closed' bila versi undangan tidak lagi terbit (mis. sesudah versi baru terbit).
   const invitations = manageableSurveyIds.length
     ? (
         await all<InvitationRow>(
@@ -273,9 +276,13 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       ).map((row) => ({
         ...row,
         status:
-          row.status === 'active' && row.expires_at && new Date(row.expires_at).getTime() < Date.now()
-            ? 'expired'
-            : row.status,
+          row.status !== 'active'
+            ? row.status
+            : row.expires_at && new Date(row.expires_at).getTime() < Date.now()
+              ? 'expired'
+              : versionStatus.get(row.version_id) !== 'published'
+                ? 'closed'
+                : row.status,
         token_hash: '',
       }))
     : [];

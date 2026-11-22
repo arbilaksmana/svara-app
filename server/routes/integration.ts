@@ -17,8 +17,15 @@ interface IntegrationTokenScope {
 interface VersionRow {
   id: string;
   number: number;
-  status: string;
+  status: 'published' | 'closed';
 }
+
+/**
+ * SEC-12 hanya menolak draf. Versi yang pernah terbit tetap terbaca setelah ditutup oleh versi baru
+ * atau oleh penutupan survei (PRD §8: skema berversi, filter versi); draf yang ikut ditutup arsip
+ * tidak pernah punya published_at sehingga tetap ditolak.
+ */
+const PUBLISHED_ONCE = "(status = 'published' OR (status = 'closed' AND published_at IS NOT NULL))";
 
 interface ResponseRow {
   id: string;
@@ -74,19 +81,19 @@ integrationRouter.get('/integration/survey-data', async (req: Request, res: Resp
       const requestedNumber = Number(requested);
       version = Number.isInteger(requestedNumber)
         ? await get<VersionRow>(
-            "SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND status = 'published' AND (id = ? OR number = ?)",
+            `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} AND (id = ? OR number = ?)`,
             survey.id,
             requested,
             requestedNumber,
           )
         : await get<VersionRow>(
-            "SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND status = 'published' AND id = ?",
+            `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} AND id = ?`,
             survey.id,
             requested,
           );
     } else {
       version = await get<VersionRow>(
-        "SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND status = 'published' ORDER BY number DESC LIMIT 1",
+        `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} ORDER BY number DESC LIMIT 1`,
         survey.id,
       );
     }
@@ -144,6 +151,7 @@ integrationRouter.get('/integration/survey-data', async (req: Request, res: Resp
       label: 'SIMULASI Modul 15 — bukan integrasi nyata.',
       survey_id: survey.id,
       survey_version: version.number,
+      survey_version_status: version.status,
       collection_modes: ['standalone', 'integrated'],
       identity_sources: ['local', 'module_13'],
       columns: ['response_id', 'respondent_id', 'submitted_at', 'assignment_id', 'question_code', 'value', 'option_id'],

@@ -81,14 +81,14 @@ async function login(email: string): Promise<string> {
   return (response.headers.get('set-cookie') ?? '').split(';')[0]!;
 }
 
-function exportRequest(cookie: string) {
-  return request(`${base}${exportPath}`, { headers: { Cookie: cookie, 'X-Svara-Client': 'web' }, agent: false });
+function exportRequest(cookie: string, headers: Record<string, string> = {}, path = exportPath) {
+  return request(`${base}${path}`, { headers: { Cookie: cookie, 'X-Svara-Client': 'web', ...headers }, agent: false });
 }
 
 /** Unduh lewat node:http agar byte mentah (termasuk BOM) dan header transfer terbaca apa adanya. */
-function download(cookie: string): Promise<Download> {
+function download(cookie: string, headers: Record<string, string> = {}, path = exportPath): Promise<Download> {
   const { promise, resolve, reject } = Promise.withResolvers<Download>();
-  const req = exportRequest(cookie);
+  const req = exportRequest(cookie, headers, path);
   req.on('response', (res) => {
     const chunks: Buffer[] = [];
     res.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -229,17 +229,30 @@ async function legacyCsv(includeText: boolean): Promise<string> {
   return `\uFEFF${[header, ...rows].map((row) => row.map((cell) => referenceCell(cell)).join(',')).join('\r\n')}\r\n`;
 }
 
+/** Kolom berkas CSV survei uji, ditulis eksplisit: kolom tetap lalu kode pertanyaan (teks bebas hanya dengan izin). */
+function exportColumns(includeText: boolean): string[] {
+  return [
+    'response_id', 'respondent_id', 'survey_id', 'survey_version', 'assignment_id', 'collection_mode', 'identity_source', 'submitted_at',
+    'L01', 'C01', ...(includeText ? ['T01', 'T02'] : []),
+  ];
+}
+
+/** Unduhan via node:http tanpa header Accept, jadi `request_accept` tercatat null; tujuan/penerima tidak diklaim. */
 function auditMetadata(rows: number, includeText: boolean, reason?: string): string {
   return JSON.stringify({
     format: 'csv',
     rows,
     includeText,
     individual: true,
-    destination: 'download',
-    accepts: ['text/csv'],
+    filename: `hasil-${surveyId}-v1.csv`,
+    columns: exportColumns(includeText),
+    request_accept: null,
     ...(reason ? { reason } : {}),
   });
 }
+
+/** Hasil akhir audit ekspor CSV, bukan baris 'Mulai ekspor CSV' yang ditulis sebelum aliran dimulai. */
+const isFinalExportAudit = (sql: string, params?: unknown[]) => /INSERT INTO audit_logs/i.test(sql) && params?.[2] === 'Ekspor CSV';
 
 async function exportAudits(outcome: string): Promise<string[]> {
   const rows = await all<{ metadata: string | null }>(
@@ -380,7 +393,7 @@ test('PERF-04: klien yang memutus koneksi menghentikan query batch berikutnya', 
       await gate.promise;
     }
     const result = await original(sql, params);
-    if (/INSERT INTO audit_logs/i.test(sql)) audited.resolve();
+    if (isFinalExportAudit(sql, params)) audited.resolve();
     return result;
   });
   try {
@@ -419,7 +432,7 @@ test('PERF-04: galat basis data di tengah aliran memutus koneksi, bukan berkas y
   const spy = mock.method(pool, 'query', async (sql: string, params?: unknown[]) => {
     if (/\bFROM answers\b/i.test(sql) && ++answerCount === 2) throw new Error('simulasi koneksi basis data putus');
     const result = await original(sql, params);
-    if (/INSERT INTO audit_logs/i.test(sql)) audited.resolve();
+    if (isFinalExportAudit(sql, params)) audited.resolve();
     return result;
   });
   const logged = mock.method(console, 'error', () => {});
@@ -448,4 +461,116 @@ test('PERF-04: galat basis data di tengah aliran memutus koneksi, bukan berkas y
     logged.mock.restore();
   }
   assert.ok((await exportAudits('gagal')).includes(auditMetadata(BATCH, true, 'stream_error')), 'audit mencatat galat aliran');
+});
+
+/** Unduhan yang selalu selesai: berakhir normal, galat, atau koneksi diputus server. */
+function settledDownload(cookie: string): Promise<{ status: number; complete: boolean; body: string }> {
+  const { promise, resolve } = Promise.withResolvers<{ status: number; complete: boolean; body: string }>();
+  const req = exportRequest(cookie);
+  req.on('response', (res) => {
+    let body = '';
+    res.setEncoding('utf8');
+    res.on('data', (chunk: string) => (body += chunk));
+    const settle = () => resolve({ status: res.statusCode ?? 0, complete: res.complete, body });
+    res.on('end', settle);
+    res.on('error', settle);
+    res.on('close', settle);
+  });
+  req.on('error', () => resolve({ status: 0, complete: false, body: '' }));
+  req.end();
+  return promise;
+}
+
+test('M6: audit ekspor yang gagal ditulis menolak ekspor (500) tanpa byte CSV dan tanpa membaca respons', async () => {
+  const original = pool.query.bind(pool) as (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null }>;
+  const sqls: string[] = [];
+  const spy = mock.method(pool, 'query', async (sql: string, params?: unknown[]) => {
+    sqls.push(sql);
+    if (/INSERT INTO audit_logs/i.test(sql)) throw new Error('simulasi audit_logs tidak dapat ditulis');
+    return original(sql, params);
+  });
+  const logged = mock.method(console, 'error', () => {});
+  let outcome: { status: number; complete: boolean; body: string };
+  try {
+    outcome = await withTimeout(settledDownload(ownerCookie), 'unduhan tidak selesai maupun terputus');
+  } finally {
+    spy.mock.restore();
+    logged.mock.restore();
+  }
+  assert.equal(outcome.status, 500, `ekspor tanpa jejak audit tidak boleh dikirim (${outcome.body.length} karakter diterima)`);
+  assert.ok(!outcome.body.startsWith('\uFEFF') && !outcome.body.includes('response_id'), 'tidak ada byte CSV yang terkirim');
+  assert.equal((JSON.parse(outcome.body) as { code?: string }).code, 'internal_error');
+  assert.equal(sqls.filter(isResponseBatch).length, 0, 'data respons tidak dibaca sebelum audit tercatat');
+});
+
+test('M6: audit ekspor ditulis sebelum byte pertama dan hanya memuat yang diketahui server', async () => {
+  const original = pool.query.bind(pool) as (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null }>;
+  const sqls: string[] = [];
+  const spy = mock.method(pool, 'query', async (sql: string, params?: unknown[]) => {
+    sqls.push(sql);
+    return original(sql, params);
+  });
+  const accept = 'text/csv, application/json;q=0.5';
+  try {
+    for (const cookie of [ownerCookie, officerCookie]) {
+      sqls.length = 0;
+      const result = await download(cookie, { Accept: accept });
+      assert.equal(result.status, 200, result.body.toString('utf8'));
+      const firstAudit = sqls.findIndex((sql) => /INSERT INTO audit_logs/i.test(sql));
+      const firstBatch = sqls.findIndex(isResponseBatch);
+      assert.ok(firstAudit >= 0 && firstBatch >= 0 && firstAudit < firstBatch, `audit (query ke-${firstAudit}) harus mendahului batch respons (query ke-${firstBatch})`);
+    }
+  } finally {
+    spy.mock.restore();
+  }
+  const object = `${surveyId} · v1`;
+  const startedBy = async (actor: string) => {
+    const row = await get<{ metadata: string }>(
+      "SELECT metadata FROM audit_logs WHERE action = 'Mulai ekspor CSV' AND outcome = 'berhasil' AND actor = ? AND object = ? ORDER BY at DESC LIMIT 1",
+      actor,
+      object,
+    );
+    return JSON.parse(row?.metadata ?? '{}') as unknown;
+  };
+  const started = (includeText: boolean) => ({
+    format: 'csv',
+    includeText,
+    individual: true,
+    filename: `hasil-${surveyId}-v1.csv`,
+    columns: exportColumns(includeText),
+    request_accept: accept,
+  });
+  assert.deepEqual(await startedBy('u_creator_a'), started(true), 'pemilik: nama berkas, kolom lengkap, dan Accept permintaan');
+  assert.deepEqual(await startedBy('u_petugas'), started(false), 'grant tanpa teks bebas: kolom teks tidak disertakan');
+
+  const codebook = await download(officerCookie, { Accept: accept }, `/surveys/${surveyId}/export?format=codebook&version=${versionId}`);
+  assert.equal(codebook.status, 200);
+  const codebookAudit = await get<{ metadata: string }>(
+    "SELECT metadata FROM audit_logs WHERE action = 'Ekspor kodebook' AND actor = 'u_petugas' AND object = ? ORDER BY at DESC LIMIT 1",
+    object,
+  );
+  // L01 punya 5 opsi dan C01 3 opsi; T01/T02 dibuang karena grant tanpa teks bebas.
+  assert.deepEqual(JSON.parse(codebookAudit?.metadata ?? '{}'), {
+    format: 'codebook', rows: 8, includeText: false, individual: false,
+    filename: `kodebook-${surveyId}-v1.csv`, questions: ['L01', 'C01'], request_accept: accept,
+  });
+
+  const outsider = await login('creator.b@svara.local');
+  const denied = await download(outsider, { Accept: accept });
+  assert.equal(denied.status, 403);
+  const rejection = await get<{ metadata: string }>(
+    "SELECT metadata FROM audit_logs WHERE action = 'Ekspor hasil' AND outcome = 'ditolak' AND actor = 'u_creator_b' AND object = ?",
+    surveyId,
+  );
+  assert.deepEqual(JSON.parse(rejection?.metadata ?? '{}'), { format: 'csv', reason: 'forbidden_export', request_accept: accept });
+
+  const exportLogs = await all<{ metadata: string | null }>(
+    "SELECT metadata FROM audit_logs WHERE action IN ('Mulai ekspor CSV', 'Ekspor CSV', 'Ekspor kodebook', 'Ekspor hasil') AND object LIKE ?",
+    `${surveyId}%`,
+  );
+  assert.ok(exportLogs.length >= 6);
+  for (const { metadata } of exportLogs) {
+    const keys = Object.keys(JSON.parse(metadata ?? '{}') as object);
+    assert.ok(!keys.includes('destination') && !keys.includes('accepts'), `tujuan/penerima tidak diklaim: ${metadata}`);
+  }
 });
