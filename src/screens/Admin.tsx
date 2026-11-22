@@ -11,8 +11,10 @@ import {
   Checkbox,
   Code,
   Divider,
+  ErrorState,
   Field,
   Label,
+  LoadingState,
   Muted,
   Panel,
   PlainLink,
@@ -29,8 +31,8 @@ import { accounts, accessGrants, auditLogs, integrationEvents, organizations } f
 import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
-import { replayEvent, refreshBootstrap, saveGrants, setAdminStats, setIntegrationNote, useStore } from '../lib/store';
-import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, adminStats, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { cancelAdminStatsLoad, loadAdminStats, loadBootstrap, replayEvent, refreshBootstrap, saveGrants, setIntegrationNote, useStore } from '../lib/store';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
 import { ORGANIZATION_TYPE_LABEL } from '../lib/labels';
 import type { OrganizationType } from '../lib/types';
 
@@ -38,85 +40,104 @@ import type { OrganizationType } from '../lib/types';
 
 export function AdminSummaryPage() {
   const { state } = useScreenState('admin-summary');
-  const { stats } = useStore();
+  const { stats, statsError, error } = useStore();
   useEffect(() => {
-    void adminStats().then(setAdminStats).catch(() => setAdminStats(null));
+    void loadAdminStats();
+    return cancelAdminStatsLoad;
   }, []);
+
+  const failure = stats ? null : statsError ?? error;
+  const retry = () => {
+    void (async () => {
+      if (error) await loadBootstrap();
+      await loadAdminStats();
+    })();
+  };
+
   return (
     <Shell kind="admin" title="Ringkasan operasional" subtitle="Pantau jumlah survei, respons, dan akun tanpa membuka jawaban individual.">
-      <StateView
-        routeId="admin-summary"
-        state={state}
-        emptyTitle="Belum ada survei"
-        emptyDetail="Metrik akan muncul setelah survei dibuat dan menerima jawaban."
-        permissionDetail="Akses ringkasan memerlukan peran super admin."
-      >
-        <div className="flex flex-col gap-5">
-          
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <Label>Jumlah survei</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.surveys ?? surveys.length}</p>
-              <Muted>Termasuk draf, terbit, dan arsip.</Muted>
+      {failure ? (
+        <ErrorState
+          title="Ringkasan operasional gagal dimuat"
+          detail={`${failure} Tidak ada angka yang ditampilkan sampai data berhasil dimuat.`}
+          action={<Button variant="secondary" onClick={retry}>Coba lagi</Button>}
+        />
+      ) : !stats ? (
+        <LoadingState label="Memuat ringkasan operasional…" />
+      ) : (
+        <StateView
+          routeId="admin-summary"
+          state={state}
+          emptyTitle="Belum ada survei"
+          emptyDetail="Metrik akan muncul setelah survei dibuat dan menerima jawaban."
+          permissionDetail="Akses ringkasan memerlukan peran super admin."
+        >
+          <div className="flex flex-col gap-5">
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <Label>Jumlah survei</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.surveys}</p>
+                <Muted>Termasuk draf, terbit, dan arsip.</Muted>
+              </Card>
+              <Card>
+                <Label>Total respons final</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.responses}</p>
+                <Muted>Agregat lintas versi.</Muted>
+              </Card>
+              <Card>
+                <Label>Akun pengelola</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.accounts}</p>
+                <Muted>Termasuk akun dinonaktifkan.</Muted>
+              </Card>
+              <Card>
+                <Label>Permintaan data menunggu</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.pendingRequests}</p>
+                <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
+              </Card>
+            </div>
+
+            <Banner tone="info" title="Tanpa akses jawaban individual">
+              Administrator memantau operasional. Akses ke jawaban individual, ekspor, dan teks bebas diberikan terpisah.
+              <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
+            </Banner>
+
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Metrik per creator</SectionTitle>
+              <Table head={['Creator', 'Survei', 'Respons']}>
+                {stats.perCreator.map((creator) => (
+                  <tr key={creator.id}>
+                    <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
+                    <Td>{creator.surveys}</Td>
+                    <Td>{creator.responses}</Td>
+                  </tr>
+                ))}
+              </Table>
             </Card>
-            <Card>
-              <Label>Total respons final</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.responses ?? 0}</p>
-              <Muted>Agregat lintas versi.</Muted>
+
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Metrik per survei</SectionTitle>
+              <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
+                {stats.perSurvey.map((survey) => (
+                  <tr key={survey.id}>
+                    <Th>{survey.title}</Th>
+                    <Td>{survey.owner}</Td>
+                    <Td>{survey.versions}</Td>
+                    <Td>{survey.responses}</Td>
+                  </tr>
+                ))}
+              </Table>
             </Card>
-            <Card>
-              <Label>Akun pengelola</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.accounts ?? accounts.length}</p>
-              <Muted>Termasuk akun dinonaktifkan.</Muted>
-            </Card>
-            <Card>
-              <Label>Permintaan data menunggu</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.pendingRequests ?? 0}</p>
-              <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
-            </Card>
+
+            <div className="flex flex-wrap gap-3">
+              <ActionLink to={ROUTES.adminAccounts} variant="secondary">Akun dan izin</ActionLink>
+              <ActionLink to={ROUTES.adminAudit} variant="secondary">Log audit</ActionLink>
+              <ActionLink to={ROUTES.adminIntegration} variant="secondary">Status integrasi</ActionLink>
+            </div>
           </div>
+        </StateView>
+      )}
 
-          <Banner tone="info" title="Tanpa akses jawaban individual">
-            Administrator memantau operasional. Akses ke jawaban individual, ekspor, dan teks bebas diberikan terpisah.
-            <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
-          </Banner>
-
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Metrik per creator</SectionTitle>
-            <Table head={['Creator', 'Survei', 'Respons']}>
-              {(stats?.perCreator ?? []).map((creator) => (
-                <tr key={creator.id}>
-                  <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
-                  <Td>{creator.surveys}</Td>
-                  <Td>{creator.responses}</Td>
-                </tr>
-              ))}
-            </Table>
-            {!stats && <Muted>Metrik belum tersedia.</Muted>}
-          </Card>
-
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Metrik per survei</SectionTitle>
-            <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
-              {(stats?.perSurvey ?? []).map((survey) => (
-                <tr key={survey.id}>
-                  <Th>{survey.title}</Th>
-                  <Td>{survey.owner}</Td>
-                  <Td>{survey.versions}</Td>
-                  <Td>{survey.responses}</Td>
-                </tr>
-              ))}
-            </Table>
-          </Card>
-
-          <div className="flex flex-wrap gap-3">
-            <ActionLink to={ROUTES.adminAccounts} variant="secondary">Akun dan izin</ActionLink>
-            <ActionLink to={ROUTES.adminAudit} variant="secondary">Log audit</ActionLink>
-            <ActionLink to={ROUTES.adminIntegration} variant="secondary">Status integrasi</ActionLink>
-          </div>
-        </div>
-      </StateView>
-      
     </Shell>
   );
 }

@@ -80,7 +80,7 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   );
 }
 
-function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; homeTo: string }) {
+function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; guestActions?: boolean; homeTo: string }) {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const notify = useToast();
@@ -143,37 +143,39 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
             </nav>
 
             {/* Mobile: satu pemicu menu, jadi tidak ada tautan yang terpotong. */}
-            <button
-              type="button"
-              aria-expanded={menuOpen}
-              aria-controls="pill-menu"
-              aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
-              onClick={() => setMenuOpen((v) => !v)}
-              className={`inline-flex size-11 items-center justify-center rounded-full text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                className="size-5"
+            {(nav.length > 0 || current || guestActions) && (
+              <button
+                type="button"
+                aria-expanded={menuOpen}
+                aria-controls="pill-menu"
+                aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
+                onClick={() => setMenuOpen((v) => !v)}
+                className={`inline-flex size-11 items-center justify-center rounded-full text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
               >
-                {menuOpen ? (
-                  <>
-                    <path d="M5 5l10 10" />
-                    <path d="M15 5 5 15" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M3 6h14" />
-                    <path d="M3 10h14" />
-                    <path d="M3 14h14" />
-                  </>
-                )}
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  className="size-5"
+                >
+                  {menuOpen ? (
+                    <>
+                      <path d="M5 5l10 10" />
+                      <path d="M15 5 5 15" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M3 6h14" />
+                      <path d="M3 10h14" />
+                      <path d="M3 14h14" />
+                    </>
+                  )}
+                </svg>
+              </button>
+            )}
           </div>
 
           {current ? (
@@ -186,14 +188,14 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 Keluar
               </button>
             </div>
-          ) : (
+          ) : guestActions ? (
             <Link
               href={ROUTES.login}
               className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 sm:inline-flex ${PRESS_LINK}`}
             >
               Masuk
             </Link>
-          )}
+          ) : null}
         </div>
 
         {menuOpen && (
@@ -221,31 +223,33 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 </li>
               ))}
             </ul>
-            <div className="mt-1 border-t border-n200 pt-1">
-              {current ? (
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0"
-                >
-                  Keluar
-                </button>
-              ) : (
-                <Link
-                  href={ROUTES.login}
-                  onClick={(event) => {
-                    if (!allowNavigation(event, guard)) {
-                      event.preventDefault();
-                      return;
-                    }
-                    setMenuOpen(false);
-                  }}
-                  className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
-                >
-                  Masuk
-                </Link>
-              )}
-            </div>
+            {(current || guestActions) && (
+              <div className="mt-1 border-t border-n200 pt-1">
+                {current ? (
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0"
+                  >
+                    Keluar
+                  </button>
+                ) : (
+                  <Link
+                    href={ROUTES.login}
+                    onClick={(event) => {
+                      if (!allowNavigation(event, guard)) {
+                        event.preventDefault();
+                        return;
+                      }
+                      setMenuOpen(false);
+                    }}
+                    className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
+                  >
+                    Masuk
+                  </Link>
+                )}
+              </div>
+            )}
           </nav>
         )}
       </div>
@@ -294,14 +298,16 @@ export function Shell({
         ? ROUTES.adminOrg
         : ROUTES.creator;
   const isOrgAdmin = activeSession?.role === 'org_admin';
-  // Super admin memakai /admin/*; org_admin mendapat ruang organisasinya sendiri.
+  // Ruang kerja hanya diisi setelah sesi klien dikenal; tamu tidak pernah melihat nav tamu di sana.
   const topNav = activeSession
     ? isOrgAdmin
       ? ORG_NAV
       : activeSession.role === 'admin'
         ? NAV.admin
         : NAV.creator
-    : GUEST_NAV;
+    : inWorkspace
+      ? []
+      : GUEST_NAV;
   // Sidebar: org_admin hanya melihat entri Organisasi, meski halaman dirender sebagai admin.
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const activePath = kind === 'respondent' ? ROUTES.home : pathname;
@@ -315,7 +321,7 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} homeTo={homeTo} />}
+      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} guestActions={!inWorkspace} homeTo={homeTo} />}
 
       {chromeless ? (
         <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
