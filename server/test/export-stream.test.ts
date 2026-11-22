@@ -13,7 +13,6 @@ process.env.EXPORT_BATCH_SIZE = String(BATCH);
 
 const { app } = await import('../app.ts');
 const { all, get, pool, run } = await import('../db.ts');
-const { csvCell } = await import('../http.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
 const QUESTION_COUNT = 4;
@@ -166,6 +165,18 @@ async function insertResponses(from: number, to: number): Promise<void> {
   }
 }
 
+/**
+ * Aturan sel acuan ditulis eksplisit, bukan memanggil csvCell yang sedang diuji.
+ * L-03: number berhingga (negatif, desimal, eksponen) ditulis apa adanya; hanya teks berawalan
+ * = + - @ tab CR yang diberi apostrof. Sebelum L-03 angka negatif juga diberi apostrof.
+ */
+function referenceCell(value: unknown): string {
+  const raw = value === null || value === undefined ? '' : String(value);
+  const numeric = typeof value === 'number' && Number.isFinite(value);
+  const text = !numeric && /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 /** Salinan perilaku ekspor sebelum PERF-04: seluruh respons + seluruh jawaban versi dibangun menjadi satu string. */
 async function legacyCsv(includeText: boolean): Promise<string> {
   const version = await get<{ number: number }>('SELECT number FROM survey_versions WHERE id = ?', versionId);
@@ -215,7 +226,7 @@ async function legacyCsv(includeText: boolean): Promise<string> {
       }),
     ];
   });
-  return `\uFEFF${[header, ...rows].map((row) => row.map((cell) => csvCell(cell)).join(',')).join('\r\n')}\r\n`;
+  return `\uFEFF${[header, ...rows].map((row) => row.map((cell) => referenceCell(cell)).join(',')).join('\r\n')}\r\n`;
 }
 
 function auditMetadata(rows: number, includeText: boolean, reason?: string): string {
@@ -315,6 +326,11 @@ test('PERF-04: CSV bertahap identik byte-per-byte dengan ekspor lama lintas bany
       const expected = await legacyCsv(includeText);
       assert.equal(result.body.toString('utf8'), expected, `CSV berbeda (includeText=${includeText}, ${total} respons)`);
       assert.ok(result.body.equals(Buffer.from(expected, 'utf8')), 'byte CSV termasuk BOM harus identik');
+      const csv = result.body.toString('utf8');
+      assert.ok(/,-1(,|\r\n)/.test(csv) && /,-2(,|\r\n)/.test(csv), 'jawaban number negatif ditulis sebagai angka');
+      assert.ok(!csv.includes("'-1") && !csv.includes("'-2"), 'number negatif tidak diberi apostrof (L-03)');
+      assert.ok(csv.includes("'=resp0"), 'respondent_id teks berawalan = tetap dinetralisasi');
+      if (includeText) assert.ok(csv.includes("'-5 poin") && csv.includes("'=SUM(A1:A9)"), 'teks berawalan - dan = tetap dinetralisasi');
       assert.ok((await exportAudits('berhasil')).includes(auditMetadata(total, includeText)), 'audit sukses mencatat jumlah baris yang ditulis');
     }
   }
