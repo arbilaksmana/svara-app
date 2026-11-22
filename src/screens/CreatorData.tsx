@@ -393,7 +393,7 @@ export function ResultsPage({ id }: { id: string }) {
                     setResponses(null);
                     setResponsesError(null);
                   }}
-                  className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                  className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                 >
                   {availableVersions.map((v) => (
                     <option key={v.id} value={v.id}>Versi {v.number} · {STATUS_LABEL[v.status]}</option>
