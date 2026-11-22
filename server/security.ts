@@ -194,10 +194,34 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+const RATE_LIMIT_SWEEP_MS = 60_000;
+let lastSweep = 0;
 
-/** Pembatas percobaan sederhana di memori proses; cukup untuk satu instans lokal. */
+/** Hanya untuk uji. */
+export function rateLimitBucketCount(): number {
+  return buckets.size;
+}
+
+/**
+ * Identitas klien untuk limiter: alamat socket, bukan `req.ip`. proxy-addr 2.0.8
+ * tidak berhenti di socket yang dipercaya (loopback), sehingga klien langsung masih
+ * bisa memalsukan X-Forwarded-For lewat `req.ip`/`req.ips`; socket tidak bisa dipalsukan.
+ */
+export function clientIp(req: Request): string {
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+/** Pembatas percobaan di memori proses; cukup untuk satu instans lokal. */
 export function rateLimit(options: { key: string; limit: number; windowMs: number }): boolean {
   const now = Date.now();
+  // Sapu entri kedaluwarsa paling sering sekali per menit atau saat peta tumbuh cepat,
+  // agar kunci per-email/per-token tidak menumpuk tanpa batas.
+  if (now - lastSweep >= RATE_LIMIT_SWEEP_MS || buckets.size > 10_000) {
+    lastSweep = now;
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt < now) buckets.delete(key);
+    }
+  }
   const bucket = buckets.get(options.key);
   if (!bucket || bucket.resetAt < now) {
     buckets.set(options.key, { count: 1, resetAt: now + options.windowMs });
@@ -206,6 +230,25 @@ export function rateLimit(options: { key: string; limit: number; windowMs: numbe
   if (bucket.count >= options.limit) return false;
   bucket.count += 1;
   return true;
+}
+
+/**
+ * Nilai `trust proxy` Express dari TRUST_PROXY. Mati secara default: header proxy
+ * tanpa konfigurasi bisa dipalsukan klien. `true` tanpa batas ditolak, diganti `loopback`.
+ */
+export function trustProxySetting(value: string | undefined): boolean | number | string {
+  const raw = (value ?? '').trim().toLowerCase();
+  if (!raw || raw === 'false' || raw === '0') return false;
+  if (/^\d+$/.test(raw)) return Math.max(1, Number(raw));
+  const hops = raw.split(',').map((hop) => hop.trim()).filter(Boolean);
+  if (hops.every((hop) => /^\d+$/.test(hop))) {
+    // Daftar hop count dibaca Express sebagai string satu elemen "a, b", bukan angka.
+    return hops.map((hop) => String(Math.max(1, Number(hop)))).join(',');
+  }
+  const ALLOWED = new Set(['loopback', 'linklocal', 'uniquelocal']);
+  if (hops.every((hop) => ALLOWED.has(hop))) return value!.trim();
+  console.warn(`[api] TRUST_PROXY tidak dikenal ("${value}"); memakai "loopback".`);
+  return 'loopback';
 }
 
 export async function knownAccountEmails(): Promise<string[]> {

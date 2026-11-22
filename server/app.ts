@@ -1,6 +1,6 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { attachSession, csrfGuard, requireAuth } from './security.ts';
+import { attachSession, csrfGuard, requireAuth, trustProxySetting } from './security.ts';
 import type { AuthedRequest } from './security.ts';
 import { authRouter } from './routes/auth.ts';
 import { publicRouter } from './routes/public.ts';
@@ -25,6 +25,7 @@ const CONTENT_SECURITY_POLICY = [
 ].join('; ');
 
 export const app = express();
+app.set('trust proxy', trustProxySetting(process.env.TRUST_PROXY));
 app.disable('x-powered-by');
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);

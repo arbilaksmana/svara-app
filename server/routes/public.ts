@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
-import { parseCookies, rateLimit, type AuthedRequest } from '../security.ts';
+import { clientIp, parseCookies, rateLimit, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
@@ -570,7 +570,7 @@ publicRouter.get('/public/surveys/:token', async (req: AuthedRequest, res: Respo
 
 publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `consent:${req.ip}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
+    if (!rateLimit({ key: `consent:${clientIp(req)}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi sebentar.');
     }
     const context = await resolvePublicContext(pathParam(req, 'token'));
@@ -704,7 +704,7 @@ publicRouter.get('/public/surveys/:token/review', (req: AuthedRequest, res: Resp
 
 publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `invite-code:${req.ip}`, limit: 20, windowMs: 10 * 60 * 1000 })) {
+    if (!rateLimit({ key: `invite-code:${clientIp(req)}`, limit: 20, windowMs: 10 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak percobaan. Coba lagi nanti.');
     }
     const code = asString(req.body?.code ?? '', 'code', 80).toUpperCase();
@@ -727,7 +727,7 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
 publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest, res: Response) => {
   let auditObject = 'respons';
   try {
-    if (!rateLimit({ key: `submit:${req.ip}`, limit: 40, windowMs: 10 * 60 * 1000 })) {
+    if (!rateLimit({ key: `submit:${clientIp(req)}`, limit: 40, windowMs: 10 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak kiriman. Coba lagi nanti.');
     }
     const key = req.get('idempotency-key')?.trim() ?? '';
@@ -936,7 +936,7 @@ publicRouter.get('/public/policy', async (_req: AuthedRequest, res: Response) =>
 
 publicRouter.post('/data-requests', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `data-request:${req.ip}`, limit: 10, windowMs: 60 * 60 * 1000 })) {
+    if (!rateLimit({ key: `data-request:${clientIp(req)}`, limit: 10, windowMs: 60 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi nanti.');
     }
     const type = asString(req.body?.type ?? '', 'type', 80);

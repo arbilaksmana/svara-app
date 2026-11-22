@@ -5,6 +5,7 @@ import type { AccountRow, AuthedRequest } from '../security.ts';
 import {
   SESSION_COOKIE,
   clearSessionCookie,
+  clientIp,
   createSession,
   destroySession,
   hashPassword,
@@ -68,7 +69,7 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
     if (!email || !password) {
       throw new ApiError(422, 'validation_error', 'Email dan kata sandi wajib diisi.');
     }
-    const key = `login:${req.ip}:${email}`;
+    const key = `login:${clientIp(req)}:${email}`;
     if (!rateLimit({ key, limit: 8, windowMs: 15 * 60 * 1000 })) {
       throw new ApiError(429, 'rate_limited', 'Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.');
     }
@@ -134,7 +135,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     if (passwordError) {
       throw new ApiError(422, 'weak_password', passwordError);
     }
-    if (!rateLimit({ key: `register:${req.ip}`, limit: REGISTER_RATE_LIMIT, windowMs: 15 * 60 * 1000 })) {
+    if (!rateLimit({ key: `register:${clientIp(req)}`, limit: REGISTER_RATE_LIMIT, windowMs: 15 * 60 * 1000 })) {
       throw new ApiError(429, 'rate_limited', 'Terlalu banyak pendaftaran dari alamat ini. Coba lagi beberapa menit lagi.');
     }
 

@@ -267,6 +267,7 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Batas waktu membuka koneksi |
 | `TEST_DATABASE_URL` | kosong | Basis data uji terpisah untuk `pnpm test` dan demo |
 | `APP_ORIGIN` | `http://127.0.0.1:3000,http://localhost:3000` di luar production; kosong di production | Origin yang diizinkan untuk mutasi; pisahkan beberapa origin dengan koma. Wajib diisi di production karena rewrite mengganti Host |
+| `TRUST_PROXY` | kosong (mati) | Kepercayaan header `X-Forwarded-For`/`X-Forwarded-Proto` untuk `req.ip` dan `req.secure`. Kosong/`0` = mati, header diabaikan. Nilai: `loopback`, `linklocal`, `uniquelocal`, gabungan koma, atau jumlah hop (`1`, `2`); `true`/`*`/rentang IP tidak diterima dan jatuh ke `loopback` dengan peringatan. Limiter selalu memakai alamat koneksi langsung, sehingga klien yang tidak lewat proxy tidak bisa memalsukan identitasnya. Set hanya bila reverse proxy tepercaya mengisi header tersebut |
 | `COOKIE_SECURE` | `0` | Set `1` di belakang HTTPS |
 | `ENABLE_HSTS` | `0` | Set `1` hanya setelah deployment HTTPS siap |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
@@ -454,7 +455,7 @@ Angka dan keterbatasan tiap skrip ada di `docs/test-evidence/`.
 - Tidak ada email, SMS, atau verifikasi identitas responden.
 - Retensi, kontak pengendali, dan transfer lintas negara tetap `null` sampai pengendali menetapkannya.
 - Teks kebijakan adalah template sintetis, bukan nasihat hukum.
-- Rate limit disimpan di proses; deployment multi-instance memerlukan penyimpanan bersama.
+- Rate limit disimpan di proses dengan pembersihan entri kedaluwarsa; deployment multi-instance memerlukan penyimpanan bersama.
 - Backup demo memakai `VACUUM INTO` lokal; belum ada enkripsi, off-site, atau uji RPO/RTO.
 
 ## Lisensi
