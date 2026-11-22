@@ -108,7 +108,7 @@ scripts/         Smoke test web
 ```
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
-- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`018`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
+- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`019`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
 - `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
@@ -188,6 +188,7 @@ Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yan
 - `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`noticeVersionFor`, dipanggil `POST /surveys` dan `PUT /surveys/:id` saat draf dibuat).
 - Publish menolak `422 notice_version_unavailable` bila notice versi draf belum tersedia di sumbernya, sehingga tidak ada versi terbit yang tautannya langsung gagal.
 - Migrasi `018_notice_survey_profile_backfill.sql` mengoreksi backfill `013` untuk data hasil upgrade: notice lingkup diisi dari teks yang dulu ditampilkan per survei (`surveys.profile_id`, versi persis atau notice terbaru profil itu) di bawah label `survey_versions.notice_version`; `notice_version` organisasi/platform yang belum dipakai survei diisi dari profil default `POST /surveys`. Sumbernya tercatat di `organization_notice_sources`/`platform_notice_sources` (`survey_profile`); baris yang sudah ada tidak ditimpa, dan survei berprofil tanpa notice tetap gagal-tertutup (`500 notice_version_unavailable`).
+- Migrasi `019_close_superseded_published_versions.sql` merapikan data dari `main`, yang publish-nya tidak menutup versi terbit sebelumnya. Untuk setiap survei dengan lebih dari satu versi `published`, hanya versi bernomor terbesar yang tetap terbit; versi terbit lain menjadi `closed` (`closed_at` = waktu migrasi), dan tautan publiknya yang masih `active` dan belum kedaluwarsa menjadi `closed` dengan `closed_reason = 'superseded'` sehingga menyajikan versi terbit terbaru. Respons, persetujuan, undangan, isi instrumen, dan status survei tidak diubah; undangan pada versi yang ditutup tampil `closed`. Idempoten; survei dengan satu versi terbit tidak tersentuh.
 
 ### Siapa boleh membaca jawaban dan teks bebas
 
@@ -305,6 +306,12 @@ pnpm admin:bootstrap
 ```
 
 `BOOTSTRAP_ADMIN_PASSWORD` minimal 12 karakter dan memakai minimal 3 dari: huruf kecil, huruf besar, angka, simbol. Script idempoten: email yang sudah menjadi `super_admin` tidak ditimpa. Jangan menaruh sandi nyata di shell history, `.env` yang ter-commit, atau argumen command line; gunakan secret manager atau environment. `NODE_ENV=production SEED_DEMO=1` menghentikan startup.
+
+Pada basis data tanpa seed, `pnpm admin:bootstrap` juga membuat profil platform (nama `Svara`, tipe `platform`, `/privacy`, `/terms`, `notice_version` `1.0`) dan notice platform `1.0` bila profil platform belum ada; tanpa profil platform, `POST /admin/organizations` ditolak `409 notice_source_missing`. Menjalankan ulang bootstrap untuk `super_admin` yang sudah ada tetap mengisi profil platform yang belum ada tanpa mengubah akun, dan tercatat di audit sebagai `Bootstrap profil platform`. Profil dan notice yang sudah ada tidak pernah ditimpa.
+
+Teks notice awal adalah **templat**: setiap field diawali `[Templat awal: wajib ditinjau pengelola platform; bukan teks hukum final]` dan tidak memuat ketentuan wali/anak. Tinjau dan ganti teks di tabel `platform_notices` sebelum survei dibuka untuk responden dan sebelum membuat organisasi pertama (organisasi baru menyalin notice platform untuk `notice_version`-nya); belum ada UI penyunting notice.
+
+Pembuatan survei (`POST /surveys`) masih mewajibkan minimal satu baris profil deployment legacy di tabel `profiles` (`surveys.profile_id` NOT NULL); di basis data tanpa seed creator mendapat `409 profile_missing` sampai baris itu tersedia. Perilaku ini sama dengan `main` dan akan diperbaiki terpisah.
 
 ### Registrasi creator
 
