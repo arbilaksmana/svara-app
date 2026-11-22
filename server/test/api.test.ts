@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
+import { anonymizeExpiredDataRequests, retentionDays } from '../data-request-retention.ts';
 import { provisionOrganizationNotice } from '../notice-provisioning.ts';
 import { hashPassword } from '../security.ts';
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
@@ -1445,12 +1446,70 @@ test('Permintaan data publik dapat ditindaklanjuti admin tanpa memuat jawaban', 
   assert.equal(created.status, 201);
   const id = (created.json as { data: { id: string } }).data.id;
   const admin = await session('admin@svara.local');
-  const patched = await call(`/admin/data-requests/${id}`, {
+  const withoutEvidence = await call(`/admin/data-requests/${id}`, {
     method: 'PATCH',
     cookie: admin,
     body: { status: 'handled', outcome_note: 'Sudah diverifikasi.' },
   });
+  assert.equal(withoutEvidence.status, 422);
+  assert.equal((withoutEvidence.json as { code?: string }).code, 'response_evidence_required');
+  const patched = await call(`/admin/data-requests/${id}`, {
+    method: 'PATCH',
+    cookie: admin,
+    body: { status: 'handled', outcome_note: 'Sudah diverifikasi.', response_channel: 'email' },
+  });
   assert.equal(patched.status, 200);
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const stored = await client.query<{ responded_at: string | null; responded_by: string | null; response_channel: string | null }>(
+      'SELECT responded_at, responded_by, response_channel FROM data_requests WHERE id = $1',
+      [id],
+    );
+    assert.ok(stored.rows[0]?.responded_at, 'responded_at harus terekam');
+    assert.ok(stored.rows[0]?.responded_by, 'responded_by harus terekam');
+    assert.equal(stored.rows[0]?.response_channel, 'email');
+  } finally {
+    await client.end();
+  }
+});
+
+test('NEW-01: job retensi menganonimkan permintaan data >365 hari dan idempoten', async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    for (const [id, days] of [['dr_test_old', 400], ['dr_test_new', 100]] as const) {
+      const createdAt = new Date(Date.now() - days * 86_400_000).toISOString();
+      await client.query(
+        `INSERT INTO data_requests (id, type, contact, note, status, created_at, updated_at)
+         VALUES ($1, 'access', 'pemohon@contoh.test', 'Catatan identitas', 'pending', $2, $2)`,
+        [id, createdAt],
+      );
+    }
+    const first = await anonymizeExpiredDataRequests();
+    assert.ok(first.anonymized >= 1);
+    const rows = await client.query<{ id: string; contact: string; note: string | null; status: string; type: string; anonymized_at: string | null }>(
+      'SELECT id, contact, note, status, type, anonymized_at FROM data_requests WHERE id = ANY($1) ORDER BY id',
+      [['dr_test_old', 'dr_test_new']],
+    );
+    const [fresh, expired] = rows.rows;
+    assert.match(expired!.contact, /^anon:[0-9a-f]{16}$/);
+    assert.equal(expired!.note, null);
+    assert.ok(expired!.anonymized_at, 'anonymized_at harus terisi');
+    assert.equal(expired!.type, 'access');
+    assert.equal(expired!.status, 'pending');
+    assert.equal(fresh!.contact, 'pemohon@contoh.test');
+    assert.equal(fresh!.note, 'Catatan identitas');
+    assert.equal(fresh!.anonymized_at, null);
+    const second = await anonymizeExpiredDataRequests();
+    assert.equal(second.anonymized, 0);
+    assert.equal(retentionDays('365'), 365);
+    assert.equal(retentionDays(''), 365);
+    assert.throws(() => retentionDays('abc'), /DATA_REQUEST_RETENTION_DAYS tidak valid/);
+    assert.throws(() => retentionDays('0'), /DATA_REQUEST_RETENTION_DAYS tidak valid/);
+  } finally {
+    await client.end();
+  }
 });
 
 test('Registrasi publik membuat creator baru dan langsung memberi sesi', async () => {

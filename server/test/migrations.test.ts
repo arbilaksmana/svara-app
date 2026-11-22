@@ -40,6 +40,7 @@ const VERSIONS = [
   '013_consent_notice_backfill.sql',
   '014_public_link_close_reason.sql',
   '015_notice_source_catalog.sql',
+  '016_data_request_retention.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {

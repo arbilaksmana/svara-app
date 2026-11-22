@@ -528,16 +528,35 @@ adminRouter.patch('/admin/data-requests/:id', async (req: AuthedRequest, res: Re
       fail(422, 'validation_error', 'Status permintaan tidak dikenal.');
     }
     const note = typeof req.body?.outcome_note === 'string' ? req.body.outcome_note.trim() : null;
+    const responseChannel = asString(req.body?.response_channel ?? '', 'response_channel', 80).trim();
+    // Verifikasi pemohon = balasan pengelola ke kontak yang diberikan; tanpa bukti balasan
+    // status 'handled' tidak boleh diklaim.
+    if (status === 'handled' && !responseChannel) {
+      fail(422, 'response_evidence_required', 'Status handled wajib mencatat response_channel sebagai bukti balasan.');
+    }
+    const at = nowIso();
+    const actor = req.account?.id ?? null;
     await run(
-      'UPDATE data_requests SET status = ?, outcome_note = ?, handled_by = ?, updated_at = ? WHERE id = ?',
+      `UPDATE data_requests
+          SET status = ?, outcome_note = ?, handled_by = ?, updated_at = ?,
+              responded_at = CASE WHEN ? = '' THEN responded_at ELSE ? END,
+              responded_by = CASE WHEN ? = '' THEN responded_by ELSE ? END,
+              response_channel = CASE WHEN ? = '' THEN response_channel ELSE ? END
+        WHERE id = ?`,
       status,
       note,
-      req.account?.id ?? null,
-      nowIso(),
+      actor,
+      at,
+      responseChannel,
+      at,
+      responseChannel,
+      actor,
+      responseChannel,
+      responseChannel,
       row.id,
     );
-    await audit(req, 'Tangani permintaan data', row.id, 'berhasil', { status });
-    res.json({ data: { ok: true, status } });
+    await audit(req, 'Tangani permintaan data', row.id, 'berhasil', { status, response_channel: responseChannel });
+    res.json({ data: { ok: true, status, responded_at: responseChannel ? at : null, response_channel: responseChannel || null } });
   } catch (error) {
     sendError(res, error);
   }

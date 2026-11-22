@@ -22,7 +22,8 @@
     "smoke:web": "node scripts/smoke-web.mjs",
     "demo:ac13": "tsx server/scripts/ac13-load.ts",
     "demo:ac15": "tsx server/scripts/ac15-restore.ts",
-    "demo:ac16": "tsx server/scripts/ac16-walkthrough.ts"
+    "demo:ac16": "tsx server/scripts/ac16-walkthrough.ts",
+    "retention:data-requests": "tsx server/data-request-retention.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.6",
