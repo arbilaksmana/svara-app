@@ -1,4 +1,5 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, timingSafeEqual, type BinaryLike } from 'node:crypto';
+import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import { all, get, nowIso, run } from './db.ts';
 
@@ -27,23 +28,32 @@ export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-export function hashPassword(password: string): string {
+/**
+ * scrypt async berjalan di threadpool libuv sehingga hashing tidak memblokir event loop.
+ * Parameter bawaan dan format `scrypt$<salt>$<hash>` sama dengan versi sinkron lama.
+ */
+const scryptAsync = promisify(scrypt) as (password: BinaryLike, salt: BinaryLike, keylen: number) => Promise<Buffer>;
+
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
+  const hash = (await scryptAsync(password, salt, 64)).toString('hex');
   return `scrypt$${salt}$${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [scheme, salt, hash] = stored.split('$');
   if (scheme !== 'scrypt' || !salt || !hash) return false;
-  const candidate = scryptSync(password, salt, 64);
+  const candidate = await scryptAsync(password, salt, 64);
   const expected = Buffer.from(hash, 'hex');
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
+/** Batas atas panjang sandi; login menolak sandi lebih panjang sebelum hashing. */
+export const PASSWORD_MAX_LENGTH = 256;
+
 /** Aturan sandi akun baru dan bootstrap; pesan dipakai langsung oleh API/UI. */
 export function passwordPolicyError(password: string): string | null {
-  if (password.length < 12 || password.length > 256) {
+  if (password.length < 12 || password.length > PASSWORD_MAX_LENGTH) {
     return 'Kata sandi harus 12-256 karakter.';
   }
   const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(password)).length;
@@ -59,7 +69,14 @@ export function parseCookies(header: string | undefined): Record<string, string>
   for (const part of header.split(';')) {
     const index = part.indexOf('=');
     if (index < 0) continue;
-    out[part.slice(0, index).trim()] = decodeURIComponent(part.slice(index + 1).trim());
+    let value: string;
+    try {
+      value = decodeURIComponent(part.slice(index + 1).trim());
+    } catch {
+      // Percent-encoding rusak (URIError): abaikan cookie ini seolah tidak dikirim.
+      continue;
+    }
+    out[part.slice(0, index).trim()] = value;
   }
   return out;
 }

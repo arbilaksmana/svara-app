@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { get, nowIso, run, withTx } from '../db.ts';
 import type { AccountRow, AuthedRequest } from '../security.ts';
 import {
+  PASSWORD_MAX_LENGTH,
   SESSION_COOKIE,
   clearSessionCookie,
   clientIp,
@@ -30,8 +31,20 @@ interface LoginRow extends AccountRow {
 
 export const authRouter = Router();
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_MAX_LENGTH = 254;
+
+/** Panjang dicek lebih dulu agar regex tidak pernah menelusuri string raksasa. */
+function validEmail(email: string): boolean {
+  return email.length <= EMAIL_MAX_LENGTH && EMAIL_RE.test(email);
+}
+
+/**
+ * `COOKIE_SECURE=1` selalu memberi `Secure`. Tanpanya hanya HTTPS terpercaya: `req.secure`
+ * membaca X-Forwarded-Proto hanya dari proxy yang dipercaya lewat TRUST_PROXY.
+ */
 function isSecure(req: AuthedRequest): boolean {
-  return req.secure || req.get('x-forwarded-proto') === 'https';
+  return process.env.COOKIE_SECURE === '1' || req.secure;
 }
 
 async function failLogin(actor: string): Promise<void> {
@@ -69,13 +82,18 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
     if (!email || !password) {
       throw new ApiError(422, 'validation_error', 'Email dan kata sandi wajib diisi.');
     }
+    // Di luar batas registrasi tidak mungkin cocok dengan akun mana pun. Ditolak sebelum
+    // limiter, query akun, hashing, dan audit, sehingga kunci limiter dan actor audit terbatas.
+    if (!validEmail(email) || password.length > PASSWORD_MAX_LENGTH) {
+      throw new ApiError(422, 'validation_error', 'Email atau kata sandi tidak valid.');
+    }
     const key = `login:${clientIp(req)}:${email}`;
     if (!rateLimit({ key, limit: 8, windowMs: 15 * 60 * 1000 })) {
       throw new ApiError(429, 'rate_limited', 'Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.');
     }
     const row = await get<LoginRow>('SELECT * FROM accounts WHERE email = ?', email);
-    if (!row || !verifyPassword(password, row.password_hash) || row.status !== 'active') {
-      await failLogin(email || 'tidak-dikenal');
+    if (!row || !(await verifyPassword(password, row.password_hash)) || row.status !== 'active') {
+      await failLogin(email);
       throw new ApiError(401, 'invalid_credentials', 'Email atau kata sandi tidak cocok.');
     }
     const session = await createSession(row.id);
@@ -103,8 +121,6 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
   }
 });
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 /** Bump ketika isi halaman kebijakan privasi atau ketentuan layanan berubah. */
 const CURRENT_CONSENT_VERSION = '2026-11-19';
 
@@ -125,7 +141,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
     if (displayName.length < 2 || displayName.length > 120) {
       throw new ApiError(422, 'validation_error', 'Nama harus 2-120 karakter.');
     }
-    if (!email || email.length > 254 || !EMAIL_RE.test(email)) {
+    if (!validEmail(email)) {
       throw new ApiError(422, 'validation_error', 'Alamat email tidak valid.');
     }
     if (!acceptTerms) {
@@ -158,6 +174,8 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
       throw new ApiError(422, 'invalid_invite_code', 'Kode undangan organisasi tidak berlaku.');
     }
 
+    // Hash di luar transaksi agar koneksi pool tidak tertahan selama scrypt berjalan.
+    const passwordHash = await hashPassword(password);
     const accountId = newId('u');
     const acceptedAt = nowIso();
     try {
@@ -169,7 +187,7 @@ authRouter.post('/auth/register', async (req: AuthedRequest, res: Response) => {
           displayName,
           'creator',
           'active',
-          hashPassword(password),
+          passwordHash,
           acceptedAt,
           CURRENT_CONSENT_VERSION,
           acceptedAt,

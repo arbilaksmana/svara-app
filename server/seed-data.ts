@@ -77,7 +77,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         name,
         role,
         status,
-        hashPassword(password),
+        await hashPassword(password),
         createdAt,
         organizationId,
       );

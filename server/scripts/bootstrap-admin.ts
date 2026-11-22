@@ -40,7 +40,7 @@ async function main(): Promise<void> {
       displayName,
       'super_admin',
       'active',
-      hashPassword(password),
+      await hashPassword(password),
       nowIso(),
     );
     await run(
