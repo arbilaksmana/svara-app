@@ -334,8 +334,15 @@ export function csvCell(value: unknown, neutralizeFormula = true): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+export const CSV_BOM = '\uFEFF';
+export const CSV_EOL = '\r\n';
+
+export function csvLine(row: unknown[]): string {
+  return row.map((cell) => csvCell(cell)).join(',');
+}
+
 export function csvDocument(rows: unknown[][]): string {
-  return `\uFEFF${rows.map((row) => row.map((cell) => csvCell(cell)).join(',')).join('\r\n')}\r\n`;
+  return `${CSV_BOM}${rows.map((row) => csvLine(row)).join(CSV_EOL)}${CSV_EOL}`;
 }
 
 export function stableStringify(value: unknown): string {

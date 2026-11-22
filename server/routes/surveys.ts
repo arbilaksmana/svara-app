@@ -14,7 +14,10 @@ import {
   canReadFreeText,
   canReadIndividual,
   canReadSurveyMetadata,
+  CSV_BOM,
+  CSV_EOL,
   csvDocument,
+  csvLine,
   fail,
   newId,
   noticeVersionFor,
@@ -109,6 +112,9 @@ export const surveysRouter = Router();
 
 /** Format ekspor → isi yang boleh diterima klien. Dicatat di audit agar tujuan ekspor terbaca. */
 const EXPORT_ACCEPT: Record<ExportFormat, readonly string[]> = { csv: ['text/csv'], codebook: ['text/csv'] };
+
+/** Respons per batch ekspor CSV. EXPORT_BATCH_SIZE hanya bisa menurunkannya (test memaksa banyak batch). */
+const EXPORT_BATCH_SIZE = Math.min(500, Math.max(1, Number.parseInt(process.env.EXPORT_BATCH_SIZE ?? '', 10) || 500));
 
 function stringOrNull(value: unknown, field: string, max = 2000): string | null {
   if (value === null || value === undefined || value === '') return null;
@@ -747,15 +753,42 @@ surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Respon
   }
 });
 
-async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow[]>> {
-  if (versionIds.length === 0) return new Map();
-  const rows = await all<AnswerDbRow>(
-    `SELECT a.response_id, a.question_code, a.option_id, a.value, a.text, a.skipped
-       FROM answers a JOIN responses r ON r.id = a.response_id
-      WHERE r.version_id IN (${versionIds.map(() => '?').join(',')})`,
-    ...versionIds,
+/** Satu batch respons ekspor; keyset `(submitted_at, id)` mengikuti urutan `ORDER BY submitted_at, id`. */
+async function responseBatch(surveyId: string, versionId: string, after: ResponseDbRow | undefined): Promise<ResponseDbRow[]> {
+  if (!after) {
+    return all<ResponseDbRow>(
+      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id LIMIT ?',
+      surveyId,
+      versionId,
+      EXPORT_BATCH_SIZE,
+    );
+  }
+  return all<ResponseDbRow>(
+    `SELECT * FROM responses
+      WHERE survey_id = ? AND version_id = ? AND (submitted_at, id) > (?, ?)
+      ORDER BY submitted_at, id LIMIT ?`,
+    surveyId,
+    versionId,
+    after.submitted_at,
+    after.id,
+    EXPORT_BATCH_SIZE,
   );
-  return byResponse(rows);
+}
+
+/** Tulis potongan CSV dan tunggu `drain` bila buffer penuh; false bila koneksi klien sudah tertutup. */
+async function writeCsv(res: Response, chunk: string): Promise<boolean> {
+  if (!res.write(chunk) && !res.destroyed) {
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        res.off('drain', done);
+        res.off('close', done);
+        resolve();
+      };
+      res.on('drain', done);
+      res.on('close', done);
+    });
+  }
+  return !res.destroyed;
 }
 
 function byResponse(rows: AnswerDbRow[]): Map<string, AnswerDbRow[]> {
@@ -835,12 +868,6 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       res.send(csvDocument(rows));
       return;
     }
-    const responses = await all<ResponseDbRow>(
-      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id',
-      survey.id,
-      version.id,
-    );
-    const answersByResponse = await answerRows([version.id]);
     const textQuestions = new Set(questions.filter((question) => question.type === 'short_text').map((question) => question.code));
     const exportQuestions = includeText ? questions : questions.filter((question) => !textQuestions.has(question.code));
     const header = [
@@ -854,31 +881,66 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       'submitted_at',
       ...exportQuestions.map((question) => question.code),
     ];
-    const rows = responses.map((response) => {
-      const answers = answersByResponse.get(response.id) ?? [];
-      const byCode = new Map(answers.map((answer) => [answer.question_code, answer]));
-      return [
-        response.id,
-        response.respondent_id,
-        response.survey_id,
-        version.number,
-        response.assignment_id ?? '',
-        response.collection_mode,
-        response.identity_source,
-        response.submitted_at,
-        ...exportQuestions.map((question) => {
-          const answer = byCode.get(question.code);
-          if (!answer || answer.skipped === 1) return '';
-          if (question.type === 'short_text') return includeText ? answer.text ?? '' : '';
-          return answer.value ?? '';
-        }),
-      ];
-    });
-    await audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { format, rows: rows.length, includeText, individual: true, ...target });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
-    res.send(csvDocument([header, ...rows]));
+    // Baris ditulis per batch; header HTTP baru terkirim bersama batch pertama sehingga galat sebelumnya tetap JSON.
+    let text = `${CSV_BOM}${csvLine(header)}${CSV_EOL}`;
+    let rows = 0;
+    let stopped: string | undefined;
+    try {
+      for (let after: ResponseDbRow | undefined; ; ) {
+        const batch = await responseBatch(survey.id, version.id, after);
+        const answersByResponse = await answersForResponses(batch.map((response) => response.id));
+        if (res.destroyed) break;
+        for (const response of batch) {
+          const answers = answersByResponse.get(response.id) ?? [];
+          const byCode = new Map(answers.map((answer) => [answer.question_code, answer]));
+          text += `${csvLine([
+            response.id,
+            response.respondent_id,
+            response.survey_id,
+            version.number,
+            response.assignment_id ?? '',
+            response.collection_mode,
+            response.identity_source,
+            response.submitted_at,
+            ...exportQuestions.map((question) => {
+              const answer = byCode.get(question.code);
+              if (!answer || answer.skipped === 1) return '';
+              if (question.type === 'short_text') return includeText ? answer.text ?? '' : '';
+              return answer.value ?? '';
+            }),
+          ])}${CSV_EOL}`;
+        }
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
+        }
+        const open = text === '' || (await writeCsv(res, text));
+        rows += batch.length;
+        if (!open || batch.length < EXPORT_BATCH_SIZE) break;
+        text = '';
+        after = batch[batch.length - 1];
+      }
+    } catch (error) {
+      if (!res.headersSent) throw error;
+      console.error('[api] ekspor CSV terhenti di tengah aliran', error);
+      stopped = 'stream_error';
+    }
+    const object = `${survey.id} · v${version.number}`;
+    const metadata = { format, rows, includeText, individual: true, ...target };
+    if (stopped || res.destroyed) {
+      // Sebagian baris mungkin sudah keluar; putus koneksi agar klien tidak menganggap berkas lengkap.
+      res.destroy();
+      await audit(req, 'Ekspor CSV', object, 'gagal', { ...metadata, reason: stopped ?? 'client_closed' });
+      return;
+    }
+    await audit(req, 'Ekspor CSV', object, 'berhasil', metadata);
+    res.end();
   } catch (error) {
+    if (res.headersSent) {
+      console.error('[api] ekspor CSV terhenti di tengah aliran', error);
+      res.destroy();
+      return;
+    }
     sendError(res, error);
   }
 });
