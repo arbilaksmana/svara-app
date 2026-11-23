@@ -10,6 +10,7 @@ import { HomePage } from '../../src/screens/Landing.tsx';
 import * as respondent from '../../src/screens/Respondent.tsx';
 import { ResultsPage } from '../../src/screens/CreatorData.tsx';
 import { PreviewPage } from '../../src/screens/CreatorCore.tsx';
+import { PrivacyPage } from '../../src/screens/Public.tsx';
 import * as storage from '../../src/lib/draft.ts';
 import { loadBootstrap } from '../../src/lib/store.ts';
 import type { BootstrapData, ConsentPayload, PublicContextData, ReceiptData } from '../../src/lib/api.ts';
@@ -370,4 +371,10 @@ test('UIX-04/NR-06: pengantar mode wali menyatakan bukti dicatat sebagai pernyat
   assert.match(text, /tidak memeriksa keasliannya/, 'Salinan menyatakan aplikasi tidak memverifikasi bukti wali');
   const placeholder = attr(tagById(html, 'guardian-ref'), 'placeholder') ?? '';
   assert.doesNotMatch(placeholder, /verifikasi|pengelola/i, `Placeholder tidak menyebut kode verifikasi: ${placeholder}`);
+});
+
+test('UIX-04/NR-06: kebijakan privasi tidak mewajibkan "bukti verifikasi" wali yang tidak ada', () => {
+  const text = visibleText(mainOf(render(createElement(PrivacyPage), '/privacy')));
+  assert.doesNotMatch(text, GUARDIAN_CLAIMS, 'Entri data anak tidak boleh mengklaim bukti wali diverifikasi');
+  assert.match(text, /Data anak.*tidak diverifikasi aplikasi/, 'Entri data anak menyatakan referensi wali dicatat apa adanya');
 });

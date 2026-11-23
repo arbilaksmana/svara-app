@@ -183,7 +183,7 @@ const PRIVACY_SECTIONS = [
   { title: 'Retensi', body: 'Masa simpan mengikuti kebijakan retensi pengendali dan ditampilkan pada pemberitahuan tiap survei.' },
   { title: 'Hak subjek dan prosedur permintaan', body: 'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali dengan verifikasi pemohon. Tindak lanjut dicatat tanpa memuat jawaban atau token.' },
   { title: 'Transfer lintas negara', body: 'Data diproses di dalam wilayah yang ditetapkan pengendali.' },
-  { title: 'Data anak', body: 'Bila profil menetapkan responden anak, persetujuan orang tua atau wali dan bukti verifikasi wajib sebelum pengiriman baru.' },
+  { title: 'Data anak', body: 'Bila profil menetapkan responden anak, kiriman baru ditolak sampai pernyataan persetujuan orang tua atau wali dan referensi buktinya diisi. Referensi dicatat apa adanya dan tidak diverifikasi aplikasi.' },
 ];
 
 const TERMS_SECTIONS = [
