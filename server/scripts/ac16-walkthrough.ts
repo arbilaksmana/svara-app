@@ -21,13 +21,16 @@ interface ApiResult {
 }
 
 let cookie = '';
+let respondentCookie = '';
 
 async function call(
   path: string,
   init: { method?: string; body?: unknown; key?: string; raw?: boolean } = {},
 ): Promise<ApiResult> {
   const headers: Record<string, string> = { 'X-Svara-Client': 'web' };
-  if (cookie) headers.Cookie = cookie;
+  const isPublicSurvey = path.startsWith('/public/surveys/');
+  const requestCookie = isPublicSurvey ? respondentCookie : cookie;
+  if (requestCookie) headers.Cookie = requestCookie;
   if (init.key) headers['Idempotency-Key'] = init.key;
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(`${BASE}${path}`, {
@@ -35,8 +38,11 @@ async function call(
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) cookie = setCookie.split(';')[0] ?? '';
+  const issuedCookie = response.headers.get('set-cookie')?.split(';')[0];
+  if (issuedCookie) {
+    if (isPublicSurvey) respondentCookie = issuedCookie;
+    else cookie = issuedCookie;
+  }
   const bytes = new Uint8Array(await response.arrayBuffer());
   const text = new TextDecoder().decode(bytes);
   let body: Record<string, unknown> = {};
@@ -129,7 +135,6 @@ try {
       }),
     );
     const form = data<{
-      version: { id: string };
       questions: Array<{ id: string; code: string }>;
       options: Array<{ id: string; question_id: string; value: number }>;
     }>(await call(`/public/surveys/${token}/form?consent_id=${encodeURIComponent(consent.consent_id)}`));
@@ -144,7 +149,6 @@ try {
         key: `ac16-demo-${index + 1}-abcdef`,
         body: {
           consent_id: consent.consent_id,
-          version_id: form.version.id,
           answers: [
             { question_code: 'AD01', option_id: optionId('AD01', pattern.AD01) },
             { question_code: 'TS01', option_id: optionId('TS01', pattern.TS01) },

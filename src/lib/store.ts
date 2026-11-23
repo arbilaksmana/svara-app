@@ -19,7 +19,7 @@ import {
   organizations,
 } from './fixtures/records';
 import * as api from './api';
-import type { AdminStats, SurveyScope } from './api';
+import type { AdminStats, DataRequest, SurveyScope } from './api';
 import type {
   Account,
   AccessGrant,
@@ -31,6 +31,11 @@ import type {
   IntegrationEvent,
   Invitation,
   Notice,
+  OrgAuditRow,
+  OrgInvitation,
+  OrgMember,
+  OrgProfile,
+  OrganizationSummary,
   PublicLink,
   Question,
   QuestionOption,
@@ -69,6 +74,26 @@ export interface DraftState {
   savedAt: string;
 }
 
+export interface OrgWorkspace {
+  profile: OrgProfile;
+  members: OrgMember[];
+  invitations: OrgInvitation[];
+  audit: OrgAuditRow[];
+}
+
+/**
+ * Data layar super admin, disalin dari bootstrap server. `null` sampai bootstrap berhasil: array modul
+ * masih berisi fixture klien sebelum itu, dan ID fixture bisa sama dengan ID seed nyata.
+ */
+export interface AdminData {
+  accounts: Account[];
+  organizations: OrganizationSummary[];
+  accessGrants: AccessGrant[];
+  auditLogs: AuditLog[];
+  integrationEvents: IntegrationEvent[];
+  surveys: Survey[];
+}
+
 export interface Snapshot {
   revision: number;
   ready: boolean;
@@ -79,13 +104,29 @@ export interface Snapshot {
   drafts: Record<string, DraftState>;
   integrationNote: string;
   stats: AdminStats | null;
+  statsError: string | null;
   notices: Notice[];
+  org: OrgWorkspace | null;
+  orgError: string | null;
+  dataRequests: DataRequest[] | null;
+  dataRequestsError: string | null;
+  admin: AdminData | null;
 }
 
 let session: Session | null = null;
 let ready = false;
 let error: string | null = null;
 let stats: Snapshot['stats'] = null;
+let statsError: string | null = null;
+/** Nomor permintaan ringkasan terakhir; respons lama tidak boleh menimpa UI. */
+let statsRequest = 0;
+let org: OrgWorkspace | null = null;
+let orgError: string | null = null;
+let orgRequest = 0;
+let dataRequestList: DataRequest[] | null = null;
+let dataRequestsError: string | null = null;
+let dataRequestsRequest = 0;
+let adminData: AdminData | null = null;
 let settings: Record<string, SettingsState> = {};
 let grants: Record<string, GrantState> = {};
 let drafts: Record<string, DraftState> = {};
@@ -115,7 +156,13 @@ function buildSnapshot(): Snapshot {
     drafts,
     integrationNote,
     stats,
+    statsError,
     notices: noticeList,
+    org,
+    orgError,
+    dataRequests: dataRequestList,
+    dataRequestsError,
+    admin: adminData,
   };
 }
 
@@ -204,6 +251,14 @@ function hydrate(data: api.BootstrapData): void {
       status: event.status as EventStatus,
     })),
   );
+  adminData = {
+    accounts: [...accounts],
+    organizations: [...organizations],
+    accessGrants: [...accessGrants],
+    auditLogs: [...auditLogs],
+    integrationEvents: [...integrationEvents],
+    surveys: [...surveys],
+  };
 
   settings = Object.fromEntries(
     Object.entries(data.settings).map(([surveyId, value]) => [
@@ -233,6 +288,16 @@ export async function loadBootstrap(): Promise<void> {
   } catch (cause) {
     ready = true;
     error = cause instanceof Error ? cause.message : 'Data workspace tidak dapat dimuat.';
+    // Sesi tetap valid walau bootstrap gagal: `/auth/me` membaca cookie tanpa data workspace,
+    // sehingga shell masih dapat menampilkan navigasi dan tombol Keluar.
+    if (!session) {
+      try {
+        const { account } = await api.me();
+        if (account) session = mapSession(account);
+      } catch {
+        // Tanpa sesi yang terbaca, shell menampilkan jalur masuk biasa.
+      }
+    }
   }
   emit();
 }
@@ -276,6 +341,9 @@ export async function signOut(): Promise<void> {
     grants = {};
     drafts = {};
     stats = null;
+    statsError = null;
+    statsRequest += 1;
+    adminData = null;
     emit();
   }
 }
@@ -347,13 +415,14 @@ export async function saveSettings(
 }
 
 export async function saveGrants(next: Record<string, GrantState>): Promise<void> {
+  if (!adminData) throw new Error('Data akun belum dimuat dari server. Muat ulang halaman, lalu coba lagi.');
   const byAccount = new Map<string, Array<{
     survey_id: string | null;
     can_read_individual: boolean;
     can_export: boolean;
     can_read_free_text: boolean;
   }>>();
-  for (const grant of accessGrants) {
+  for (const grant of adminData.accessGrants) {
     const state = next[grant.id] ?? {
       read: grant.can_read_individual,
       export: grant.can_export,
@@ -380,8 +449,79 @@ export async function replayEvent(eventId: string): Promise<void> {
   await refreshBootstrap();
 }
 
-export async function setAdminStats(next: Snapshot['stats']): Promise<void> {
-  stats = next;
+export async function loadAdminStats(): Promise<void> {
+  const request = ++statsRequest;
+  stats = null;
+  statsError = null;
+  emit();
+  try {
+    const next = await api.adminStats();
+    if (request !== statsRequest) return;
+    stats = next;
+  } catch (cause) {
+    if (request !== statsRequest) return;
+    statsError = cause instanceof Error ? cause.message : 'Ringkasan operasional tidak dapat dimuat.';
+  }
+  emit();
+}
+
+/** Dipanggil saat layar dilepas; respons yang tiba setelahnya tidak boleh mengubah state. */
+export function cancelAdminStatsLoad(): void {
+  statsRequest += 1;
+}
+
+/**
+ * Profil, anggota, undangan, dan audit organisasi dimuat sekaligus. Data lama tetap tampil selama
+ * pemuatan ulang; galat disimpan terpisah agar layar menawarkan "Coba lagi", bukan daftar kosong.
+ */
+export async function loadOrgWorkspace(): Promise<void> {
+  const request = ++orgRequest;
+  orgError = null;
+  emit();
+  try {
+    const [profile, members, invitationList, audit] = await Promise.all([
+      api.getOrgProfile(),
+      api.getOrgMembers(),
+      api.listOrgInvitations(),
+      api.getOrgAudit(),
+    ]);
+    if (request !== orgRequest) return;
+    org = { profile: profile.profile, members, invitations: invitationList.invitations, audit };
+  } catch (cause) {
+    if (request !== orgRequest) return;
+    orgError = cause instanceof Error ? cause.message : 'Data organisasi tidak dapat dimuat.';
+  }
+  emit();
+}
+
+/** Dipanggil saat layar organisasi dilepas: respons yang tertunda diabaikan dan data tidak dibawa ke sesi berikutnya. */
+export function cancelOrgWorkspaceLoad(): void {
+  orgRequest += 1;
+  org = null;
+  orgError = null;
+  emit();
+}
+
+export async function loadDataRequests(): Promise<void> {
+  const request = ++dataRequestsRequest;
+  dataRequestsError = null;
+  emit();
+  try {
+    const next = await api.getDataRequests();
+    if (request !== dataRequestsRequest) return;
+    dataRequestList = next;
+  } catch (cause) {
+    if (request !== dataRequestsRequest) return;
+    dataRequestsError = cause instanceof Error ? cause.message : 'Daftar permintaan data tidak dapat dimuat.';
+  }
+  emit();
+}
+
+/** Sama dengan cancelOrgWorkspaceLoad untuk antrean permintaan data super admin. */
+export function cancelDataRequestsLoad(): void {
+  dataRequestsRequest += 1;
+  dataRequestList = null;
+  dataRequestsError = null;
   emit();
 }
 
@@ -415,20 +555,44 @@ export function isCreator(): boolean {
   return session?.role === 'creator' && session.serverRole === 'creator';
 }
 
+/**
+ * Cermin `canManageSurvey` di server/http.ts: pemilik mengelola surveinya sendiri,
+ * org_admin mengelola survei organisasinya. Survei tanpa organisasi (NULL) tidak pernah
+ * jatuh ke org_admin.
+ */
+export function canManageAs(
+  session: Session | null,
+  survey: Pick<Survey, 'owner_id' | 'organization_id'> | null | undefined,
+): boolean {
+  if (!session || !survey) return false;
+  if (survey.owner_id === session.id) return true;
+  return (
+    session.serverRole === 'org_admin' &&
+    session.organizationId !== null &&
+    survey.organization_id != null &&
+    survey.organization_id === session.organizationId
+  );
+}
+
 export function ensureAccount(account: Account | undefined): Account | undefined {
   return account;
 }
 
+/** Data admin terbaru dari server di luar render (mis. setelah `await refreshBootstrap()`); `null` sebelum bootstrap berhasil. */
+export function currentAdminData(): AdminData | null {
+  return adminData;
+}
+
 export function allAccounts(): Account[] {
-  return accounts;
+  return adminData?.accounts ?? [];
 }
 
 export function allAuditLogs(): AuditLog[] {
-  return auditLogs;
+  return adminData?.auditLogs ?? [];
 }
 
 export function allIntegrationEvents(): IntegrationEvent[] {
-  return integrationEvents;
+  return adminData?.integrationEvents ?? [];
 }
 
 /** Profil kebijakan survei dari server. Tidak ada fallback ke profil lain. */

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef } from 'react';
-import type { ButtonHTMLAttributes, InputHTMLAttributes, MouseEvent, ReactNode, TextareaHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, MouseEvent, ReactNode, Ref, TextareaHTMLAttributes } from 'react';
 import Link from 'next/link';
 import { StateLink } from '../lib/state';
 import { allowNavigation, useNavigationGuard } from '../lib/navigation-guard';
@@ -234,10 +234,12 @@ interface FieldProps {
   hint?: string;
   error?: string;
   required?: boolean;
-  children: (aria: { 'aria-describedby': string | undefined; 'aria-invalid': boolean; id: string }) => ReactNode;
+  /** Galat diumumkan sebagai alert. Matikan bila formulir sudah memakai ErrorSummary agar tidak ada banyak alert serentak. */
+  announceError?: boolean;
+  children: (aria: { 'aria-describedby': string | undefined; 'aria-invalid': boolean; 'aria-required': true | undefined; id: string }) => ReactNode;
 }
 
-export function Field({ id, label, hint, error, required, children }: FieldProps) {
+export function Field({ id, label, hint, error, required, announceError = true, children }: FieldProps) {
   const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null]
     .filter(Boolean)
     .join(' ') || undefined;
@@ -248,9 +250,42 @@ export function Field({ id, label, hint, error, required, children }: FieldProps
         {required && <span className="text-danger"> *</span>}
         {required && <span className="sr-only"> (wajib)</span>}
       </label>
-      {children({ id, 'aria-describedby': describedBy, 'aria-invalid': Boolean(error) })}
+      {children({ id, 'aria-describedby': describedBy, 'aria-invalid': Boolean(error), 'aria-required': required || undefined })}
       {hint && <p id={`${id}-hint`} className="text-caption text-muted">{hint}</p>}
-      {error && <p id={`${id}-error`} role="alert" className="text-caption font-bold text-danger">{error}</p>}
+      {error && <p id={`${id}-error`} role={announceError ? 'alert' : undefined} className="text-caption font-bold text-danger">{error}</p>}
+    </div>
+  );
+}
+
+/** Satu ringkasan galat per formulir: satu alert yang menerima fokus, tiap butir menautkan ke kontrolnya. */
+export function ErrorSummary({
+  title,
+  errors,
+  ref,
+}: {
+  title: string;
+  errors: Array<{ id: string; message: string }>;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <div ref={ref} tabIndex={-1} role="alert" className="rounded-md border border-danger-fill bg-danger-soft p-4">
+      <p className="text-body font-bold text-danger">{title}</p>
+      <ul className="mt-2 flex list-inside list-disc flex-col gap-1 text-body-sm text-ink">
+        {errors.map((error) => (
+          <li key={error.id}>
+            <a
+              href={`#${error.id}`}
+              onClick={(event) => {
+                event.preventDefault();
+                document.getElementById(error.id)?.focus();
+              }}
+              className="text-ink underline decoration-1 underline-offset-4 hover:text-danger"
+            >
+              {error.message}
+            </a>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

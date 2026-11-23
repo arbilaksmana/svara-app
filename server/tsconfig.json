@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2024",
-    "lib": ["ES2024"],
+    "lib": ["ES2024", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -13,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["."]
+  "include": [".", "../src/components/GuardianEvidence.tsx"]
 }

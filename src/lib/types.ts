@@ -81,6 +81,7 @@ export interface Question {
   hint: string | null;
   group_code: string | null;
   dimension_code: string | null;
+  direction?: string | null;
   option_ids: string[];
 }
 
@@ -102,7 +103,8 @@ export interface Assignment {
   participant_ref: string;
 }
 
-export type InvitationStatus = 'active' | 'used' | 'revoked' | 'expired';
+/** 'closed' hanya status tampilan undangan survei: versinya sudah tidak terbit (baris DB tetap 'active'). */
+export type InvitationStatus = 'active' | 'used' | 'revoked' | 'expired' | 'closed';
 
 export interface Invitation {
   id: string;
@@ -162,7 +164,8 @@ export interface Response {
 }
 
 export type ConsentStatus = 'granted' | 'pending' | 'withdrawn';
-export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'verified' | 'revoked';
+/** `self_attested`: referensi diisi responden dan belum diverifikasi pengelola. */
+export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'self_attested' | 'verified' | 'revoked';
 
 export interface ConsentRecord {
   id: string;
@@ -178,7 +181,7 @@ export interface ConsentRecord {
   guardian_evidence_ref: string | null;
 }
 
-export type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
+export type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal' | 'dimulai';
 
 export interface AuditLog {
   id: string;

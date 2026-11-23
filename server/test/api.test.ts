@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
+import { anonymizeExpiredDataRequests, retentionDays } from '../data-request-retention.ts';
+import { provisionOrganizationNotice } from '../notice-provisioning.ts';
+import { hashPassword } from '../security.ts';
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
 const PORT = 3191;
@@ -28,6 +32,7 @@ async function call(
     idempotencyKey?: string;
     headers?: Record<string, string>;
     auth?: string;
+    redirect?: RequestRedirect;
   } = {},
 ): Promise<Result> {
   const headers = new Headers({ 'X-Svara-Client': 'web', Accept: 'application/json' });
@@ -40,6 +45,7 @@ async function call(
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    redirect: options.redirect,
   });
   const bytes = new Uint8Array(await response.arrayBuffer());
   const text = new TextDecoder().decode(bytes);
@@ -77,6 +83,29 @@ function session(email: string): Promise<string> {
   return cached;
 }
 
+function consentCookie(result: Result): string {
+  const cookie = result.headers.get('set-cookie') ?? '';
+  assert.match(cookie, /^svara_respondent=[A-Za-z0-9_-]{43};/u, 'penerbitan consent harus mengikat sesi responden');
+  assert.match(cookie, /; HttpOnly/u);
+  return cookie.split(';')[0]!;
+}
+
+/** Baca kolom status dan referensi bukti wali langsung dari basis data uji. */
+async function storedGuardianEvidence(consentId: string): Promise<{ status: string; ref: string | null } | null> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query<{ guardian_evidence_status: string; guardian_evidence_ref: string | null }>(
+      'SELECT guardian_evidence_status, guardian_evidence_ref FROM consent_records WHERE id = $1',
+      [consentId],
+    );
+    const row = result.rows[0];
+    return row ? { status: row.guardian_evidence_status, ref: row.guardian_evidence_ref } : null;
+  } finally {
+    await client.end();
+  }
+}
+
 async function waitForServer(child: ChildProcess): Promise<void> {
   let ready!: () => void;
   const signal = new Promise<void>((resolveSignal) => {
@@ -102,6 +131,7 @@ before(async () => {
       ...process.env,
       PORT: String(PORT),
       DATABASE_URL: databaseUrl,
+      INTEGRATION_ORGANIZATION_ID: 'org_smk',
       INTEGRATION_TOKEN,
       COOKIE_SECURE: '0',
       ENABLE_HSTS: '0',
@@ -133,7 +163,6 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   const creatorA = await session('creator.a@svara.local');
   const bootstrapA = data<{
     surveys: Array<{ id: string }>;
-    summaries: Record<string, unknown>;
     accounts: Array<unknown>;
   }>(await call('/bootstrap', { cookie: creatorA }));
   const idsA = bootstrapA.surveys.map((survey) => survey.id).sort();
@@ -146,7 +175,6 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   const admin = await session('admin@svara.local');
   const bootstrapAdmin = data<{
     surveys: Array<unknown>;
-    summaries: Record<string, unknown>;
     accounts: Array<unknown>;
     auditLogs: Array<unknown>;
   }>(await call('/bootstrap', { cookie: admin }));
@@ -157,6 +185,79 @@ test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
   assert.equal(adminSummary.status, 403, 'administrator tanpa grant tidak membaca jawaban');
   const adminCsv = await call('/surveys/s_demo1/export?version=1', { cookie: admin });
   assert.equal(adminCsv.status, 403);
+});
+
+test('UIX-01/BR-01: creator melihat survei ber-grant tanpa memperoleh hak kelola', async () => {
+  const officer = await session('officer@svara.local');
+  const creator = await session('creator.a@svara.local');
+  const other = await session('creator.b@svara.local');
+  const orgAdmin = await session('orgadmin@svara.local');
+  const admin = await session('admin@svara.local');
+  interface Bootstrap {
+    surveys: Array<{ id: string }>;
+    versions: Array<{ survey_id: string }>;
+    invitations: Array<{ survey_id: string }>;
+    publicLinks: Array<{ survey_id: string }>;
+    assignments: Array<{ survey_id: string }>;
+    grants: Array<{
+      account_id: string;
+      survey_id: string;
+      can_read_individual: boolean;
+      can_export: boolean;
+      can_read_free_text: boolean;
+    }>;
+  }
+  const bootstrap = async (cookie: string) => data<Bootstrap>(await call('/bootstrap', { cookie }));
+  const list = async (cookie: string) => data<Array<{ id: string }>>(await call('/surveys', { cookie })).map((s) => s.id);
+  const granted = await bootstrap(officer);
+  assert.deepEqual(granted.surveys.map((s) => s.id), ['s_demo1'], 'bootstrap harus menampilkan survei yang diberikan');
+  assert.deepEqual(await list(officer), ['s_demo1'], 'daftar API harus sama dengan bootstrap');
+  assert.ok(granted.versions.some((v) => v.survey_id === 's_demo1'));
+  assert.deepEqual(granted.invitations, [], 'grant baca tidak membuka undangan');
+  assert.deepEqual(granted.publicLinks, [], 'grant baca tidak membuka token tautan umum');
+  assert.deepEqual(granted.assignments, [], 'grant baca tidak membuka identitas penugasan');
+  assert.equal((await call('/surveys/s_demo1', { cookie: officer })).status, 200);
+  assert.equal((await call('/surveys/s_demo1/summary', { cookie: officer })).status, 200);
+  assert.equal((await call('/surveys/s_demo2', { cookie: officer })).status, 403);
+  assert.deepEqual(await list(other), ['s_demo3'], 'grant akun lain tidak bocor');
+  for (const [method, suffix] of [
+    ['PUT', ''], ['POST', '/publish'], ['POST', '/duplicate'],
+    ['POST', '/invitations'], ['PUT', '/settings'],
+  ]) {
+    assert.equal((await call(`/surveys/s_demo1${suffix}`, { method, cookie: officer, body: {} })).status, 403, `${method} ${suffix} tetap khusus pengelola`);
+  }
+  const owned = await bootstrap(creator);
+  for (const key of ['invitations', 'publicLinks', 'assignments'] as const) {
+    assert.ok(owned[key].some((row) => row.survey_id === 's_demo1'), `${key} tetap tersedia bagi pemilik`);
+  }
+
+  const original = (await bootstrap(admin)).grants;
+  const setGrants = async (accountId: string, surveyIds: string[]) => {
+    const result = await call(`/admin/grants/${accountId}`, {
+      method: 'PUT', cookie: admin, body: { grants: surveyIds.map((survey_id) => ({ survey_id })) },
+    });
+    assert.equal(result.status, 200, result.text);
+  };
+  try {
+    await setGrants('u_creator_a', ['s_demo1', 's_demo3']);
+    const expected = ['s_demo3', 's_demo1', 's_demo2', 's_demo4'];
+    assert.deepEqual(await list(creator), expected, 'gabungan milik + grant terurut tanpa duplikasi');
+    assert.deepEqual((await bootstrap(creator)).surveys.map((s) => s.id), expected);
+    await setGrants('u_orgadmin', ['s_demo3']);
+    assert.deepEqual(await list(orgAdmin), ['s_demo1', 's_demo2', 's_demo4'], 'grant tidak melebarkan lingkup org_admin');
+    assert.deepEqual(await list(admin), expected, 'super_admin tetap melihat seluruh survei');
+    await setGrants('u_petugas', []);
+    assert.deepEqual(await list(officer), [], 'pencabutan grant langsung menghapus visibilitas');
+    assert.deepEqual((await bootstrap(officer)).surveys, []);
+    assert.equal((await call('/surveys/s_demo1', { cookie: officer })).status, 403);
+  } finally {
+    for (const id of ['u_creator_a', 'u_orgadmin', 'u_petugas']) {
+      const restored = await call(`/admin/grants/${id}`, {
+        method: 'PUT', cookie: admin, body: { grants: original.filter((grant) => grant.account_id === id) },
+      });
+      assert.equal(restored.status, 200, restored.text);
+    }
+  }
 });
 
 test('Mutasi menerima origin web lokal dan menolak origin asing', async () => {
@@ -288,7 +389,7 @@ test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi ta
   assert.equal((copySummary.json as { data: { total: number } }).data.total, 0);
 });
 
-test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melayani versi lama', async () => {
+test('AC02/AC04: draf baru tidak menggantikan versi yang masih terbit pada tautan umum', async () => {
   const cookie = await session('creator.a@svara.local');
   const detail = data<{
     survey: { id: string; current_version_id: string };
@@ -342,7 +443,8 @@ test('AC02/AC04: mengubah versi terbit membuat draf dan tautan lama tetap melaya
 
   const legacy = await call('/public/surveys/link-umum-demo');
   assert.equal(legacy.status, 200);
-  assert.equal((legacy.json as { data: { version: { id: string } } }).data.version.id, published.id);
+  assert.equal(data<{ version: { number: number } }>(legacy).version.number, published.number);
+  assert.ok(!legacy.text.includes(draft.id), 'ID draf tidak dikirim ke responden');
 });
 
 test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons, retry bukti sama', async () => {
@@ -356,7 +458,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   );
   const token = fresh.token;
   const base = await call(`/public/surveys/${token}`);
-  const baseData = data<{ questions: unknown[]; guardianRequired: boolean; canSubmit: boolean }>(base);
+  const baseData = data<{ questions: unknown[]; guardianRequired: boolean; canSubmit: boolean; consent_version: string }>(base);
   assert.equal(baseData.questions.length, 0, 'metadata publik tidak membocorkan item sebelum consent');
   assert.equal(baseData.guardianRequired, true);
 
@@ -370,20 +472,25 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(missingGuardian.status, 422);
 
-  const consent = data<{ consent_id: string }>(
-    await call(`/public/surveys/${token}/consent`, {
-      method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
-    }),
-  );
+  const issuedConsent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { version_id: baseData.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-uji' },
+  });
+  const consent = data<{ consent_id: string }>(issuedConsent);
+  const cookie = consentCookie(issuedConsent);
+  const otherCookie = consentCookie(await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { version_id: baseData.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sesi-lain' },
+  }));
   const form = data<{
     questions: Array<{ code: string; type: string; required: boolean; option_ids: string[] }>;
     options: Array<{ id: string }>;
-  }>(await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`));
+  }>(await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie }));
   assert.equal(form.questions.length, 3);
 
   const missingAnswers = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-validasi-001',
     body: { consent_id: consent.consent_id, version_id: 'v_demo1_1', answers: [] },
   });
@@ -407,7 +514,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
   });
   assert.equal(noConsent.status, 403);
 
-  const ambientCreator = creator;
+  const ambientCreator = `${creator}; ${cookie}`;
   const created = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
     idempotencyKey: 'kunci-undangan-0001',
@@ -429,8 +536,18 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
     'semua audit Kirim respons lewat route publik harus memakai aktor publik',
   );
 
+  const reload = await call(`/public/surveys/${token}/review?consent_id=${consent.consent_id}`, { cookie });
+  assert.equal(reload.status, 200, reload.text);
+  const review = data<{ retryOnly: boolean; canSubmit: boolean; questions: unknown[] }>(reload);
+  assert.equal(review.retryOnly, true);
+  assert.equal(review.canSubmit, false);
+  assert.deepEqual(review.questions, form.questions);
+  assert.equal((await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie })).status, 409);
+  assert.equal((await call(`/public/surveys/${token}/review?consent_id=${consent.consent_id}`, { cookie: otherCookie })).status, 409);
+
   const replay = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0001',
     body,
   });
@@ -439,6 +556,7 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const conflict = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0001',
     body: { ...body, answers: [] },
   });
@@ -446,19 +564,23 @@ test('AC05/AC06/AC07: consent server-side, validasi, satu undangan satu respons,
 
   const second = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie,
     idempotencyKey: 'kunci-undangan-0002',
     body,
   });
   assert.equal(second.status, 409, 'undangan terpakai tidak menerima respons kedua');
 
-  const wrongReceipt = await call(`/public/surveys/${token}/receipt/${receipt.response_id}`, {
-    headers: { 'Idempotency-Key': 'kunci-lain-000000' },
-  });
+  const receiptPath = `/public/surveys/${token}/receipt/${receipt.response_id}`;
+  const receiptHeaders = { 'Idempotency-Key': 'kunci-undangan-0001' };
+  const wrongReceipt = await call(receiptPath, { cookie, headers: { 'Idempotency-Key': 'kunci-lain-000000' } });
   assert.equal(wrongReceipt.status, 404);
-  const rightReceipt = await call(`/public/surveys/${token}/receipt/${receipt.response_id}`, {
-    headers: { 'Idempotency-Key': 'kunci-undangan-0001' },
-  });
+  const anonymousReceipt = await call(receiptPath, { headers: receiptHeaders });
+  assert.equal(anonymousReceipt.status, 404);
+  const otherSessionReceipt = await call(receiptPath, { cookie: otherCookie, headers: receiptHeaders });
+  assert.equal(otherSessionReceipt.status, 404);
+  const rightReceipt = await call(receiptPath, { cookie, headers: receiptHeaders });
   assert.equal(rightReceipt.status, 200);
+  assert.deepEqual(data(rightReceipt), receipt);
 });
 
 test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () => {
@@ -494,6 +616,36 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
   assert.equal(secondRevoke.status, 200);
   const stillRevoked = data<{ state: string }>(await call(`/public/surveys/${created.token}`));
   assert.equal(stillRevoked.state, 'revoked');
+});
+
+test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified', async () => {
+  const token = 'link-umum-demo';
+  const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
+  assert.equal(context.guardianRequired, true, 'tautan demo wajib bermode wali');
+
+  const evidenceRef = `ref-acak-${Math.random().toString(36).slice(2)}`;
+  const created = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: evidenceRef },
+  });
+  assert.equal(created.status, 201, created.text);
+  const consent = data<{ consent_id: string; guardian_evidence_status: string }>(created);
+  assert.equal(consent.guardian_evidence_status, 'self_attested');
+
+  const form = data<{ consent: { guardian_evidence_status: string } }>(
+    await call(`/public/surveys/${token}/form?consent_id=${consent.consent_id}`, { cookie: consentCookie(created) }),
+  );
+  assert.equal(form.consent.guardian_evidence_status, 'self_attested');
+
+  const stored = await storedGuardianEvidence(consent.consent_id);
+  assert.deepEqual(stored, { status: 'self_attested', ref: evidenceRef }, 'referensi mentah tetap tersimpan');
+
+  const missing = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { respondent_click: true, eligibility: true },
+  });
+  assert.equal(missing.status, 422);
+  assert.equal((missing.json as { code: string }).code, 'guardian_evidence_required');
 });
 
 test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () => {
@@ -584,21 +736,20 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
 
 test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai tersimpan', async () => {
   const token = 'link-umum-demo';
-  const context = data<{ version: { id: string }; guardianRequired: boolean }>(await call(`/public/surveys/${token}`));
+  const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true);
-  const consent = data<{ consent_id: string }>(
-    await call(`/public/surveys/${token}/consent`, {
-      method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
-    }),
-  );
+  const issuedConsent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-formula' },
+  });
+  const consent = data<{ consent_id: string }>(issuedConsent);
   const text = '=SUM(1,2) "kutip", baris\nbaru';
   const created = await call(`/public/surveys/${token}/responses`, {
     method: 'POST',
+    cookie: consentCookie(issuedConsent),
     idempotencyKey: 'kunci-formula-0001',
     body: {
       consent_id: consent.consent_id,
-      version_id: context.version.id,
       answers: [
         { question_code: 'AD01', option_id: 'q_ad01_opt3' },
         { question_code: 'TS01', option_id: 'q_ts01_opt2' },
@@ -615,6 +766,66 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
   assert.ok(csv.text.includes("'=SUM(1,2)"), 'nilai formula dinetralkan saat ekspor');
   assert.ok(csv.text.includes('""kutip""'), 'kutip ganda di-escape');
   assert.ok(csv.text.includes('baris\nbaru"'), 'baris baru dikutip');
+});
+
+test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh ke versi lain', async () => {
+  const context = data<{
+    profile: { id: string; source: string; consent_mode: string | null; respondent_age_category: string | null };
+    notice: { id: string; version: string };
+    version: { notice_version: string };
+    consent_version: string;
+    guardianRequired: boolean;
+  }>(await call('/public/surveys/link-umum-demo'));
+
+  // s_demo1 milik org_smk dengan consent_mode guardian dan notice_version versi 1.0.
+  assert.equal(context.profile.source, 'organization');
+  assert.equal(context.profile.id, 'org_smk');
+  assert.equal(context.profile.consent_mode, 'guardian');
+  assert.equal(context.guardianRequired, true);
+  assert.equal(context.notice.id, 'on_org_smk_1_0');
+  assert.equal(context.notice.version, context.version.notice_version);
+  assert.equal(context.notice.version, '1.0');
+
+  const consent = data<{ consent_id: string; notice_version: string; notice_source: string }>(
+    await call('/public/surveys/link-umum-demo/consent', {
+      method: 'POST',
+      body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sumber' },
+    }),
+  );
+  assert.equal(consent.notice_version, '1.0');
+  assert.equal(consent.notice_source, 'organization');
+
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    const history = await db.query<{ source: string; source_id: string; notice_id: string; notice_version: string }>(
+      'SELECT source, source_id, notice_id, notice_version FROM consent_notice_versions WHERE consent_id = $1',
+      [consent.consent_id],
+    );
+    assert.deepEqual(history.rows, [
+      { source: 'organization', source_id: 'org_smk', notice_id: 'on_org_smk_1_0', notice_version: '1.0' },
+    ]);
+
+    // Notice versi berbeda untuk organisasi yang sama tidak boleh menggantikan versi yang tercatat.
+    await db.query("DELETE FROM organization_notices WHERE id = 'on_org_smk_1_0'");
+  } finally {
+    await db.end();
+  }
+  const failClosed = await call('/public/surveys/link-umum-demo');
+  assert.equal(failClosed.status, 500);
+  assert.equal((failClosed.json as { code: string }).code, 'notice_version_unavailable');
+
+  const db2 = new Client({ connectionString: databaseUrl });
+  await db2.connect();
+  try {
+    await db2.query(
+      `INSERT INTO organization_notices (id, organization_id, version, effective_date, purpose, data_categories,
+        module15_usage, retention_text, recipients, contact, rights, child_data_text, cross_border_text, created_at)
+       VALUES ('on_org_smk_1_0', 'org_smk', '1.0', '2026-11-17', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', '2026-11-17')`,
+    );
+  } finally {
+    await db2.end();
+  }
 });
 
 test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutnya', async () => {
@@ -636,6 +847,8 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
   });
   assert.equal(blockedLogin.status, 401);
   await call('/admin/accounts/u_creator_b', { method: 'PATCH', cookie: admin, body: { status: 'active' } });
+  // L-04: penangguhan menghapus semua sesi akun, jadi cookie cache lama tidak berlaku lagi.
+  sessions.delete('creator.b@svara.local');
 
   const before = data<{ grants: Array<{ account_id: string }> }>(
     await call('/bootstrap', { cookie: admin }),
@@ -808,8 +1021,10 @@ test('Super admin menetapkan organisasi akun dan lingkupnya berlaku pada permint
 test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () => {
   const admin = await session('admin@svara.local');
   const email = 'admin.baru@svara.local';
+  // Notice organisasi baru berasal dari profil deployment legacy bernama sama+tipe (aturan 013).
   const payload = {
     name: 'SMA Harapan Baru (sintetis)',
+    notice_profile_name: 'SMK Nusantara (sintetis)',
     organization_type: 'school',
     respondent_age_category: 'minor',
     consent_mode: 'guardian',
@@ -847,8 +1062,25 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
   assert.equal(taken.status, 409);
   assert.equal((taken.json as { code?: string } | null)?.code, 'email_taken');
 
+  // Tanpa notice legacy yang cocok nama+tipe (aturan 013), organisasi ditolak alih-alih lahir tanpa notice.
+  const noNoticeSource = await call('/admin/organizations', {
+    method: 'POST',
+    cookie: admin,
+    body: { ...payload, admin: { ...payload.admin, email: 'tanpa.notice@svara.local' }, notice_profile_name: 'Tidak Ada' },
+  });
+  assert.equal(noNoticeSource.status, 422);
+  assert.equal((noNoticeSource.json as { code?: string } | null)?.code, 'notice_version_unavailable');
+  const rolledBack = new Client({ connectionString: databaseUrl });
+  await rolledBack.connect();
+  try {
+    const orphan = await rolledBack.query("SELECT id FROM organizations WHERE name = $1", [payload.name]);
+    assert.deepEqual(orphan.rows, [], 'penolakan tidak boleh meninggalkan organisasi tanpa notice');
+  } finally {
+    await rolledBack.end();
+  }
+
   const created = await call('/admin/organizations', { method: 'POST', cookie: admin, body: payload });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, created.text);
   const result = data<{
     organization: { id: string; name: string; organization_type: string; respondent_age_category: string; consent_mode: string };
     account: { id: string; role: string; status: string; organization_id: string | null; email: string };
@@ -884,6 +1116,49 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
     ]);
     const metadata = JSON.parse(String(audit.rows[0]?.metadata ?? '{}')) as { admin_account_id?: string };
     assert.equal(metadata.admin_account_id, result.account.id);
+
+    // Notice legacy dari profil pilihan ikut terprovision; provisioning ulang tidak menggandakan baris.
+    const notices = await stored.query<{ version: string }>(
+      'SELECT version FROM organization_notices WHERE organization_id = $1',
+      [result.organization.id],
+    );
+    assert.deepEqual(notices.rows, [{ version: '1.0' }]);
+    assert.equal(await provisionOrganizationNotice(result.organization.id, payload.notice_profile_name), 0);
+    const again = await stored.query<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM organization_notices WHERE organization_id = $1',
+      [result.organization.id],
+    );
+    assert.equal(again.rows[0]?.count, notices.rows.length);
+
+    // End-to-end: creator milik organisasi baru menerbitkan survei, lalu pengantar publiknya harus 200
+    // dengan notice yang baru diprovision (bukan notice_version_unavailable).
+    const creatorEmail = 'creator.baru@svara.local';
+    await stored.query(
+      `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at, organization_id)
+       VALUES ('u_orgbaru_creator', $1, 'Kreator Baru', 'creator', 'active', $2, $3, $4)`,
+      [creatorEmail, await hashPassword('SvaraDemo123!'), new Date().toISOString(), result.organization.id],
+    );
+    const creatorCookie = await login(creatorEmail);
+    const ownSurvey = data<{ survey: { id: string } }>(await call('/surveys', {
+      method: 'POST', cookie: creatorCookie, body: { title: 'Survei organisasi baru', owner_scope: 'organization' },
+    }));
+    const saved = await call(`/surveys/${ownSurvey.survey.id}`, {
+      method: 'PUT', cookie: creatorCookie, body: {
+        title: 'Survei organisasi baru',
+        purpose: 'Menguji notice organisasi yang baru dibuat.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: [{ code: 'Q1', type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`/surveys/${ownSurvey.survey.id}/publish`, { method: 'POST', cookie: creatorCookie });
+    assert.equal(published.status, 200, published.text);
+    const linkToken = data<{ publicLink: { token: string } }>(published).publicLink.token;
+    const publicIntro = await call(`/public/surveys/${linkToken}`);
+    assert.equal(publicIntro.status, 200, publicIntro.text);
+    assert.equal(data<{ notice: { version: string } }>(publicIntro).notice.version, '1.0');
+    await stored.query('UPDATE accounts SET status = $1 WHERE email = $2', ['suspended', creatorEmail]);
   } finally {
     try {
       // audit_logs menahan akun lewat account_id (login/admin), jadi bersihkan barisnya dulu.
@@ -891,8 +1166,26 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
         result.organization.id,
         result.account.id,
       ]);
-      await stored.query('DELETE FROM accounts WHERE id = $1', [result.account.id]);
-      await stored.query('DELETE FROM organizations WHERE id = $1', [result.organization.id]);
+      await stored.query(
+        'DELETE FROM audit_logs WHERE account_id IN (SELECT id FROM accounts WHERE organization_id = $1)',
+        [result.organization.id],
+      );
+      // Baris turunan survei organisasi uji (dibuat end-to-end di atas) harus pergi sebelum organisasi.
+      const orgSurveys = 'SELECT id FROM surveys WHERE organization_id = $1';
+      await stored.query(`DELETE FROM public_links WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query(
+        `DELETE FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE version_id IN (SELECT id FROM survey_versions WHERE survey_id IN (${orgSurveys})))`,
+        [result.organization.id],
+      );
+      await stored.query(
+        `DELETE FROM questions WHERE version_id IN (SELECT id FROM survey_versions WHERE survey_id IN (${orgSurveys}))`,
+        [result.organization.id],
+      );
+      await stored.query(`DELETE FROM survey_versions WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query(`DELETE FROM survey_settings WHERE survey_id IN (${orgSurveys})`, [result.organization.id]);
+      await stored.query('DELETE FROM surveys WHERE organization_id = $1', [result.organization.id]);
+      await stored.query('DELETE FROM organization_notices WHERE organization_id = $1', [result.organization.id]);
+      await stored.query('DELETE FROM accounts WHERE organization_id = $1', [result.organization.id]);
     } finally {
       await stored.end();
     }
@@ -909,6 +1202,66 @@ test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
   assert.ok(stats.perSurvey.length >= 1);
   assert.ok(stats.perSurvey.every((row) => typeof row.owner === 'string'));
 });
+
+test('SEC-12: token integrasi tanpa cakupan ditolak', async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tokenHash = createHash('sha256').update(INTEGRATION_TOKEN).digest('hex');
+    await client.query('DELETE FROM integration_token_scopes WHERE token_hash = $1', [tokenHash]);
+  } finally {
+    await client.end();
+  }
+
+  const unscoped = await call('/integration/survey-data?survey_id=s_demo1&version=1', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(unscoped.status, 403, unscoped.text);
+});
+
+async function assignIntegrationTokenToOrganizationA(): Promise<void> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const tokenHash = createHash('sha256').update(INTEGRATION_TOKEN).digest('hex');
+    await client.query(
+      `INSERT INTO integration_token_scopes (token_hash, organization_id, survey_id)
+       VALUES ($1, 'org_smk', NULL)
+       ON CONFLICT (token_hash) DO UPDATE SET organization_id = EXCLUDED.organization_id, survey_id = NULL`,
+      [tokenHash],
+    );
+    await client.query(
+      `INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at)
+       VALUES ('v_sec12_org_b_published', 's_demo3', 1, 'published', '1.0', '2026-11-21T00:00:00Z')
+       ON CONFLICT (id) DO NOTHING`,
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+test('SEC-12: token organisasi A menolak survei organisasi B', async () => {
+  await assignIntegrationTokenToOrganizationA();
+  const crossOrganization = await call('/integration/survey-data?survey_id=s_demo3&version=v_sec12_org_b_published', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(crossOrganization.status, 404, crossOrganization.text);
+});
+
+test('SEC-12: token menolak versi draf tetapi tetap membaca versi terbit dalam cakupannya', async () => {
+  await assignIntegrationTokenToOrganizationA();
+  const draft = await call('/integration/survey-data?survey_id=s_demo1&version=v_demo1_2', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(draft.status, 404, draft.text);
+
+  const published = await call('/integration/survey-data?survey_id=s_demo1&version=v_demo1_1', {
+    auth: `Bearer ${INTEGRATION_TOKEN}`,
+  });
+  assert.equal(published.status, 200, published.text);
+  assert.equal(published.json?.survey_version, 1);
+});
+
 
 test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas', async () => {
   const admin = await session('admin@svara.local');
@@ -960,14 +1313,97 @@ test('AC14: event integrasi, retry tanpa status palsu, dan API layanan terbatas'
   assert.ok(audit.some((log) => log.actor === 'layanan-15'));
 });
 
+test('Retry identik setelah publish berikutnya tetap mengembalikan bukti yang sama', async () => {
+  const creator = await session('creator.a@svara.local');
+  const title = 'Survei retry setelah publish';
+  const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+    method: 'POST', cookie: creator, body: { title, owner_scope: 'organization' },
+  }));
+  const surveyPath = `/surveys/${survey.id}`;
+  // PERHATIAN fixture: profil org_smk mewajibkan wali, jadi setiap consent di bawah wajib membawa
+  // guardian_evidence_ref. Tanpa itu baseline gagal 422 di setup, bukan di assertion retry.
+  const save = async (questionCodes: string[]) => {
+    const saved = await call(surveyPath, {
+      method: 'PUT', cookie: creator, body: {
+        title,
+        purpose: 'Menguji retry idempoten setelah versi baru terbit.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: questionCodes.map((code) => ({
+          code, type: 'short_text', required: true, section: 'Uji', label: `Tanggapan ${code}`,
+        })),
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`${surveyPath}/publish`, { method: 'POST', cookie: creator });
+    assert.equal(published.status, 200, published.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(published);
+  };
+
+  const v1 = await save(['Q1']);
+  const token = v1.publicLink.token;
+  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
+  const consent = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: intro.consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-retry',
+    },
+  });
+  assert.equal(consent.status, 201, consent.text);
+  const consentId = data<{ consent_id: string }>(consent).consent_id;
+  const respondent = consentCookie(consent);
+  const key = 'retry-identik-publish-0001';
+  const body = { consent_id: consentId, answers: [{ question_code: 'Q1', text: 'Jawaban tetap' }] };
+  const first = await call(`/public/surveys/${token}/responses`, {
+    method: 'POST', cookie: respondent, idempotencyKey: key, body,
+  });
+  assert.equal(first.status, 201, first.text);
+  const receipt = data(first);
+
+  const v2 = await save(['Q1', 'Q2']);
+  assert.notEqual(v2.version.id, v1.version.id);
+
+  const retry = await call(`/public/surveys/${token}/responses`, {
+    method: 'POST', cookie: respondent, idempotencyKey: key, body,
+  });
+  assert.equal(retry.status, 200, retry.text);
+  assert.deepEqual(data(retry), receipt, 'retry identik mengembalikan bukti yang sama');
+  assert.equal(data<{ version_number: number }>(retry).version_number, 1, 'bukti tetap milik versi attempt');
+
+  // Review historis untuk sesi pemilik attempt harus tetap terbuka (retryOnly), bukan ditolak.
+  const review = await call(`/public/surveys/${token}/review?consent_id=${consentId}`, { cookie: respondent });
+  assert.equal(review.status, 200, review.text);
+  assert.equal(data<{ retryOnly?: boolean }>(review).retryOnly, true);
+
+  // Sesi lain tidak boleh membuka review attempt orang lain.
+  const otherSession = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: data<{ consent_version: string }>(await call(`/public/surveys/${token}`)).consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-sesi-lain',
+    },
+  });
+  assert.equal(otherSession.status, 201, otherSession.text);
+  const foreignReview = await call(`/public/surveys/${token}/review?consent_id=${consentId}`, {
+    cookie: consentCookie(otherSession),
+  });
+  assert.equal(foreignReview.status, 409, foreignReview.text);
+  assert.equal(foreignReview.json?.code, 'consent_context_mismatch');
+});
+
 test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons', async () => {
   const token = 'link-umum-perpus';
-  const context = data<{ version: { id: string } }>(await call(`/public/surveys/${token}`));
+  const { consent_version: consentVersion } = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
         method: 'POST',
-        body: { respondent_click: true, eligibility: true },
+        body: { version_id: consentVersion, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-beban' },
       }),
     ),
   );
@@ -977,10 +1413,10 @@ test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan 
       const consentId = (consent.json as { data: { consent_id: string } }).data.consent_id;
       return call(`/public/surveys/${token}/responses`, {
         method: 'POST',
+        cookie: consentCookie(consent),
         idempotencyKey: `beban-kunci-${index}-abcdef`,
         body: {
           consent_id: consentId,
-          version_id: context.version.id,
           answers: [
             { question_code: 'P01', option_id: 'q_p01_opt3' },
             { question_code: 'P02', option_id: 'q_p02_opt2' },
@@ -1010,12 +1446,70 @@ test('Permintaan data publik dapat ditindaklanjuti admin tanpa memuat jawaban', 
   assert.equal(created.status, 201);
   const id = (created.json as { data: { id: string } }).data.id;
   const admin = await session('admin@svara.local');
-  const patched = await call(`/admin/data-requests/${id}`, {
+  const withoutEvidence = await call(`/admin/data-requests/${id}`, {
     method: 'PATCH',
     cookie: admin,
     body: { status: 'handled', outcome_note: 'Sudah diverifikasi.' },
   });
+  assert.equal(withoutEvidence.status, 422);
+  assert.equal((withoutEvidence.json as { code?: string }).code, 'response_evidence_required');
+  const patched = await call(`/admin/data-requests/${id}`, {
+    method: 'PATCH',
+    cookie: admin,
+    body: { status: 'handled', outcome_note: 'Sudah diverifikasi.', response_channel: 'email' },
+  });
   assert.equal(patched.status, 200);
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const stored = await client.query<{ responded_at: string | null; responded_by: string | null; response_channel: string | null }>(
+      'SELECT responded_at, responded_by, response_channel FROM data_requests WHERE id = $1',
+      [id],
+    );
+    assert.ok(stored.rows[0]?.responded_at, 'responded_at harus terekam');
+    assert.ok(stored.rows[0]?.responded_by, 'responded_by harus terekam');
+    assert.equal(stored.rows[0]?.response_channel, 'email');
+  } finally {
+    await client.end();
+  }
+});
+
+test('NEW-01: job retensi menganonimkan permintaan data >365 hari dan idempoten', async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    for (const [id, days] of [['dr_test_old', 400], ['dr_test_new', 100]] as const) {
+      const createdAt = new Date(Date.now() - days * 86_400_000).toISOString();
+      await client.query(
+        `INSERT INTO data_requests (id, type, contact, note, status, created_at, updated_at)
+         VALUES ($1, 'access', 'pemohon@contoh.test', 'Catatan identitas', 'pending', $2, $2)`,
+        [id, createdAt],
+      );
+    }
+    const first = await anonymizeExpiredDataRequests();
+    assert.ok(first.anonymized >= 1);
+    const rows = await client.query<{ id: string; contact: string; note: string | null; status: string; type: string; anonymized_at: string | null }>(
+      'SELECT id, contact, note, status, type, anonymized_at FROM data_requests WHERE id = ANY($1) ORDER BY id',
+      [['dr_test_old', 'dr_test_new']],
+    );
+    const [fresh, expired] = rows.rows;
+    assert.match(expired!.contact, /^anon:[0-9a-f]{16}$/);
+    assert.equal(expired!.note, null);
+    assert.ok(expired!.anonymized_at, 'anonymized_at harus terisi');
+    assert.equal(expired!.type, 'access');
+    assert.equal(expired!.status, 'pending');
+    assert.equal(fresh!.contact, 'pemohon@contoh.test');
+    assert.equal(fresh!.note, 'Catatan identitas');
+    assert.equal(fresh!.anonymized_at, null);
+    const second = await anonymizeExpiredDataRequests();
+    assert.equal(second.anonymized, 0);
+    assert.equal(retentionDays('365'), 365);
+    assert.equal(retentionDays(''), 365);
+    assert.throws(() => retentionDays('abc'), /DATA_REQUEST_RETENTION_DAYS tidak valid/);
+    assert.throws(() => retentionDays('0'), /DATA_REQUEST_RETENTION_DAYS tidak valid/);
+  } finally {
+    await client.end();
+  }
 });
 
 test('Registrasi publik membuat creator baru dan langsung memberi sesi', async () => {
@@ -1601,7 +2095,6 @@ test('Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback
 
 test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organisasi', async () => {
   const orgAdmin = await session('orgadmin@svara.local');
-  const creator = await session('creator.a@svara.local');
   const members = data<{ members: Array<{ id: string; role: string; email: string }> }>(
     await call('/org/members', { cookie: orgAdmin }),
   );
@@ -1650,6 +2143,8 @@ test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organi
     body: { status: 'active' },
   });
   assert.equal(reactivated.status, 200);
+  // L-04: penangguhan menghapus semua sesi akun, jadi cookie cache lama tidak berlaku lagi.
+  sessions.delete('creator.a@svara.local');
 
   // org_admin lain (org_perpus) membuat undangan; kode itu mengikat ke org_perpus, bukan org_smk.
   const orgBCode = await call('/org/invitations', { method: 'POST', cookie: await session('creator.b@svara.local') });
@@ -1730,7 +2225,7 @@ test('Lingkup /org/*: anggota, undangan, dan audit tidak pernah melintasi organi
   }
 
   // Creator dan org_perpus ditolak di ketiga endpoint.
-  for (const [label, cookie] of [['creator', creator], ['org lain', await session('creator.b@svara.local')]] as const) {
+  for (const [label, cookie] of [['creator', await session('creator.a@svara.local')], ['org lain', await session('creator.b@svara.local')]] as const) {
     for (const [method, path, body] of [
       ['GET', '/org/members', undefined],
       ['PATCH', '/org/members/u_creator_a', { status: 'active' }],
@@ -1859,4 +2354,225 @@ test('Kode undangan organisasi: masa berlaku, pencabutan, dan penolakan pemakaia
     await db.query('DELETE FROM organization_invitations WHERE id = $1', ['oi_uji_organisasi_lain']);
     await db.end();
   }
+});
+
+test('SEC-02: consent menolak notice yang berubah sejak intro dan mencatat notice yang dirender', async () => {
+  const creator = await session('creator.a@svara.local');
+  const title = 'Survei notice berganti';
+  const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+    method: 'POST', cookie: creator, body: { title },
+  }));
+  const surveyPath = `/surveys/${survey.id}`;
+  const save = async (questionCode: string) => {
+    const saved = await call(surveyPath, {
+      method: 'PUT', cookie: creator, body: {
+        title,
+        purpose: 'Menguji pemberitahuan yang berubah di antara intro dan persetujuan.',
+        object_label: 'Peserta',
+        instructions: '',
+        questions: [{ code: questionCode, type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`${surveyPath}/publish`, { method: 'POST', cookie: creator });
+    assert.equal(published.status, 200, published.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(published);
+  };
+
+  const v1 = await save('Q1');
+  const introToken = v1.publicLink.token;
+  const intro = data<{ consent_version: string; version: { notice_version: string } }>(await call(`/public/surveys/${introToken}`));
+
+  const countConsents = async () => {
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const result = await client.query<{ count: string }>('SELECT COUNT(*) AS count FROM consent_records WHERE survey_id = $1', [survey.id]);
+      return Number(result.rows[0]!.count);
+    } finally {
+      await client.end();
+    }
+  };
+  const before = await countConsents();
+
+  const v2 = await save('Q2');
+  assert.notEqual(v2.version.id, v1.version.id);
+  // Versi v2 memakai notice platform aktif yang sama dengan v1, jadi cacatnya hanya terlihat dari version_id:
+  // klien tidak boleh menyetujui versi lain yang tidak pernah ia render.
+  const stale = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { version_id: intro.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(stale.status, 409, stale.text);
+  assert.equal((stale.json as { code: string }).code, 'notice_changed');
+  assert.equal(await countConsents(), before, 'consent basi tidak boleh tercatat');
+
+  const withoutVersion = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(withoutVersion.status, 422, withoutVersion.text);
+  assert.equal((withoutVersion.json as { code: string }).code, 'version_id_required');
+  assert.equal(await countConsents(), before);
+
+  const reloaded = data<{ consent_version: string }>(await call(`/public/surveys/${introToken}`));
+  assert.notEqual(reloaded.consent_version, intro.consent_version, 'token lama meremap ke versi terbit terbaru');
+  const fresh = await call(`/public/surveys/${introToken}/consent`, {
+    method: 'POST', body: { version_id: reloaded.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-notice' },
+  });
+  assert.equal(fresh.status, 201, fresh.text);
+  const consentId = data<{ consent_id: string }>(fresh).consent_id;
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const recorded = await client.query<{ version_id: string; notice_id: string; notice_version: string }>(
+      'SELECT c.version_id, n.notice_id, n.notice_version FROM consent_records c JOIN consent_notice_versions n ON n.consent_id = c.id WHERE c.id = $1',
+      [consentId],
+    );
+    assert.equal(recorded.rows[0]?.version_id, v2.version.id);
+    const noticeVersion = recorded.rows[0]?.notice_version;
+    assert.match(noticeVersion ?? '', /^\d+\.\d+$/u);
+    assert.equal(recorded.rows[0]?.notice_id, `pn_${noticeVersion.replace(".", "_")}`);
+    const { notice } = data<{ notice: { id: string; version: string } }>(await call(`/public/surveys/${introToken}`));
+    assert.deepEqual(
+      { id: recorded.rows[0]?.notice_id, version: noticeVersion },
+      { id: notice.id, version: notice.version },
+    );
+  } finally {
+    await client.end();
+  }
+});
+
+test('Tautan umum v1 menyajikan v2 dan menyimpan respons pada v2', async (t) => {
+  const cookie = await session('creator.a@svara.local');
+  async function createSurvey(title: string) {
+    const { survey } = data<{ survey: { id: string } }>(await call('/surveys', {
+      method: 'POST', cookie, body: { title },
+    }));
+    return `/surveys/${survey.id}`;
+  }
+
+  async function publish(path: string, title: string, questionCode: string) {
+    const saved = await call(path, {
+      method: 'PUT', cookie, body: {
+        title,
+        purpose: 'Menguji perubahan instrumen.',
+        questions: [{ code: questionCode, type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+      },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    return data<{ version: { id: string }; publicLink: { token: string } }>(await call(`${path}/publish`, {
+      method: 'POST', cookie,
+    }));
+  }
+
+  const title = 'Survei riwayat tautan';
+  const path = await createSurvey(title);
+  const v1 = await publish(path, title, 'Q1');
+  const v1Intro = data<{ consent_version: string }>(await call(`/public/surveys/${v1.publicLink.token}`));
+  // Referensi wali wajib dikirim: tanpa itu fixture gagal 422 di setup (bukan di assertion remap) pada
+  // profil yang mewajibkan wali, sehingga bukti merah tidak pernah mencapai perilaku yang diuji.
+  const oldConsent = await call(`/public/surveys/${v1.publicLink.token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: v1Intro.consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'ref-wali-riwayat',
+    },
+  });
+  assert.equal(oldConsent.status, 201, oldConsent.text);
+  const otherTitle = 'Survei kedua';
+  const otherSurvey = await createSurvey(otherTitle);
+  await publish(otherSurvey, otherTitle, 'OTHER1');
+  await publish(otherSurvey, otherTitle, 'OTHER2');
+  const other = await publish(otherSurvey, otherTitle, 'OTHER3');
+  const otherPath = `/public/surveys/${other.publicLink.token}`;
+  const v2 = await publish(path, title, 'Q2');
+  const oldPath = `/public/surveys/${v1.publicLink.token}`;
+  const currentPath = `/public/surveys/${v2.publicLink.token}`;
+  const key = 'kiriman-tautan-v1-0001';
+  let receiptRequest: { path: string; cookie: string } | undefined;
+  type LinkContext = { state: string; canSubmit: boolean; consent_version: string; version: { number: number } };
+
+  await t.test('token v1 menyajikan v2 tanpa redirect HTTP dan dapat dipakai mengirim', async () => {
+    const response = await call(oldPath, { redirect: 'manual' });
+    assert.equal(response.status, 200, response.text);
+    const context = data<LinkContext>(response);
+    assert.equal(context.version.number, 2, 'token v1 harus menyajikan konteks v2');
+    assert.equal(context.state, 'active');
+    assert.equal(context.canSubmit, true);
+    assert.ok(!response.text.includes(v1.version.id) && !response.text.includes(v2.version.id));
+    const { consent_id: oldConsentId } = data<{ consent_id: string }>(oldConsent);
+    const stale = await call(`${oldPath}/form?consent_id=${oldConsentId}`, { cookie: consentCookie(oldConsent) });
+    assert.equal(stale.status, 409, stale.text);
+    assert.equal(stale.json?.code, 'consent_context_mismatch');
+
+    const issued = await call(`${oldPath}/consent`, {
+      method: 'POST', body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-versi' },
+    });
+    assert.equal(issued.status, 201, issued.text);
+    const { consent_id } = data<{ consent_id: string }>(issued);
+    const respondent = consentCookie(issued);
+    const formResponse = await call(`${oldPath}/form?consent_id=${consent_id}`, { cookie: respondent });
+    assert.ok(!formResponse.text.includes(v2.version.id));
+    const form = data<{ questions: Array<{ code: string }> }>(formResponse);
+    assert.deepEqual(form.questions.map(({ code }) => code), ['Q2']);
+
+    const submitted = await call(`${oldPath}/responses`, {
+      method: 'POST', cookie: respondent, idempotencyKey: key,
+      body: { consent_id, answers: [{ question_code: 'Q2', text: 'Jawaban versi dua' }] },
+    });
+    assert.equal(submitted.status, 201, submitted.text);
+    const { response_id } = data<{ response_id: string }>(submitted);
+    assert.ok(!submitted.text.includes(v2.version.id));
+    receiptRequest = { path: `${oldPath}/receipt/${response_id}`, cookie: respondent };
+    const db = new Client({ connectionString: databaseUrl });
+    await db.connect();
+    try {
+      const stored = await db.query<{ version_id: string }>('SELECT version_id FROM responses WHERE id = $1', [response_id]);
+      assert.deepEqual(stored.rows, [{ version_id: v2.version.id }]);
+    } finally {
+      await db.end();
+    }
+  });
+
+  await t.test('token versi aktif tetap melayani versi miliknya', async () => {
+    const current = data<LinkContext>(await call(currentPath, { redirect: 'manual' }));
+    assert.equal(current.state, 'active');
+    assert.equal(current.canSubmit, true);
+    assert.equal(current.version.number, 2);
+  });
+
+  await t.test('token v1 langsung menyajikan v3 setelah publikasi ketiga', async () => {
+    const v3 = await publish(path, title, 'Q3');
+    const latest = data<LinkContext>(await call(`/public/surveys/${v3.publicLink.token}`));
+    assert.equal(latest.version.number, 3);
+    assert.deepEqual(data(await call(oldPath)), latest);
+    assert.deepEqual(data(await call(currentPath)), latest);
+  });
+
+  await t.test('bukti v2 tetap bisa dipulihkan melalui token v1 setelah v3 terbit', async () => {
+    assert.ok(receiptRequest);
+    const receipt = await call(receiptRequest.path, { cookie: receiptRequest.cookie, idempotencyKey: key });
+    assert.equal(receipt.status, 200, receipt.text);
+    assert.equal(data<{ version_number: number }>(receipt).version_number, 2);
+    assert.ok(!receipt.text.includes(v2.version.id));
+  });
+
+  await t.test('setelah penutupan, token tetap closed meski survei lain masih terbit', async () => {
+    const otherContext = data<LinkContext & { survey: { title: string } }>(await call(otherPath));
+    assert.equal(otherContext.state, 'active');
+    assert.equal(otherContext.survey.title, otherTitle);
+    assert.equal(otherContext.version.number, 3);
+
+    const closed = await call(`${path}/close`, { method: 'POST', cookie });
+    assert.equal(closed.status, 200, closed.text);
+    for (const tokenPath of [oldPath, currentPath]) {
+      const context = data<{ state: string; canSubmit: boolean; survey: { title: string } }>(await call(tokenPath));
+      assert.equal(context.state, 'closed');
+      assert.equal(context.canSubmit, false);
+      assert.equal(context.survey.title, title);
+    }
+    assert.deepEqual(data(await call(otherPath)), otherContext);
+  });
 });

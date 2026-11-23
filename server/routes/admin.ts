@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
+import { noticeVersionForNewOrganization, provisionNoticesForNewOrganization } from '../notice-provisioning.ts';
 import type { AuthedRequest } from '../security.ts';
-import { hashPassword, passwordPolicyError, requireRole } from '../security.ts';
+import { hashPassword, passwordPolicyError, redactAuditRow, requireRole, revokeSessionsOnStatusChange } from '../security.ts';
 import {
   asBoolean,
   asString,
@@ -105,13 +106,16 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
     if (account.role === 'super_admin' && (role !== 'super_admin' || status !== 'active') && (await activeSuperAdmins()) <= 1) {
       fail(409, 'last_super_admin', 'Tidak dapat menonaktifkan super admin terakhir.');
     }
-    await run(
-      'UPDATE accounts SET role = ?, status = ?, organization_id = ? WHERE id = ?',
-      role,
-      status,
-      organizationId,
-      account.id,
-    );
+    await withTx(async () => {
+      await run(
+        'UPDATE accounts SET role = ?, status = ?, organization_id = ? WHERE id = ?',
+        role,
+        status,
+        organizationId,
+        account.id,
+      );
+      await revokeSessionsOnStatusChange(account.id, account.status, status);
+    });
     await audit(req, 'Ubah akun', account.id, 'berhasil', { role, status, organization_id: organizationId });
     res.json({ data: { ...account, role, status, organization_id: organizationId } });
   } catch (error) {
@@ -160,9 +164,9 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
     const termsUrl =
       body.terms_url === undefined ? '/ketentuan-layanan' : asString(body.terms_url, 'terms_url', 500);
     if (!termsUrl) fail(422, 'validation_error', 'terms_url wajib diisi.');
-    const noticeVersion =
-      body.notice_version === undefined ? '1.0' : asString(body.notice_version, 'notice_version', 20);
-    if (!noticeVersion) fail(422, 'validation_error', 'notice_version wajib diisi.');
+    const requestedNoticeVersion =
+      body.notice_version === undefined ? null : asString(body.notice_version, 'notice_version', 20);
+    if (requestedNoticeVersion === '') fail(422, 'validation_error', 'notice_version wajib diisi.');
 
     let retentionDays: number | null = null;
     if (body.retention_days !== undefined && body.retention_days !== null) {
@@ -199,10 +203,18 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
       fail(409, 'email_taken', 'Email sudah terdaftar. Tautkan akun itu ke organisasi lewat tabel akun, atau pakai email lain.');
     }
 
+    // Notice awal berasal dari profil legacy hanya bila notice_profile_name dikirim; tanpa itu (payload UI)
+    // organisasi mendapat salinan notice platform. Nama organisasi tidak dicocokkan ke profil legacy.
+    const noticeProfile =
+      body.notice_profile_name === undefined || body.notice_profile_name === null
+        ? null
+        : asString(body.notice_profile_name, 'notice_profile_name', 200) || null;
+    const noticeVersion = requestedNoticeVersion ?? (await noticeVersionForNewOrganization(noticeProfile));
+
     const organizationId = newId('org');
     const accountId = newId('u');
     const createdAt = nowIso();
-    await withTx(async () => {
+    const provisioned = await withTx(async () => {
       await run(
         `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days,
                                     data_request_contact, cross_border_transfer, notice_version, created_at,
@@ -228,15 +240,21 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
         accountId,
         adminEmail,
         adminName,
-        hashPassword(adminPassword),
+        await hashPassword(adminPassword),
         createdAt,
         organizationId,
       );
+      // Tanpa notice, survei publik organisasi baru gagal notice_version_unavailable; provisioning
+      // berjalan dalam transaksi yang sama agar organisasi tanpa notice tidak pernah terlihat.
+      return provisionNoticesForNewOrganization(organizationId, noticeVersion, noticeProfile);
     });
     await audit(req, 'Buat organisasi', organizationId, 'berhasil', {
       organization_id: organizationId,
       admin_account_id: accountId,
       organization_type: organizationType,
+      notice_version: noticeVersion,
+      notice_source: provisioned.source,
+      notice_count: provisioned.organization_notices,
     });
     res.status(201).json({
       data: {
@@ -437,8 +455,8 @@ adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
 adminRouter.get('/admin/audit', async (req: AuthedRequest, res: Response) => {
   try {
     const limit = parseLimit(req.query.limit, 100, 500);
-    const rows = await all<Record<string, unknown>>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT ?', limit);
-    res.json({ data: rows });
+    const rows = await all<{ object: string; metadata: string | null }>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT ?', limit);
+    res.json({ data: rows.map(redactAuditRow) });
   } catch (error) {
     sendError(res, error);
   }
@@ -511,16 +529,35 @@ adminRouter.patch('/admin/data-requests/:id', async (req: AuthedRequest, res: Re
       fail(422, 'validation_error', 'Status permintaan tidak dikenal.');
     }
     const note = typeof req.body?.outcome_note === 'string' ? req.body.outcome_note.trim() : null;
+    const responseChannel = asString(req.body?.response_channel ?? '', 'response_channel', 80).trim();
+    // Verifikasi pemohon = balasan pengelola ke kontak yang diberikan; tanpa bukti balasan
+    // status 'handled' tidak boleh diklaim.
+    if (status === 'handled' && !responseChannel) {
+      fail(422, 'response_evidence_required', 'Status handled wajib mencatat response_channel sebagai bukti balasan.');
+    }
+    const at = nowIso();
+    const actor = req.account?.id ?? null;
     await run(
-      'UPDATE data_requests SET status = ?, outcome_note = ?, handled_by = ?, updated_at = ? WHERE id = ?',
+      `UPDATE data_requests
+          SET status = ?, outcome_note = ?, handled_by = ?, updated_at = ?,
+              responded_at = CASE WHEN ? = '' THEN responded_at ELSE ? END,
+              responded_by = CASE WHEN ? = '' THEN responded_by ELSE ? END,
+              response_channel = CASE WHEN ? = '' THEN response_channel ELSE ? END
+        WHERE id = ?`,
       status,
       note,
-      req.account?.id ?? null,
-      nowIso(),
+      actor,
+      at,
+      responseChannel,
+      at,
+      responseChannel,
+      actor,
+      responseChannel,
+      responseChannel,
       row.id,
     );
-    await audit(req, 'Tangani permintaan data', row.id, 'berhasil', { status });
-    res.json({ data: { ok: true, status } });
+    await audit(req, 'Tangani permintaan data', row.id, 'berhasil', { status, response_channel: responseChannel });
+    res.json({ data: { ok: true, status, responded_at: responseChannel ? at : null, response_channel: responseChannel || null } });
   } catch (error) {
     sendError(res, error);
   }

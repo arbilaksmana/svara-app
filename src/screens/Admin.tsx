@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -11,8 +11,10 @@ import {
   Checkbox,
   Code,
   Divider,
+  ErrorState,
   Field,
   Label,
+  LoadingState,
   Muted,
   Panel,
   PlainLink,
@@ -25,109 +27,180 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { accounts, accessGrants, auditLogs, integrationEvents, organizations } from '../lib/fixtures/records';
-import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
-import { replayEvent, refreshBootstrap, saveGrants, setAdminStats, setIntegrationNote, useStore } from '../lib/store';
-import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, adminStats, getDataRequests, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
-import { ORGANIZATION_TYPE_LABEL } from '../lib/labels';
-import type { OrganizationType } from '../lib/types';
+import {
+  cancelAdminStatsLoad,
+  cancelDataRequestsLoad,
+  currentAdminData,
+  loadAdminStats,
+  loadBootstrap,
+  loadDataRequests,
+  replayEvent,
+  refreshBootstrap,
+  saveGrants,
+  setIntegrationNote,
+  useStore,
+  type AdminData,
+} from '../lib/store';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
+import type { AuditOutcome, OrganizationType } from '../lib/types';
 
 /* ---------------- Ringkasan ---------------- */
 
 export function AdminSummaryPage() {
   const { state } = useScreenState('admin-summary');
-  const { stats } = useStore();
+  const { stats, statsError, error } = useStore();
   useEffect(() => {
-    void adminStats().then(setAdminStats).catch(() => setAdminStats(null));
+    void loadAdminStats();
+    return cancelAdminStatsLoad;
   }, []);
+
+  const failure = stats ? null : statsError ?? error;
+  const retry = () => {
+    void (async () => {
+      if (error) await loadBootstrap();
+      await loadAdminStats();
+    })();
+  };
+
   return (
     <Shell kind="admin" title="Ringkasan operasional" subtitle="Pantau jumlah survei, respons, dan akun tanpa membuka jawaban individual.">
-      <StateView
-        routeId="admin-summary"
-        state={state}
-        emptyTitle="Belum ada survei"
-        emptyDetail="Metrik akan muncul setelah survei dibuat dan menerima jawaban."
-        permissionDetail="Akses ringkasan memerlukan peran super admin."
-      >
-        <div className="flex flex-col gap-5">
-          
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <Label>Jumlah survei</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.surveys ?? surveys.length}</p>
-              <Muted>Termasuk draf, terbit, dan arsip.</Muted>
+      {failure ? (
+        <ErrorState
+          title="Ringkasan operasional gagal dimuat"
+          detail={`${failure} Tidak ada angka yang ditampilkan sampai data berhasil dimuat.`}
+          action={<Button variant="secondary" onClick={retry}>Coba lagi</Button>}
+        />
+      ) : !stats ? (
+        <LoadingState label="Memuat ringkasan operasional…" />
+      ) : (
+        <StateView
+          routeId="admin-summary"
+          state={state}
+          emptyTitle="Belum ada survei"
+          emptyDetail="Metrik akan muncul setelah survei dibuat dan menerima jawaban."
+          permissionDetail="Akses ringkasan memerlukan peran super admin."
+        >
+          <div className="flex flex-col gap-5">
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <Label>Jumlah survei</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.surveys}</p>
+                <Muted>Termasuk draf, terbit, dan arsip.</Muted>
+              </Card>
+              <Card>
+                <Label>Total respons final</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.responses}</p>
+                <Muted>Agregat lintas versi.</Muted>
+              </Card>
+              <Card>
+                <Label>Akun pengelola</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.accounts}</p>
+                <Muted>Termasuk akun dinonaktifkan.</Muted>
+              </Card>
+              <Card>
+                <Label>Permintaan data menunggu</Label>
+                <p className="mt-2 text-h1 font-bold text-ink">{stats.pendingRequests}</p>
+                <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
+              </Card>
+            </div>
+
+            <Banner tone="info" title="Tanpa akses jawaban individual">
+              Administrator memantau operasional. Akses ke jawaban individual, ekspor, dan teks bebas diberikan terpisah.
+              <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
+            </Banner>
+
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Metrik per creator</SectionTitle>
+              <Table head={['Creator', 'Survei', 'Respons']}>
+                {stats.perCreator.map((creator) => (
+                  <tr key={creator.id}>
+                    <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
+                    <Td>{creator.surveys}</Td>
+                    <Td>{creator.responses}</Td>
+                  </tr>
+                ))}
+              </Table>
             </Card>
-            <Card>
-              <Label>Total respons final</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.responses ?? 0}</p>
-              <Muted>Agregat lintas versi.</Muted>
+
+            <Card className="flex flex-col gap-3">
+              <SectionTitle>Metrik per survei</SectionTitle>
+              <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
+                {stats.perSurvey.map((survey) => (
+                  <tr key={survey.id}>
+                    <Th>{survey.title}</Th>
+                    <Td>{survey.owner}</Td>
+                    <Td>{survey.versions}</Td>
+                    <Td>{survey.responses}</Td>
+                  </tr>
+                ))}
+              </Table>
             </Card>
-            <Card>
-              <Label>Akun pengelola</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.accounts ?? accounts.length}</p>
-              <Muted>Termasuk akun dinonaktifkan.</Muted>
-            </Card>
-            <Card>
-              <Label>Permintaan data menunggu</Label>
-              <p className="mt-2 text-h1 font-bold text-ink">{stats?.pendingRequests ?? 0}</p>
-              <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
-            </Card>
+
+            <div className="flex flex-wrap gap-3">
+              <ActionLink to={ROUTES.adminAccounts} variant="secondary">Akun dan izin</ActionLink>
+              <ActionLink to={ROUTES.adminAudit} variant="secondary">Log audit</ActionLink>
+              <ActionLink to={ROUTES.adminIntegration} variant="secondary">Status integrasi</ActionLink>
+            </div>
           </div>
+        </StateView>
+      )}
 
-          <Banner tone="info" title="Tanpa akses jawaban individual">
-            Administrator memantau operasional. Akses ke jawaban individual, ekspor, dan teks bebas diberikan terpisah.
-            <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
-          </Banner>
-
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Metrik per creator</SectionTitle>
-            <Table head={['Creator', 'Survei', 'Respons']}>
-              {(stats?.perCreator ?? []).map((creator) => (
-                <tr key={creator.id}>
-                  <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
-                  <Td>{creator.surveys}</Td>
-                  <Td>{creator.responses}</Td>
-                </tr>
-              ))}
-            </Table>
-            {!stats && <Muted>Metrik belum tersedia.</Muted>}
-          </Card>
-
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Metrik per survei</SectionTitle>
-            <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
-              {(stats?.perSurvey ?? []).map((survey) => (
-                <tr key={survey.id}>
-                  <Th>{survey.title}</Th>
-                  <Td>{survey.owner}</Td>
-                  <Td>{survey.versions}</Td>
-                  <Td>{survey.responses}</Td>
-                </tr>
-              ))}
-            </Table>
-          </Card>
-
-          <div className="flex flex-wrap gap-3">
-            <ActionLink to={ROUTES.adminAccounts} variant="secondary">Akun dan izin</ActionLink>
-            <ActionLink to={ROUTES.adminAudit} variant="secondary">Log audit</ActionLink>
-            <ActionLink to={ROUTES.adminIntegration} variant="secondary">Status integrasi</ActionLink>
-          </div>
-        </div>
-      </StateView>
-      
     </Shell>
   );
+}
+
+/* ---------------- Data admin dari bootstrap ---------------- */
+
+/**
+ * Akun, grant, organisasi, log audit, dan event integrasi hanya berasal dari bootstrap server. Sebelum
+ * bootstrap berhasil layar menampilkan keadaan memuat; bila gagal, galat dengan "Coba lagi". Fixture klien
+ * tidak pernah dirender, dan kontrol aksi baru ada setelah data server tersedia.
+ */
+function AdminDataGate({ subject, children }: { subject: string; children: (data: AdminData) => ReactNode }) {
+  const { admin, error } = useStore();
+  if (admin) return <>{children(admin)}</>;
+  if (error) {
+    return (
+      <ErrorState
+        title={`${subject} gagal dimuat`}
+        detail={`${error} Tidak ada data yang ditampilkan sampai data berhasil dimuat.`}
+        action={<Button variant="secondary" onClick={() => void loadBootstrap()}>Coba lagi</Button>}
+      />
+    );
+  }
+  return <LoadingState label={`Memuat ${subject.toLowerCase()}…`} rows={4} />;
+}
+
+/**
+ * Aktor audit: nama akun bila dikenal, dengan ID di bawahnya. Aktor tanpa akun yang dikenal
+ * (publik, sistem, akun terhapus, atau di luar organisasi) tampil sebagai ID apa adanya.
+ */
+export function AuditActor({ actor, names }: { actor: string; names: ReadonlyMap<string, string> }) {
+  const name = names.get(actor);
+  if (!name) return <Code>{actor}</Code>;
+  return <>{name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{actor}</Code></span></>;
 }
 
 /* ---------------- Akun dan izin ---------------- */
 
 export function AdminAccountsPage() {
+  return (
+    <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
+      <AdminDataGate subject="Akun dan izin">{(data) => <AdminAccountsContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+/** Dipasang setelah data server tersedia, sehingga state awal formulir tidak pernah diisi dari fixture. */
+function AdminAccountsContent({ data }: { data: AdminData }) {
+  const { accounts, accessGrants, organizations, surveys } = data;
   const { state } = useScreenState('admin-accounts');
   const notify = useToast();
-  const { grants: storedGrants, revision, session } = useStore();
-  void revision;
+  const { grants: storedGrants, session } = useStore();
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   const [grants, setGrants] = useState(() =>
     Object.fromEntries(accessGrants.map((g) => [g.id, {
@@ -161,7 +234,7 @@ export function AdminAccountsPage() {
       export: storedGrants[grant.id]?.export ?? grant.can_export,
       text: storedGrants[grant.id]?.text ?? grant.can_read_free_text,
     }])));
-  }, [revision, storedGrants]);
+  }, [accessGrants, storedGrants]);
 
   const changeRole = (accountId: string, displayName: string, chosen: string) => {
     const role = chosen === 'admin' ? 'super_admin' : chosen;
@@ -225,7 +298,7 @@ export function AdminAccountsPage() {
   };
 
   return (
-    <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
+    <>
       <StateView
         routeId="admin-accounts"
         state={state}
@@ -251,11 +324,11 @@ export function AdminAccountsPage() {
                       value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                      className="min-h-[44px] rounded-sm border border-control-border bg-n0 px-2 text-body-sm text-ink"
                     >
-                      <option value="creator">creator</option>
-                      <option value="org_admin">org_admin</option>
-                      <option value="admin">admin</option>
+                      <option value="creator">{ROLE_LABEL.creator}</option>
+                      <option value="org_admin">{ROLE_LABEL.org_admin}</option>
+                      <option value="admin">{ROLE_LABEL.super_admin}</option>
                     </select>
                   </Td>
                   <Td>
@@ -264,7 +337,7 @@ export function AdminAccountsPage() {
                       value={a.organization_id ?? ''}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
                       onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] max-w-[12rem] rounded-sm border border-n200 bg-n0 px-2 text-body-sm text-ink"
+                      className="min-h-[44px] max-w-[12rem] rounded-sm border border-control-border bg-n0 px-2 text-body-sm text-ink"
                     >
                       <option value="">Tanpa organisasi</option>
                       {organizations.map((organization) => (
@@ -272,7 +345,7 @@ export function AdminAccountsPage() {
                       ))}
                     </select>
                   </Td>
-                  <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge></Td>
+                  <Td><Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[a.status]}</Badge></Td>
                   <Td>{accessGrants.filter((g) => g.account_id === a.id).length} grant</Td>
                   <Td>
                     <Button
@@ -297,7 +370,7 @@ export function AdminAccountsPage() {
                       <p className="text-body font-bold text-ink">{a.display_name}</p>
                       <p className="font-mono text-annotation tracking-mono text-muted"><Code>{a.id}</Code></p>
                     </div>
-                    <Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{a.status === 'active' ? 'Aktif' : 'Dinonaktifkan'}</Badge>
+                    <Badge tone={a.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[a.status]}</Badge>
                   </div>
                   <label className="flex flex-col gap-1 text-caption font-bold text-muted">
                     Peran
@@ -306,11 +379,11 @@ export function AdminAccountsPage() {
                       value={a.role === 'super_admin' ? 'admin' : a.role}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked}
                       onChange={(event) => changeRole(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                      className="min-h-[44px] w-full rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
-                      <option value="creator">creator</option>
-                      <option value="org_admin">org_admin</option>
-                      <option value="admin">admin</option>
+                      <option value="creator">{ROLE_LABEL.creator}</option>
+                      <option value="org_admin">{ROLE_LABEL.org_admin}</option>
+                      <option value="admin">{ROLE_LABEL.super_admin}</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 text-caption font-bold text-muted">
@@ -320,7 +393,7 @@ export function AdminAccountsPage() {
                       value={a.organization_id ?? ''}
                       disabled={accountBusy === a.id || session?.id === a.id || mutationsBlocked || a.role === 'super_admin'}
                       onChange={(event) => changeOrganization(a.id, a.display_name, event.target.value)}
-                      className="min-h-[44px] w-full rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                      className="min-h-[44px] w-full rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                     >
                       <option value="">Tanpa organisasi</option>
                       {organizations.map((organization) => (
@@ -483,7 +556,7 @@ export function AdminAccountsPage() {
                     aria-label="Akun untuk cakupan baru"
                     value={scopeAccount}
                     onChange={(event) => setScopeAccount(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                   >
                     <option value="">Pilih akun</option>
                     {accounts.filter((a) => a.role !== 'super_admin').map((a) => (
@@ -497,7 +570,7 @@ export function AdminAccountsPage() {
                     aria-label="Survei untuk cakupan baru"
                     value={scopeSurvey}
                     onChange={(event) => setScopeSurvey(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
+                    className="min-h-[44px] w-full min-w-0 rounded-sm border border-control-border bg-n0 px-2 text-body-sm font-normal text-ink"
                   >
                     {surveys.map((survey) => (
                       <option key={survey.id} value={survey.id}>{survey.title}</option>
@@ -543,7 +616,7 @@ export function AdminAccountsPage() {
                   void adminSaveGrants(accountId, rows)
                     .then(async () => {
                       await refreshBootstrap();
-                      const created = accessGrants.find((grant) => grant.account_id === accountId && grant.survey_id === surveyId);
+                      const created = currentAdminData()?.accessGrants.find((grant) => grant.account_id === accountId && grant.survey_id === surveyId);
                       if (created) {
                         setGrants((prev) => ({
                           ...prev,
@@ -583,20 +656,36 @@ export function AdminAccountsPage() {
           </Panel>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 
 /* ---------------- Log audit ---------------- */
 
+const AUDIT_OUTCOME_TONE: Record<AuditOutcome, 'success' | 'danger' | 'warning' | 'info'> = {
+  berhasil: 'success',
+  ditolak: 'danger',
+  gagal: 'warning',
+  dimulai: 'info',
+};
+
 export function AdminAuditPage() {
-  const { state } = useScreenState('admin-audit');
   useEffect(() => {
     void refreshBootstrap();
   }, []);
   return (
     <Shell kind="admin" title="Log audit" subtitle="Catatan aktivitas memuat aktor, aksi, objek, hasil, dan waktu tanpa isi jawaban.">
+      <AdminDataGate subject="Log audit">{(data) => <AdminAuditContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+function AdminAuditContent({ data }: { data: AdminData }) {
+  const { auditLogs, accounts } = data;
+  const { state } = useScreenState('admin-audit');
+  const names = new Map(accounts.map((account) => [account.id, account.display_name]));
+  return (
+    <>
       <StateView
         routeId="admin-audit"
         state={state}
@@ -615,11 +704,11 @@ export function AdminAuditPage() {
               {auditLogs.map((log) => (
                 <tr key={log.id}>
                   <Td>{formatWIB(log.at)}</Td>
-                  <Td className="font-bold">{log.actor}</Td>
+                  <Td className="font-bold"><AuditActor actor={log.actor} names={names} /></Td>
                   <Td>{log.action}</Td>
                   <Td><Code>{log.object}</Code></Td>
                   <Td>
-                    <Badge tone={log.outcome === 'berhasil' ? 'success' : log.outcome === 'ditolak' ? 'danger' : 'warning'}>
+                    <Badge tone={AUDIT_OUTCOME_TONE[log.outcome]}>
                       {log.outcome}
                     </Badge>
                   </Td>
@@ -638,29 +727,36 @@ export function AdminAuditPage() {
           </Panel>
           <div className="flex flex-wrap gap-3">
             <ActionLink to={ROUTES.adminIntegration} variant="secondary">Lihat event integrasi</ActionLink>
-            <ActionLink to={ROUTES.creatorResults('s_demo1')} variant="secondary">Kembali ke hasil</ActionLink>
+            <ActionLink to={ROUTES.admin} variant="secondary">Kembali ke ringkasan</ActionLink>
           </div>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 
 /* ---------------- Integrasi ---------------- */
 
 export function AdminIntegrationPage() {
+  return (
+    <Shell kind="admin" title="Status integrasi" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
+      <AdminDataGate subject="Event integrasi">{(data) => <AdminIntegrationContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+function AdminIntegrationContent({ data }: { data: AdminData }) {
+  const { integrationEvents } = data;
   const { state } = useScreenState('admin-integration');
   const notify = useToast();
-  const { revision, integrationNote } = useStore();
-  void revision;
+  const { integrationNote } = useStore();
   const [replayed, setReplayed] = useState<string | null>(null);
   const [busyEvent, setBusyEvent] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const down = state === 'error';
 
   return (
-    <Shell kind="admin" title="Status integrasi" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
+    <>
       <StateView
         routeId="admin-integration"
         state={state}
@@ -766,7 +862,7 @@ export function AdminIntegrationPage() {
             </p>
             <div className="flex flex-wrap gap-3">
               <ActionLink to={ROUTES.respondentIntro('link-umum-demo')}>Buka alur responden mandiri</ActionLink>
-              <ActionLink to={ROUTES.creatorResults('s_demo1')} variant="secondary">Lihat ringkasan</ActionLink>
+              <ActionLink to={ROUTES.admin} variant="secondary">Lihat ringkasan operasional</ActionLink>
               <ActionLink to={ROUTES.adminAudit} variant="secondary">Lihat log audit</ActionLink>
             </div>
           </Card>
@@ -780,8 +876,7 @@ export function AdminIntegrationPage() {
           </Panel>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 
@@ -795,11 +890,71 @@ const REQUEST_LABELS: Record<DataRequestStatus, string> = {
   rejected: 'Ditolak',
 };
 
+/** Kanal yang dipakai pengelola untuk membalas pemohon; server mencatatnya sebagai jejak balasan `response_channel`. */
+const RESPONSE_CHANNEL_LABELS: Record<string, string> = {
+  email: 'Email',
+  phone: 'Telepon',
+  messaging: 'Pesan singkat (SMS/WhatsApp)',
+  letter: 'Surat',
+  in_person: 'Tatap muka',
+};
+
+/**
+ * Nilai kanonis yang dicatat server, bukan pilihan balasan admin: job retensi mengganti kanal teks bebas
+ * dengan `dianonimkan`. Baris lama tetap menampilkannya sebagai label manusiawi, tanpa menawarkannya
+ * sebagai pilihan kanal baru.
+ */
+const SYSTEM_CHANNEL_LABELS: Record<string, string> = {
+  dianonimkan: 'Dianonimkan',
+};
+
+const CHANNEL_REQUIRED = 'Pilih kanal yang dipakai untuk membalas pemohon. Kanal ini dicatat sebagai bukti bahwa permintaan sudah dibalas.';
+
 function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () => void }) {
   const [status, setStatus] = useState<DataRequestStatus>(request.status);
   const [note, setNote] = useState(request.outcome_note ?? '');
+  const [channel, setChannel] = useState(request.response_channel ?? '');
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const notify = useToast();
+  const fieldId = `request-${request.id}`;
+  const channelId = `${fieldId}-channel`;
+  // Kanal tersimpan di luar daftar (mis. teks bebas lewat API) tetap dapat dipilih agar simpan ulang tidak menggantinya.
+  const storedChannel = request.response_channel;
+  const channelOptions = storedChannel && !Object.hasOwn(RESPONSE_CHANNEL_LABELS, storedChannel)
+    ? [[storedChannel, SYSTEM_CHANNEL_LABELS[storedChannel] ?? storedChannel], ...Object.entries(RESPONSE_CHANNEL_LABELS)]
+    : Object.entries(RESPONSE_CHANNEL_LABELS);
+
+  const save = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaveError(null);
+    setChannelError(null);
+    if (status === 'handled' && !channel) {
+      setChannelError(CHANNEL_REQUIRED);
+      document.getElementById(channelId)?.focus();
+      return;
+    }
+    const outcomeNote = note.trim();
+    setBusy(true);
+    void updateDataRequest(
+      request.id,
+      status === 'handled' ? { status, outcome_note: outcomeNote, response_channel: channel } : { status, outcome_note: outcomeNote },
+    )
+      .then(() => {
+        notify('Permintaan data diperbarui. Log audit mencatat tindakan ini.');
+        onSaved();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === 'response_evidence_required') {
+          setChannelError(CHANNEL_REQUIRED);
+          document.getElementById(channelId)?.focus();
+          return;
+        }
+        setSaveError(error instanceof Error ? error.message : 'Permintaan data gagal diperbarui.');
+      })
+      .finally(() => setBusy(false));
+  };
 
   return (
     <li className="flex flex-col gap-3 rounded-md border border-n200 p-4">
@@ -813,7 +968,7 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
       <dl className="flex flex-col gap-2 text-body-sm">
         <div className="flex flex-wrap gap-x-3">
           <dt className="font-bold text-muted">Jenis</dt>
-          <dd className="text-ink">{request.type}</dd>
+          <dd className="text-ink">{DATA_REQUEST_TYPE_LABEL[request.type] ?? request.type}</dd>
         </div>
         <div className="flex flex-wrap gap-x-3">
           <dt className="font-bold text-muted">Kontak</dt>
@@ -824,70 +979,85 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
           <dd className="min-w-0 break-words text-ink">{request.note ?? '—'}</dd>
         </div>
       </dl>
-      <div className="grid gap-3 sm:grid-cols-[12rem_1fr] sm:items-end">
-        <label className="flex flex-col gap-1 text-caption font-bold text-muted">
-          Status
-          <select
-            aria-label={`Status permintaan ${request.id}`}
-            value={status}
-            onChange={(event) => setStatus(event.target.value as DataRequestStatus)}
-            className="min-h-[44px] rounded-md border border-n200 bg-n0 px-2 text-body-sm font-normal text-ink"
-          >
-            {Object.entries(REQUEST_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
+      <form className="flex flex-col gap-3" noValidate onSubmit={save}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field id={`${fieldId}-status`} label="Status">
+            {(aria) => (
+              <select
+                {...aria}
+                aria-label={`Status permintaan ${request.id}`}
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value as DataRequestStatus);
+                  setChannelError(null);
+                }}
+                className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
+              >
+                {Object.entries(REQUEST_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            )}
+          </Field>
+          {status === 'handled' && (
+            <Field
+              id={channelId}
+              label="Kanal balasan"
+              required
+              hint="Cara Anda membalas pemohon."
+              error={channelError ?? undefined}
+            >
+              {(aria) => (
+                <select
+                  {...aria}
+                  aria-label={`Kanal balasan permintaan ${request.id}`}
+                  value={channel}
+                  onChange={(event) => {
+                    setChannel(event.target.value);
+                    setChannelError(null);
+                  }}
+                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink aria-invalid:border-2 aria-invalid:border-danger"
+                >
+                  <option value="">Pilih kanal</option>
+                  {channelOptions.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          <div className="sm:col-span-2">
+            <Field id={`${fieldId}-note`} label="Catatan hasil">
+              {(aria) => (
+                <TextInput
+                  {...aria}
+                  aria-label={`Catatan hasil permintaan ${request.id}`}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </div>
+        {saveError && <ErrorState title="Perubahan belum tersimpan" detail={saveError} />}
         <div>
-          <TextInput
-            aria-label={`Catatan hasil permintaan ${request.id}`}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            placeholder="Catatan hasil"
-          />
-          <Button
-            variant="secondary"
-            className="mt-2"
-            loading={busy}
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void updateDataRequest(request.id, status, note.trim())
-                .then(() => {
-                  notify('Permintaan data diperbarui. Log audit mencatat tindakan ini.');
-                  onSaved();
-                })
-                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Permintaan gagal diperbarui.', 'danger'))
-                .finally(() => setBusy(false));
-            }}
-          >
+          <Button type="submit" variant="secondary" loading={busy} disabled={busy}>
             Simpan
           </Button>
         </div>
-      </div>
+      </form>
     </li>
   );
 }
 
 export function AdminRequestsPage() {
   const { state } = useScreenState('admin-requests');
-  const [rows, setRows] = useState<DataRequest[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const { dataRequests: rows, dataRequestsError: error } = useStore();
 
   useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    void getDataRequests()
-      .then((data) => { if (!cancelled) setRows(data); })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setRows([]);
-          setError(err instanceof Error ? err.message : 'Permintaan data gagal dimuat.');
-        }
-      });
-    return () => { cancelled = true; };
-  }, [reloadKey]);
+    void loadDataRequests();
+    return cancelDataRequestsLoad;
+  }, []);
 
   return (
     <Shell kind="admin" title="Permintaan data" subtitle="Verifikasi pemohon dan tindak lanjuti akses, koreksi, penarikan, atau penghapusan tanpa membuka jawaban.">
@@ -896,17 +1066,22 @@ export function AdminRequestsPage() {
           <Banner tone="info" title="Verifikasi sebelum tindakan">
             Kontak pada permintaan belum otomatis terverifikasi. Jangan memuat jawaban individual di halaman ini; catat hanya status dan ringkasan tindakan.
           </Banner>
-          {error && <Banner tone="danger" title="Daftar permintaan gagal dimuat">{error}</Banner>}
           <Card className="flex flex-col gap-3">
             <SectionTitle>Daftar permintaan</SectionTitle>
-            {rows === null ? (
+            {error ? (
+              <ErrorState
+                title="Daftar permintaan gagal dimuat"
+                detail={`${error} Antrean tidak ditampilkan sampai data berhasil dimuat.`}
+                action={<Button variant="secondary" onClick={() => void loadDataRequests()}>Coba lagi</Button>}
+              />
+            ) : rows === null ? (
               <p role="status" className="text-body-sm text-muted">Memuat permintaan…</p>
             ) : rows.length === 0 ? (
               <p className="text-body-sm text-muted">Belum ada permintaan data.</p>
             ) : (
               <ul className="flex flex-col gap-3">
                 {rows.map((request) => (
-                  <RequestRow key={request.id} request={request} onSaved={() => setReloadKey((value) => value + 1)} />
+                  <RequestRow key={request.id} request={request} onSaved={() => void loadDataRequests()} />
                 ))}
               </ul>
             )}

@@ -99,6 +99,7 @@ Aturan:
 | --- | --- | --- |
 | **Super admin** | Kelola akun dan peran, pantau jumlah survei dan respons, baca log operasional sesuai tugas | Role tidak otomatis memberikan akses ke jawaban individual |
 | **Creator** | Buat/salin survei, kelola versi, publikasi, tutup, arsip, lihat agregat milik sendiri | Periksa kepemilikan objek pada setiap permintaan |
+| **Admin organisasi** | Kelola profil organisasinya, anggota dan suspend, kode undangan creator, log audit organisasi; mengelola survei ber-`organization_id` organisasinya dan membaca jawaban individualnya | Hanya `org_admin` yang terikat organisasi; survei tanpa organisasi (NULL) tidak pernah jatuh kepadanya (keputusan produk 2026-11-23) |
 | **Petugas berizin** | Akses atau ekspor jawaban individual sesuai penugasan | Pisahkan izin baca individual, izin ekspor, dan izin teks bebas; periksa cakupan survei |
 | **Responden mandiri** | Buka tautan atau undangan, baca pemberitahuan, jawab, tinjau, kirim, dan terima bukti | Token/versi harus aktif untuk pengiriman baru. Jalur umum menjamin idempotensi kiriman, bukan identitas unik manusia |
 | **Layanan Modul 13** | Berikan identitas dan penugasan terverifikasi; terima status pengiriman | Autentikasi layanan, cakupan minimum, ID stabil |
@@ -153,8 +154,8 @@ Pada gangguan API, antarmuka menjelaskan statusnya. Undangan mandiri hanya dapat
 ### 5.2 Siklus hidup
 
 - **Draf → terbit.** Publikasi memerlukan konfigurasi item valid dan menghasilkan snapshot tetap beserta tautan yang mengarah ke versi tersebut.
-- **Terbit → versi berikutnya.** Edit substansial membuat draf baru. Formulir A yang sedang dibuka tetap mengirim ke versi A selama penerimaan A masih terbuka. Jangan memindahkannya diam-diam ke B.
-- **Terbit → ditutup → arsip.** Tolak kiriman baru untuk versi yang ditutup. Rekam waktu penutupan dan pertahankan riwayat sesuai retensi. Pengarsipan mengatur visibilitas pengelolaan.
+- **Terbit → versi berikutnya.** Edit substansial membuat draf baru tanpa menutup versi terbit. Publikasi versi baru menutup versi terbit sebelumnya, sehingga hanya versi terbaru yang menerima kiriman baru. Formulir lama tidak dialihkan ke versi baru.
+- **Terbit → ditutup → arsip.** Penutupan survei menutup semua versi terbit dan tautan umum yang masih aktif untuk versi tersebut. Rekam waktu penutupan dan pertahankan riwayat sesuai retensi. Pengarsipan mengatur visibilitas pengelolaan.
 - **Salin survei.** Salin konfigurasi ke draf baru. Respons, identitas, izin khusus, bukti persetujuan/verifikasi (pada studi kasus: bukti wali), dan undangan tidak ikut disalin.
 - **Gangguan integrasi.** Tampilkan status yang dapat dipahami responden. Sediakan akses mandiri hanya jika diaktifkan untuk survei tersebut. Catat mode dan sumber identitas; hindari membuat identitas kedua otomatis.
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BrandMark } from '../components/Brand';
@@ -9,6 +10,7 @@ import {
   Banner,
   Button,
   Checkbox,
+  ErrorSummary,
   Field,
   PlainLink,
   TextInput,
@@ -29,38 +31,31 @@ export function RegisterPage() {
   const [confirmation, setConfirmation] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  // Pratinjau ?state=validation menampilkan keadaan yang sama dengan kirim formulir kosong.
+  const [submitted, setSubmitted] = useState(state === 'validation');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
 
-  const nameMissing = name.trim().length < 2;
-  const emailMissing = !email.trim();
-  const passwordMissing = !password;
-  const passwordTooShort = password.length > 0 && password.length < 12;
-  const confirmationMissing = !confirmation;
-  const confirmationMismatch = confirmation.length > 0 && confirmation !== password;
-  const termsMissing = !acceptedTerms;
-  const invalid = nameMissing
-    || emailMissing
-    || passwordMissing
-    || passwordTooShort
-    || confirmationMissing
-    || confirmationMismatch
-    || termsMissing;
-
-  const nameError = submitted && nameMissing ? 'Nama minimal 2 karakter.' : undefined;
-  const emailError = submitted && emailMissing ? 'Email wajib diisi.' : undefined;
-  const passwordError = submitted && passwordMissing
-    ? 'Kata sandi wajib diisi.'
-    : submitted && passwordTooShort
-      ? 'Kata sandi minimal 12 karakter.'
-      : undefined;
-  const confirmationError = submitted && confirmationMissing
-    ? 'Ulangi kata sandi wajib diisi.'
-    : submitted && confirmationMismatch
-      ? 'Konfirmasi kata sandi tidak sama.'
-      : undefined;
-  const termsError = submitted && termsMissing ? 'Persetujuan kebijakan dan ketentuan wajib dicentang.' : undefined;
+  const messages = {
+    name: name.trim().length < 2 ? 'Nama minimal 2 karakter.' : undefined,
+    email: !email.trim() ? 'Email wajib diisi.' : undefined,
+    password: !password
+      ? 'Kata sandi wajib diisi.'
+      : password.length < 12
+        ? 'Kata sandi minimal 12 karakter.'
+        : undefined,
+    confirmation: !confirmation
+      ? 'Ulangi kata sandi wajib diisi.'
+      : confirmation !== password
+        ? 'Konfirmasi kata sandi tidak sama.'
+        : undefined,
+    terms: acceptedTerms ? undefined : 'Persetujuan kebijakan dan ketentuan wajib dicentang.',
+  };
+  const errors = Object.entries(messages).flatMap(([key, message]) => (message ? [{ id: `register-${key}`, message }] : []));
+  const fieldErrors: Partial<typeof messages> = submitted ? messages : {};
+  // Ringkasan dibekukan per percobaan kirim agar alert tidak diumumkan ulang setiap kali pengguna mengetik.
+  const [summary, setSummary] = useState(() => (submitted ? errors : []));
 
   return (
     <Shell kind="public" title="Buat akun" chromeless>
@@ -75,11 +70,9 @@ export function RegisterPage() {
                 </Link>
               </div>
 
-              {state === 'validation' && (
-                <Banner tone="danger" title="Periksa data akun">
-                  Lengkapi nama, email, kata sandi, dan persetujuan.
-                </Banner>
-              )}
+              <h1 className="text-center text-h2 font-bold text-ink">Buat akun</h1>
+
+              {summary.length > 0 && <ErrorSummary ref={summaryRef} title="Periksa data akun" errors={summary} />}
               {error && (
                 <Banner tone="danger" title="Tidak dapat membuat akun">
                   {error}
@@ -91,9 +84,15 @@ export function RegisterPage() {
                 noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
-                  setSubmitted(true);
-                  setError(null);
-                  if (invalid) return;
+                  flushSync(() => {
+                    setSubmitted(true);
+                    setError(null);
+                    setSummary(errors);
+                  });
+                  if (errors.length > 0) {
+                    summaryRef.current?.focus();
+                    return;
+                  }
                   setBusy(true);
                   void register({
                     name: name.trim().replace(/\s+/g, ' '),
@@ -116,7 +115,7 @@ export function RegisterPage() {
                     .finally(() => setBusy(false));
                 }}
               >
-                <Field id="register-name" label="Nama" required error={nameError}>
+                <Field id="register-name" label="Nama" required error={fieldErrors.name} announceError={false}>
                   {(aria) => (
                     <TextInput
                       {...aria}
@@ -128,7 +127,7 @@ export function RegisterPage() {
                   )}
                 </Field>
 
-                <Field id="register-email" label="Email" required error={emailError}>
+                <Field id="register-email" label="Email" required error={fieldErrors.email} announceError={false}>
                   {(aria) => (
                     <TextInput
                       {...aria}
@@ -145,8 +144,9 @@ export function RegisterPage() {
                   id="register-password"
                   label="Kata sandi"
                   required
-                  error={passwordError}
-                  hint={passwordError ? undefined : 'Minimal 12 karakter; gunakan minimal 3 dari huruf kecil, huruf besar, angka, atau simbol.'}
+                  error={fieldErrors.password}
+                  announceError={false}
+                  hint={fieldErrors.password ? undefined : 'Minimal 12 karakter; gunakan minimal 3 dari huruf kecil, huruf besar, angka, atau simbol.'}
                 >
                   {(aria) => (
                     <TextInput
@@ -160,7 +160,7 @@ export function RegisterPage() {
                   )}
                 </Field>
 
-                <Field id="register-confirmation" label="Ulangi kata sandi" required error={confirmationError}>
+                <Field id="register-confirmation" label="Ulangi kata sandi" required error={fieldErrors.confirmation} announceError={false}>
                   {(aria) => (
                     <TextInput
                       {...aria}
@@ -194,8 +194,8 @@ export function RegisterPage() {
                     id="register-terms"
                     checked={acceptedTerms}
                     onChange={setAcceptedTerms}
-                    invalid={Boolean(termsError)}
-                    describedBy={termsError ? 'register-terms-error' : undefined}
+                    invalid={Boolean(fieldErrors.terms)}
+                    describedBy={fieldErrors.terms ? 'register-terms-error' : undefined}
                     label={(
                       <>
                         Saya menyetujui{' '}
@@ -209,8 +209,8 @@ export function RegisterPage() {
                       </>
                     )}
                   />
-                  {termsError && (
-                    <p id="register-terms-error" role="alert" className="text-caption font-bold text-danger">{termsError}</p>
+                  {fieldErrors.terms && (
+                    <p id="register-terms-error" className="text-caption font-bold text-danger">{fieldErrors.terms}</p>
                   )}
                 </div>
 

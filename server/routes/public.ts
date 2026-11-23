@@ -1,7 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
-import { rateLimit, type AuthedRequest } from '../security.ts';
+import { clientIp, parseCookies, rateLimit, secureCookie, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
@@ -24,6 +25,7 @@ interface LinkRow {
   label: string;
   status: string;
   expires_at: string | null;
+  closed_reason: string | null;
 }
 
 interface InvitationRow {
@@ -68,41 +70,26 @@ interface OptionRow {
   value: number | null;
 }
 
+/** `profile` pada payload publik adalah profil kebijakan efektif, bukan baris `profiles` lama. */
 interface ProfileRow {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string;
-  consent_mode: string;
+  respondent_age_category: string | null;
+  consent_mode: string | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
   data_request_contact: string | null;
   cross_border_transfer: number | null;
   notice_version: string;
-  synthetic_placeholder: number;
+  source: 'organization' | 'platform';
 }
 
-interface NoticeRow {
-  id: string;
-  profile_id: string;
-  version: string;
-  effective_date: string;
-  purpose: string;
-  data_categories: string;
-  module15_usage: string;
-  retention_text: string;
-  recipients: string;
-  contact: string;
-  rights: string;
-  child_data_text: string;
-  cross_border_text: string;
-  synthetic_placeholder: number;
-}
+type NoticeRow = PolicyNotice;
 
 interface PublicQuestion {
   id: string;
-  version_id: string;
   code: string;
   ord: number;
   type: QuestionType;
@@ -151,17 +138,28 @@ interface ValidAnswer {
 
 interface ConsentRow {
   id: string;
-  survey_id: string;
   version_id: string;
   notice_version: string;
   basis: string;
-  status: string;
   recorded_at: string;
   guardian_evidence_status: string;
+  guardian_evidence_ref: string | null;
   response_id: string | null;
 }
 
 export const publicRouter = Router();
+
+const RESPONDENT_COOKIE = 'svara_respondent';
+const CONSENT_TTL_MS = 24 * 60 * 60 * 1000;
+
+function respondentSession(req: AuthedRequest): string | undefined {
+  const token = parseCookies(req.headers.cookie)[RESPONDENT_COOKIE];
+  return token && /^[A-Za-z0-9_-]{43}$/u.test(token) ? token : undefined;
+}
+
+function consentSessionHash(consentId: string, session: string): string {
+  return sha256Hex(`${consentId}:${session}`);
+}
 
 async function questionRows(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
@@ -178,7 +176,6 @@ async function publicQuestions(versionId: string): Promise<{ questions: PublicQu
     const questionOptions = await optionRows(question.id);
     questions.push({
       id: question.id,
-      version_id: question.version_id,
       code: question.code,
       ord: question.ord,
       type: question.type,
@@ -196,16 +193,97 @@ async function publicQuestions(versionId: string): Promise<{ questions: PublicQu
   return { questions, options };
 }
 
-async function profileFor(id: string): Promise<ProfileRow | undefined> {
-  return get<ProfileRow>('SELECT * FROM profiles WHERE id = ?', id);
+/**
+ * Kebijakan efektif mengikuti lingkup survei: organisasi pemilik, atau platform untuk survei
+ * mandiri. `surveys.profile_id`/`profiles` adalah warisan deployment dan tidak dibaca lagi.
+ */
+interface NoticeSource {
+  id: string;
+  organization_name: string;
+  organization_type: string;
+  respondent_age_category: string | null;
+  consent_mode: string | null;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  notice_version: string;
+  source: 'organization' | 'platform';
 }
 
-async function noticeFor(profileId: string, version: string): Promise<NoticeRow | undefined> {
-  return get<NoticeRow>(
-    'SELECT * FROM notices WHERE profile_id = ? ORDER BY CASE WHEN version = ? THEN 0 ELSE 1 END, effective_date DESC LIMIT 1',
-    profileId,
-    version,
-  );
+interface PolicyNotice {
+  id: string;
+  version: string;
+  effective_date: string;
+  purpose: string;
+  data_categories: string;
+  module15_usage: string;
+  retention_text: string;
+  recipients: string;
+  contact: string;
+  rights: string;
+  child_data_text: string;
+  cross_border_text: string;
+}
+
+async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
+  const row = survey.organization_id
+    ? await get<Omit<NoticeSource, 'source'>>(
+        `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+                policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
+           FROM organizations WHERE id = ?`,
+        survey.organization_id,
+      )
+    : await get<Omit<NoticeSource, 'source'>>(
+        `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
+                NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
+                cross_border_transfer, notice_version
+           FROM platform_profile WHERE id = 'platform'`,
+      );
+  if (!row) fail(409, 'policy_source_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+  return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
+}
+
+async function noticeRow(source: NoticeSource, version: string): Promise<PolicyNotice | undefined> {
+  return source.source === 'organization'
+    ? get<PolicyNotice>(
+        'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
+        source.id,
+        version,
+      )
+    : get<PolicyNotice>('SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1', version);
+}
+
+/**
+ * Notice harus persis versi yang tercatat pada versi survei. Bila versi itu tidak ada,
+ * permintaan gagal (fail closed) alih-alih menampilkan notice versi lain.
+ */
+async function noticeForVersion(source: NoticeSource, version: string): Promise<PolicyNotice> {
+  const row = await noticeRow(source, version);
+  if (!row) fail(500, 'notice_version_unavailable', 'Pemberitahuan versi yang diperlukan survei tidak tersedia.');
+  return row;
+}
+
+/**
+ * Dipanggil publish dengan pembaca yang sama dengan endpoint publik, agar tidak ada versi terbit
+ * yang tautannya langsung gagal 500. Sumber kebijakan yang hilang tetap 409 `policy_source_missing`.
+ */
+export async function requirePublishableNotice(survey: SurveyRow, version: string): Promise<void> {
+  if (!(await noticeRow(await noticeSourceFor(survey), version))) {
+    fail(
+      422,
+      'notice_version_unavailable',
+      `Pemberitahuan privasi versi ${version} untuk survei ini belum tersedia, sehingga tautannya tidak dapat dibuka responden. Minta admin melengkapinya sebelum menerbitkan.`,
+    );
+  }
+}
+
+/** NULL = tanpa batas. Nilai yang tidak dapat diurai dianggap sudah lewat (fail-closed), bukan tanpa batas. */
+function invitationExpired(expiresAt: string | null): boolean {
+  if (expiresAt === null) return false;
+  const at = Date.parse(expiresAt);
+  return Number.isNaN(at) || at < Date.now();
 }
 
 async function invitationForToken(token: string): Promise<InvitationRow | undefined> {
@@ -216,10 +294,15 @@ async function linkForToken(token: string): Promise<LinkRow | undefined> {
   return get<LinkRow>('SELECT * FROM public_links WHERE token_hash = ?', sha256Hex(token));
 }
 
+/**
+ * `public_links.closed_reason` yang boleh dilayani ulang ke versi terbit terbaru (BF-04): ditutup oleh
+ * versi baru ('superseded') atau oleh penutupan survei ('closed'). Arsip menulis 'archived' dan tidak
+ * pernah dihidupkan lagi.
+ */
+export const CONTINUABLE_CLOSE_REASONS = ['superseded', 'closed'] as const;
+
 function baseState(version: VersionRow, survey: SurveyRow): 'active' | 'closed' | 'expired' | 'revoked' | 'used' {
-  if (survey.status === 'archived') return 'closed';
-  if (version.status === 'closed' || version.status === 'archived') return 'closed';
-  if (version.status !== 'published') return 'closed';
+  if (survey.status !== 'published' || version.status !== 'published') return 'closed';
   return 'active';
 }
 
@@ -230,14 +313,13 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
     const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
     const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', invitation.survey_id);
     if (!assignment || !version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-    const profile = await profileFor(survey.profile_id);
-    const notice = await noticeFor(survey.profile_id, version.notice_version);
-    if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
+    const profile = await noticeSourceFor(survey);
+    const notice = await noticeForVersion(profile, version.notice_version);
     const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', assignment.id);
     let state = baseState(version, survey);
     if (invitation.status === 'used' || existing) state = 'used';
     else if (invitation.status === 'revoked') state = 'revoked';
-    else if (invitation.status === 'expired' || (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now())) state = 'expired';
+    else if (invitation.status === 'expired' || invitationExpired(invitation.expires_at)) state = 'expired';
     const { questions, options } = await publicQuestions(version.id);
     return {
       kind: 'invitation',
@@ -256,16 +338,48 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   }
   const link = await linkForToken(token);
   if (!link) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', link.version_id);
+  const version0 = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ? AND survey_id = ?', link.version_id, link.survey_id);
   const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', link.survey_id);
-  if (!version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-  const profile = await profileFor(survey.profile_id);
-  const notice = await noticeFor(survey.profile_id, version.notice_version);
-  if (!profile || !notice) fail(500, 'profile_missing', 'Konfigurasi profil survei tidak lengkap.');
+  if (!version0 || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
+  let version = version0;
+  const expired = link.status === 'expired' || (link.expires_at !== null && Date.parse(link.expires_at) < Date.now());
+  // Tautan yang dicabut ditolak sebelum isi survei dibaca; arsip/penutupan tetap dilayani sebagai
+  // 'closed' (tanpa pertanyaan, tanpa kiriman) seperti kontrak publik sebelumnya.
+  if (link.status === 'revoked') fail(409, 'link_revoked', 'Tautan ini sudah tidak aktif.');
   let state = baseState(version, survey);
-  if (link.status === 'closed') state = 'closed';
-  else if (link.status === 'expired' || (link.expires_at && new Date(link.expires_at).getTime() < Date.now())) state = 'expired';
-  else if (link.status !== 'active') state = 'revoked';
+  // Expiry menang atas status baris: tautan yang lewat expires_at selalu 'expired' walau barisnya
+  // 'closed'/'active', agar responden tidak mencoba mengisi tautan yang sudah tidak berlaku.
+  if (expired) state = 'expired';
+  else if (link.status === 'closed') state = 'closed';
+  // Versi terbit saat ini berstatus published, jadi sumber remap wajib sudah tidak terbit; arsip menutup
+  // survei tanpa menaikkan current_version_id sehingga status versi harus ikut diperiksa. Hanya tautan
+  // berstatus 'closed' dengan alasan di CONTINUABLE_CLOSE_REASONS ('superseded' dan 'closed') yang
+  // di-remap; komentar migrasi 014 ("remap hanya 'superseded'") mendahului alasan 'closed'. Alasan
+  // 'archived', NULL (ditutup sebelum 014, asal penutupan tidak diketahui), dan tautan yang masih
+  // 'active' pada versi yang tidak lagi terbit tetap 'closed'.
+  if (
+    version.status !== 'published' &&
+    link.status === 'closed' &&
+    CONTINUABLE_CLOSE_REASONS.some((reason) => reason === link.closed_reason) &&
+    !expired &&
+    survey.status === 'published' &&
+    survey.current_version_id !== version.id
+  ) {
+    // The survey's current_version_id can point to a draft instead of the published version.
+    const latest = await get<VersionRow>(
+      `SELECT * FROM survey_versions
+       WHERE survey_id = ? AND status = 'published' AND number > ?
+       ORDER BY number DESC LIMIT 1`,
+      link.survey_id,
+      version.number,
+    );
+    if (latest) {
+      version = latest;
+      state = 'active';
+    }
+  }
+  const profile = await noticeSourceFor(survey);
+  const notice = await noticeForVersion(profile, version.notice_version);
   const { questions, options } = await publicQuestions(version.id);
   return {
     kind: 'public',
@@ -282,6 +396,25 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   };
 }
 
+// SEC-02: id versi tidak boleh bocor ke responden (juga mencakup id draf). Token buram di bawah membuat
+// klien bisa mengirim balik versi yang dirender tanpa memegang id internalnya.
+function consentVersionToken(versionId: string): string {
+  return Buffer.from(versionId, 'utf8').toString('base64url');
+}
+
+/**
+ * Retry harus divalidasi terhadap versi milik attempt pertama, bukan versi terbit saat ini: sesudah
+ * publish berikutnya, isi dan kunci idempotensi yang sama masih milik versi lama. Pertanyaan, opsi,
+ * dan consent diambil dari versi attempt agar hash idempotensi bisa dibandingkan apa adanya.
+ */
+async function contextForStoredAttempt(context: PublicContext, versionId: string): Promise<PublicContext> {
+  if (versionId === context.version.id) return context;
+  const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', versionId);
+  if (!version) fail(409, 'submission_closed', 'Versi respons ini tidak tersedia lagi.');
+  const { questions, options } = await publicQuestions(version.id);
+  return { ...context, version, questions, options, state: 'active', canSubmit: false };
+}
+
 function publicPayload(context: PublicContext, includeQuestions = false) {
   return {
     kind: context.kind,
@@ -289,35 +422,32 @@ function publicPayload(context: PublicContext, includeQuestions = false) {
     state: context.state,
     canSubmit: context.canSubmit,
     guardianRequired: context.guardianRequired,
-    survey: context.survey,
-    version: {
-      ...context.version,
-      question_ids: includeQuestions ? context.questions.map((question) => question.id) : [],
+    survey: {
+      title: context.survey.title,
+      purpose: context.survey.purpose,
+      object_label: context.survey.object_label,
+      instructions: context.survey.instructions,
     },
+    version: {
+      number: context.version.number,
+      notice_version: context.version.notice_version,
+    },
+    consent_version: consentVersionToken(context.version.id),
     questions: includeQuestions ? context.questions : [],
     options: includeQuestions ? context.options : [],
     profile: {
       ...context.profile,
       cross_border_transfer:
         context.profile.cross_border_transfer === null ? null : context.profile.cross_border_transfer === 1,
-      synthetic_placeholder: context.profile.synthetic_placeholder === 1,
+      synthetic_placeholder: false,
     },
-    notice: { ...context.notice, synthetic_placeholder: context.notice.synthetic_placeholder === 1 },
+    notice: { ...context.notice, synthetic_placeholder: false },
     invitation: context.invitation
       ? {
-          id: context.invitation.id,
-          assignment_id: context.invitation.assignment_id,
-          survey_id: context.invitation.survey_id,
-          version_id: context.invitation.version_id,
           code: context.invitation.code,
           status: context.state === 'used' ? 'used' : context.invitation.status,
-          expires_at: context.invitation.expires_at,
-          used_at: context.invitation.used_at,
-          revoked_at: context.invitation.revoked_at,
-          token_hash: '',
         }
       : null,
-    assignment: context.assignment ?? null,
   };
 }
 
@@ -381,32 +511,77 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
   return result;
 }
 
-/** Persetujuan harus tercatat lebih dulu; formulir dan kiriman menolak tanpa consent_id yang sah. */
-async function requireConsent(context: PublicContext, consentId: unknown): Promise<ConsentRow> {
+function consentForSession(context: PublicContext, versionId: string, id: string, session: string, lock = false) {
+  return get<ConsentRow>(
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+       FROM consent_records
+      WHERE id = ? AND survey_id = ? AND version_id = ? AND status = 'granted'
+        AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
+        AND respondent_session_hash = ?${lock ? ' FOR UPDATE' : ''}`,
+    id,
+    context.survey.id,
+    versionId,
+    context.invitation?.id ?? null,
+    context.link?.id ?? null,
+    consentSessionHash(id, session),
+  );
+}
+
+/**
+ * Consent milik sesi ini tanpa syarat versi; dipakai review historis yang harus tetap terbuka untuk
+ * attempt pada versi lama sesudah publish berikutnya. Form/review versi lain tetap ditolak pemanggil.
+ */
+function sessionConsent(context: PublicContext, id: string, session: string) {
+  return get<ConsentRow>(
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+       FROM consent_records
+      WHERE id = ? AND survey_id = ? AND status = 'granted'
+        AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
+        AND respondent_session_hash = ?`,
+    id,
+    context.survey.id,
+    context.invitation?.id ?? null,
+    context.link?.id ?? null,
+    consentSessionHash(id, session),
+  );
+}
+
+async function requireConsent(
+  context: PublicContext, req: AuthedRequest, consentId: unknown, lock = false,
+): Promise<ConsentRow> {
   const id = typeof consentId === 'string' ? consentId.trim() : '';
   if (!id) fail(403, 'consent_required', 'Persetujuan belum tercatat. Buka pengantar dan setujui pemberitahuan.');
-  const consent = await get<ConsentRow>('SELECT * FROM consent_records WHERE id = ?', id);
-  if (
-    !consent ||
-    consent.status !== 'granted' ||
-    consent.survey_id !== context.survey.id ||
-    consent.version_id !== context.version.id
-  ) {
-    fail(403, 'consent_required', 'Persetujuan tidak berlaku untuk formulir ini.');
-  }
+  const session = respondentSession(req);
+  if (!session) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
+  const consent = await consentForSession(context, context.version.id, id, session, lock);
+  if (!consent) fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
   return consent;
+}
+
+function requireUnusedConsent(context: PublicContext, consent: ConsentRow): void {
+  if (consent.response_id !== null) {
+    fail(409, 'consent_already_used', 'Persetujuan ini sudah dipakai untuk satu respons final.');
+  }
+  const age = Date.now() - Date.parse(consent.recorded_at);
+  if (!Number.isFinite(age) || age < 0 || age >= CONSENT_TTL_MS) {
+    fail(409, 'consent_expired', 'Persetujuan kedaluwarsa. Buka kembali pengantar untuk mencatat persetujuan baru.');
+  }
+  if (context.guardianRequired && (
+    !['self_attested', 'verified'].includes(consent.guardian_evidence_status) || !consent.guardian_evidence_ref?.trim()
+  )) {
+    fail(409, 'guardian_evidence_required', 'Buka kembali pengantar dan lengkapi bukti wali.');
+  }
 }
 
 async function receiptFor(responseId: string) {
   const row = await get<{
     id: string;
     survey_id: string;
-    version_id: string;
     submitted_at: string;
     idempotency_key: string;
     number: number;
   }>(
-    `SELECT r.id, r.survey_id, r.version_id, r.submitted_at, r.idempotency_key, v.number
+    `SELECT r.id, r.survey_id, r.submitted_at, r.idempotency_key, v.number
        FROM responses r JOIN survey_versions v ON v.id = r.version_id
       WHERE r.id = ?`,
     responseId,
@@ -415,7 +590,6 @@ async function receiptFor(responseId: string) {
   return {
     response_id: row.id,
     survey_id: row.survey_id,
-    version_id: row.version_id,
     version_number: row.number,
     submitted_at: row.submitted_at,
     status: 'submitted',
@@ -435,7 +609,7 @@ publicRouter.get('/public/surveys/:token', async (req: AuthedRequest, res: Respo
 
 publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `consent:${req.ip}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
+    if (!rateLimit({ key: `consent:${clientIp(req)}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi sebentar.');
     }
     const context = await resolvePublicContext(pathParam(req, 'token'));
@@ -451,29 +625,71 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     if (context.guardianRequired && !evidenceRef) {
       fail(422, 'guardian_evidence_required', 'Bukti verifikasi wali wajib tersedia sebelum pengisian.');
     }
+    // SEC-02: persetujuan hanya sah untuk versi+notice yang benar-benar dirender pada intro. Klien mengirim
+    // consent_version dari konteks yang tampil; remap tautan lama tidak boleh diam-diam mengganti notice yang disetujui.
+    const shownToken = typeof req.body?.version_id === 'string' ? req.body.version_id.trim() : '';
+    if (!shownToken) {
+      fail(422, 'version_id_required', 'Muat ulang pengantar sebelum menyetujui pemberitahuan.');
+    }
     const consentId = newId('c');
+    const existingSession = respondentSession(req);
+    const session = existingSession ?? randomBytes(32).toString('base64url');
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
-    const guardianStatus = context.guardianRequired ? 'verified' : 'not_required';
+    // SEC-04/BF-03: referensi dari form adalah pernyataan responden, bukan hasil verifikasi.
+    // Tidak ada jalur yang menandai evidence_ref sebagai sah, jadi statusnya self_attested.
+    const guardianStatus = context.guardianRequired ? 'self_attested' : 'not_required';
     const recordedAt = nowIso();
-    await run(
-      `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
-        respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, response_id)
-       VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, NULL)`,
-      consentId,
-      context.survey.id,
-      context.version.id,
-      context.version.notice_version,
-      basis,
-      recordedAt,
-      guardianStatus,
-      context.guardianRequired ? evidenceRef : null,
-      context.invitation?.id ?? null,
-    );
+    await withTx(async () => {
+      // Versi diperiksa di dalam transaksi agar publish yang terjadi setelah resolve tidak lolos.
+      const shownVersionId = Buffer.from(shownToken, 'base64url').toString('utf8');
+      if (shownVersionId !== context.version.id) {
+        fail(409, 'notice_changed', 'Pemberitahuan atau versi survei berubah. Baca ulang pengantar lalu setujui.');
+      }
+      await run(
+        `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
+          respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, public_link_id,
+          respondent_session_hash, response_id)
+         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, ?, ?, NULL)`,
+        consentId,
+        context.survey.id,
+        context.version.id,
+        context.version.notice_version,
+        basis,
+        recordedAt,
+        guardianStatus,
+        context.guardianRequired ? evidenceRef : null,
+        context.invitation?.id ?? null,
+        context.link?.id ?? null,
+        consentSessionHash(consentId, session),
+      );
+      // Catat notice yang benar-benar ditampilkan, terpisah dari notice_version pada versi survei.
+      await run(
+        `INSERT INTO consent_notice_versions (consent_id, source, source_id, notice_id, notice_version, effective_date, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        consentId,
+        context.profile.source,
+        context.profile.id,
+        context.notice.id,
+        context.notice.version,
+        context.notice.effective_date,
+        recordedAt,
+      );
+    });
     await auditPublic('Persetujuan tercatat', `${context.survey.id} · v${context.version.number}`, 'berhasil');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!existingSession) {
+      res.cookie(RESPONDENT_COOKIE, session, {
+        path: '/api/v1/public/surveys',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: secureCookie(req),
+      });
+    }
     res.status(201).json({
       data: {
         consent_id: consentId,
         notice_version: context.version.notice_version,
+        notice_source: context.profile.source,
         basis,
         guardian_evidence_status: guardianStatus,
         recorded_at: recordedAt,
@@ -484,17 +700,31 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
   }
 });
 
-publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: Response) => {
+async function loadPublicForm(req: AuthedRequest, res: Response, allowRetry: boolean) {
   try {
-    const context = await resolvePublicContext(pathParam(req, 'token'));
-    const consent = await requireConsent(context, req.query.consent_id);
-    if (!context.canSubmit) {
-      fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
+    const resolved = await resolvePublicContext(pathParam(req, 'token'));
+    const consentId = typeof req.query.consent_id === 'string' ? req.query.consent_id.trim() : '';
+    const session = respondentSession(req);
+    const owned = consentId && session ? await sessionConsent(resolved, consentId, session) : undefined;
+    // Review retry milik attempt historis memakai versi milik consent, bukan versi terbit sekarang.
+    const retryOnly = allowRetry && owned !== undefined && owned.response_id !== null;
+    const context = retryOnly && owned.version_id !== resolved.version.id
+      ? await contextForStoredAttempt(resolved, owned.version_id)
+      : resolved;
+    const consent = owned?.version_id === context.version.id
+      ? owned
+      : await requireConsent(context, req, req.query.consent_id);
+    if (!retryOnly) {
+      if (!context.canSubmit) {
+        fail(409, `submission_${context.state}`, `Formulir tidak dapat dibuka: ${context.state}.`);
+      }
+      requireUnusedConsent(context, consent);
     }
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       data: {
         ...publicPayload(context, true),
+        ...(retryOnly ? { retryOnly: true, canSubmit: false } : {}),
         consent: {
           consent_id: consent.id,
           notice_version: consent.notice_version,
@@ -506,11 +736,14 @@ publicRouter.get('/public/surveys/:token/form', async (req: AuthedRequest, res: 
   } catch (error) {
     sendError(res, error);
   }
-});
+}
+
+publicRouter.get('/public/surveys/:token/form', (req: AuthedRequest, res: Response) => loadPublicForm(req, res, false));
+publicRouter.get('/public/surveys/:token/review', (req: AuthedRequest, res: Response) => loadPublicForm(req, res, true));
 
 publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `invite-code:${req.ip}`, limit: 20, windowMs: 10 * 60 * 1000 })) {
+    if (!rateLimit({ key: `invite-code:${clientIp(req)}`, limit: 20, windowMs: 10 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak percobaan. Coba lagi nanti.');
     }
     const code = asString(req.body?.code ?? '', 'code', 80).toUpperCase();
@@ -521,7 +754,7 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
     );
     if (!invitation) fail(404, 'invitation_not_found', 'Kode undangan tidak dikenal.');
     if (invitation.status !== 'active') fail(409, 'invitation_inactive', 'Undangan ini tidak aktif.');
-    if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
+    if (invitationExpired(invitation.expires_at)) {
       fail(409, 'invitation_expired', 'Undangan ini sudah kedaluwarsa.');
     }
     res.json({ data: { token: invitation.token, url: `/s/${invitation.token}` } });
@@ -533,7 +766,7 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
 publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest, res: Response) => {
   let auditObject = 'respons';
   try {
-    if (!rateLimit({ key: `submit:${req.ip}`, limit: 40, windowMs: 10 * 60 * 1000 })) {
+    if (!rateLimit({ key: `submit:${clientIp(req)}`, limit: 40, windowMs: 10 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak kiriman. Coba lagi nanti.');
     }
     const key = req.get('idempotency-key')?.trim() ?? '';
@@ -542,32 +775,56 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
     }
     const context = await resolvePublicContext(pathParam(req, 'token'));
     auditObject = `${context.survey.id} · v${context.version.number}`;
-    const consent = await requireConsent(context, req.body?.consent_id);
-    const answers = await parseAnswers(context, req.body?.answers);
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
-    const hash = payloadHash({
-      consent_id: consent.id,
-      answers: answers.map((answer) => ({
-        code: answer.question.code,
-        option_id: answer.option?.id ?? null,
-        text: answer.text,
-        skipped: answer.skipped,
-      })),
-    });
     const outcome = await withTx(async () => {
       // Serialkan retry dengan kunci yang sama sebelum memeriksa idempotensi.
       await get('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', `${scope}:${key}`);
-      const existingAttempt = await get<{ response_id: string; payload_hash: string }>(
-        'SELECT response_id, payload_hash FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
+      const existingAttempt = await get<{ response_id: string; payload_hash: string; version_id: string }>(
+        `SELECT a.response_id, a.payload_hash, r.version_id
+           FROM submission_attempts a JOIN responses r ON r.id = a.response_id
+          WHERE a.scope = ? AND a.idempotency_key = ?`,
         scope,
         key,
       );
       if (existingAttempt) {
+        const attemptContext = await contextForStoredAttempt(context, existingAttempt.version_id);
+        const bound = await get<{ consent_id: string }>(
+          'SELECT id AS consent_id FROM consent_records WHERE response_id = ?',
+          existingAttempt.response_id,
+        );
+        const session = respondentSession(req);
+        const attemptConsent = bound && session
+          ? await consentForSession(context, attemptContext.version.id, bound.consent_id, session)
+          : undefined;
+        if (attemptConsent?.response_id !== existingAttempt.response_id) {
+          fail(409, 'consent_context_mismatch', 'Buka kembali pengantar dan catat persetujuan untuk sesi ini.');
+        }
+        const answers = await parseAnswers(attemptContext, req.body?.answers);
+        const hash = payloadHash({
+          consent_id: attemptConsent.id,
+          answers: answers.map((answer) => ({
+            code: answer.question.code,
+            option_id: answer.option?.id ?? null,
+            text: answer.text,
+            skipped: answer.skipped,
+          })),
+        });
         if (existingAttempt.payload_hash !== hash) {
           fail(409, 'idempotency_conflict', 'Kunci pengiriman yang sama dipakai dengan isi berbeda.', { retryable: false });
         }
         return { receipt: await receiptFor(existingAttempt.response_id), created: false };
       }
+      const consent = await requireConsent(context, req, req.body?.consent_id);
+      const answers = await parseAnswers(context, req.body?.answers);
+      const hash = payloadHash({
+        consent_id: consent.id,
+        answers: answers.map((answer) => ({
+          code: answer.question.code,
+          option_id: answer.option?.id ?? null,
+          text: answer.text,
+          skipped: answer.skipped,
+        })),
+      });
       if (!context.canSubmit) {
         fail(409, `submission_${context.state}`, `Formulir tidak dapat menerima kiriman: ${context.state}.`, { state: context.state });
       }
@@ -582,10 +839,12 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
         const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', context.assignment!.id);
         if (existing) fail(409, 'already_submitted', 'Undangan ini sudah digunakan untuk respons final.');
       }
+      requireUnusedConsent(context, await requireConsent(context, req, consent.id, true));
       const responseId = newId('r');
       const respondentId = newId('p');
       const now = nowIso();
-      const freshVersion = await get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ?', context.version.id);
+      // Jangan biarkan penutupan versi commit di antara pengecekan status dan penyimpanan respons.
+      const freshVersion = await get<{ status: string }>('SELECT status FROM survey_versions WHERE id = ? FOR SHARE', context.version.id);
       if (freshVersion?.status !== 'published') fail(409, 'submission_closed', 'Versi ini sudah ditutup.');
       await run(
         'INSERT INTO respondents (id, source, external_ref, created_at) VALUES (?, ?, NULL, ?)',
@@ -618,7 +877,12 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
           answer.skipped ? 1 : 0,
         );
       }
-      await run('UPDATE consent_records SET response_id = ? WHERE id = ?', responseId, consent.id);
+      const consumed = await run(
+        'UPDATE consent_records SET response_id = ? WHERE id = ? AND response_id IS NULL',
+        responseId,
+        consent.id,
+      );
+      if (consumed !== 1) fail(409, 'consent_already_used', 'Persetujuan ini sudah dipakai untuk satu respons final.');
       await run(
         'INSERT INTO submission_attempts (id, scope, idempotency_key, payload_hash, response_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         newId('sa'),
@@ -659,20 +923,29 @@ publicRouter.post('/public/surveys/:token/responses', async (req: AuthedRequest,
 
 publicRouter.get('/public/surveys/:token/receipt/:responseId', async (req: AuthedRequest, res: Response) => {
   try {
+    res.setHeader('Cache-Control', 'no-store');
     const key = req.get('idempotency-key')?.trim() ?? '';
     if (!key) fail(422, 'idempotency_key_required', 'Header Idempotency-Key diperlukan untuk memulihkan bukti.');
+    const session = respondentSession(req);
+    if (!session) fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     const context = await resolvePublicContext(pathParam(req, 'token'));
     const scope = context.kind === 'invitation' ? `invitation:${context.invitation!.id}` : `public:${context.link!.id}`;
-    const attempt = await get<{ response_id: string }>(
-      'SELECT response_id FROM submission_attempts WHERE scope = ? AND idempotency_key = ?',
+    const responseId = pathParam(req, 'responseId');
+    const attempt = await get<{ consent_id: string; version_id: string }>(
+      `SELECT c.id AS consent_id, r.version_id
+         FROM submission_attempts a
+         JOIN responses r ON r.id = a.response_id
+         JOIN consent_records c ON c.response_id = r.id
+        WHERE a.scope = ? AND a.idempotency_key = ? AND a.response_id = ?`,
       scope,
       key,
+      responseId,
     );
-    if (!attempt || attempt.response_id !== pathParam(req, 'responseId')) {
+    const consent = attempt && await consentForSession(context, attempt.version_id, attempt.consent_id, session);
+    if (consent?.response_id !== responseId) {
       fail(404, 'receipt_not_found', 'Bukti tidak ditemukan untuk konteks ini.');
     }
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: await receiptFor(attempt.response_id) });
+    res.json({ data: await receiptFor(responseId) });
   } catch (error) {
     sendError(res, error);
   }
@@ -702,7 +975,7 @@ publicRouter.get('/public/policy', async (_req: AuthedRequest, res: Response) =>
 
 publicRouter.post('/data-requests', async (req: AuthedRequest, res: Response) => {
   try {
-    if (!rateLimit({ key: `data-request:${req.ip}`, limit: 10, windowMs: 60 * 60 * 1000 })) {
+    if (!rateLimit({ key: `data-request:${clientIp(req)}`, limit: 10, windowMs: 60 * 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi nanti.');
     }
     const type = asString(req.body?.type ?? '', 'type', 80);

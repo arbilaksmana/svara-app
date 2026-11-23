@@ -115,10 +115,7 @@ export function canManageSurvey(account: AccountRow, survey: SurveyRow): boolean
   );
 }
 
-/**
- * Survei yang bisa dikelola akun: super_admin semua, org_admin lingkup organisasinya,
- * creator miliknya sendiri. Dipakai GET /surveys dan bootstrap agar filter tidak diduplikasi.
- */
+/** Daftar mengikuti lingkup peran; creator melihat miliknya dan survei ber-grant, bukan hak kelola tambahan. */
 export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[]> {
   if (account.role === 'super_admin') {
     return all<SurveyRow>('SELECT * FROM surveys ORDER BY updated_at DESC, id');
@@ -132,7 +129,14 @@ export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[
     );
   }
   if (account.role === 'creator') {
-    return all<SurveyRow>('SELECT * FROM surveys WHERE owner_id = ? ORDER BY updated_at DESC, id', account.id);
+    return all<SurveyRow>(
+      `SELECT s.* FROM surveys s
+        WHERE s.owner_id = ?
+           OR EXISTS (SELECT 1 FROM access_grants g WHERE g.survey_id = s.id AND g.account_id = ?)
+        ORDER BY s.updated_at DESC, s.id`,
+      account.id,
+      account.id,
+    );
   }
   return all<SurveyRow>(
     `SELECT DISTINCT s.*
@@ -173,9 +177,15 @@ export async function canReadIndividual(account: AccountRow, survey: SurveyRow):
   return Boolean(grant?.can_read_individual && settings?.allow_individual);
 }
 
+/** Izin ekspor apa pun (CSV per-responden maupun kodebook) tetap butuh grant `can_export`. */
 export async function canExport(account: AccountRow, survey: SurveyRow): Promise<boolean> {
   if (canManageSurvey(account, survey)) return true;
   return Boolean((await grantFor(account.id, survey.id))?.can_export);
+}
+
+/** Ekspor CSV memuat baris per-responden, jadi izinnya tidak boleh lebih longgar dari canReadIndividual. */
+export async function canExportIndividual(account: AccountRow, survey: SurveyRow): Promise<boolean> {
+  return (await canExport(account, survey)) && (await canReadIndividual(account, survey));
 }
 
 export async function canReadFreeText(account: AccountRow, survey: SurveyRow): Promise<boolean> {
@@ -253,22 +263,11 @@ export async function requireVersion(versionId: string): Promise<VersionRow> {
   return version;
 }
 
-export async function requirePublishedVersion(surveyId: string): Promise<VersionRow> {
-  const version = await get<VersionRow>(
-    `SELECT * FROM survey_versions
-      WHERE survey_id = ? AND status = 'published'
-      ORDER BY number DESC LIMIT 1`,
-    surveyId,
-  );
-  if (!version) fail(409, 'no_published_version', 'Belum ada versi terbit untuk survei ini.');
-  return version;
-}
-
 export function actorFor(req: AuthedRequest): string {
   return req.account?.id ?? 'publik';
 }
 
-type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal';
+type AuditOutcome = 'berhasil' | 'ditolak' | 'gagal' | 'dimulai';
 
 /** Audit hanya menyimpan metadata operasional; token, kata sandi, dan jawaban tidak boleh masuk. */
 async function insertAudit(
@@ -315,8 +314,11 @@ export async function auditPublic(
 }
 
 export function csvCell(value: unknown, neutralizeFormula = true): string {
+  // Number berhingga selalu ditulis sebagai angka (-1, 2.5, 1e+21) dan tidak bisa menjadi rumus;
+  // hanya teks (termasuk teks "-1") dan nilai non-berhingga yang dinetralisasi.
+  const numeric = typeof value === 'number' && Number.isFinite(value);
   let text = value === null || value === undefined ? '' : String(value);
-  if (neutralizeFormula && /^[=+\-@\t\r]/.test(text)) {
+  if (neutralizeFormula && !numeric && /^[=+\-@\t\r]/.test(text)) {
     // Prefix apostrof agar spreadsheet memperlakukan nilai sebagai teks.
     // Nilai asli di basis data tidak diubah.
     text = `'${text}`;
@@ -324,8 +326,15 @@ export function csvCell(value: unknown, neutralizeFormula = true): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+export const CSV_BOM = '\uFEFF';
+export const CSV_EOL = '\r\n';
+
+export function csvLine(row: unknown[]): string {
+  return row.map((cell) => csvCell(cell)).join(',');
+}
+
 export function csvDocument(rows: unknown[][]): string {
-  return `\uFEFF${rows.map((row) => row.map((cell) => csvCell(cell)).join(',')).join('\r\n')}\r\n`;
+  return `${CSV_BOM}${rows.map((row) => csvLine(row)).join(CSV_EOL)}${CSV_EOL}`;
 }
 
 export function stableStringify(value: unknown): string {

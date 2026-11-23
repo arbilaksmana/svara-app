@@ -20,7 +20,7 @@ import { StateView } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { useStore } from '../lib/store';
-import { versionsFor, questionsFor, optionsFor } from '../lib/fixtures/surveys';
+import { versionsFor, questionsFor } from '../lib/fixtures/surveys';
 
 const CAPABILITIES = [
   {
@@ -56,6 +56,10 @@ const FLOW = [
   { step: 'Baca hasil', detail: 'Ringkasan per versi, lalu unduh CSV sesuai izin.', to: () => ROUTES.creatorResults('s_demo1') },
 ];
 
+/** Contoh label skala yang statis: bagian ini tidak bergantung pada data survei yang diganti bootstrap. */
+const SCALE_5 = ['Sangat tidak setuju', 'Tidak setuju', 'Netral', 'Setuju', 'Sangat setuju'];
+const SCALE_4 = ['Tidak sesuai', 'Kurang sesuai', 'Sesuai', 'Sangat sesuai'];
+
 const FAQ = [
   {
     q: 'Apa bedanya draf dan versi terbit?',
@@ -77,10 +81,11 @@ const FAQ = [
 
 export function HomePage() {
   const { state } = useScreenState('home');
-  const { session } = useStore();
+  const { session, ready, error } = useStore();
   const demoVersions = versionsFor('s_demo1');
-  const scale5 = optionsFor('q_ad01');
-  const scale4 = optionsFor('q_p01');
+  // NEW-UX-C: sebelum bootstrap berhasil modul survei masih berisi fixture klien, jadi panel tidak dirender di SSR,
+  // saat bootstrap gagal, maupun untuk tamu (bootstrap tamu tanpa survei). Panel hanya membaca versi terbit dari server.
+  const activeDemo = ready && !error && session ? demoVersions.find((v) => v.status === 'published') : undefined;
 
   // Tautan navbar tamu memakai hash; gulir manual saat hash berubah.
   useEffect(() => {
@@ -104,10 +109,10 @@ export function HomePage() {
       >
         <div className="flex flex-col gap-16 lg:gap-24">
           {/* Hero */}
-          <section aria-labelledby="hero-title" className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <section aria-labelledby="hero-title" className={`grid gap-10 lg:items-center ${activeDemo ? 'lg:grid-cols-[1.05fr_0.95fr]' : ''}`}>
             <div className="flex min-w-0 flex-col items-start gap-5">
               <p className="font-mono text-caption font-bold tracking-mono text-n600">PEMBUAT SURVEI</p>
-              <h1 id="hero-title" className="text-h1 font-bold leading-[1.12] text-ink lg:text-[46px]">
+              <h1 id="hero-title" className="text-h1 font-bold leading-[1.12] text-ink wrap-anywhere lg:text-[46px]">
                 Susun instrumen sekali.
                 <span className="block text-n600">Terbitkan per versi.</span>
               </h1>
@@ -128,6 +133,7 @@ export function HomePage() {
             </div>
 
             {/* Panel produk dari data nyata, bukan tangkapan layar rekaan. */}
+            {activeDemo && (
             <Card className="flex min-w-0 flex-col gap-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -153,16 +159,17 @@ export function HomePage() {
                 </Table>
               </div>
               <p className="text-caption text-muted">
-                {questionsFor(demoVersions.find((v) => v.status === 'published')?.id ?? '').length} item pada versi aktif.
+                {questionsFor(activeDemo.id).length} item pada versi aktif.
                 Formulir yang sudah terbuka tetap memakai versinya sendiri.
               </p>
             </Card>
+            )}
           </section>
 
           {/* Kemampuan inti */}
           <section aria-labelledby="kemampuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="kemampuan" className="text-h2 font-bold text-ink">Yang membedakan dari formulir biasa</h2>
+              <h2 id="kemampuan" className="text-h2 font-bold text-ink wrap-anywhere">Yang membedakan dari formulir biasa</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Empat hal yang dipakai setiap hari oleh pengelola survei.
               </p>
@@ -173,7 +180,7 @@ export function HomePage() {
                   key={item.title}
                   className={`grid gap-2 py-5 sm:grid-cols-[auto_1fr_auto] sm:items-start sm:gap-6 ${i > 0 ? 'border-t border-n200' : ''}`}
                 >
-                  <span className="font-mono text-caption font-bold tracking-mono text-n400">
+                  <span className="font-mono text-caption font-bold tracking-mono text-n600">
                     {String(i + 1).padStart(2, '0')}
                   </span>
                   <div className="min-w-0">
@@ -189,7 +196,7 @@ export function HomePage() {
           {/* Jalur data dan persetujuan */}
           <section aria-labelledby="persetujuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="persetujuan" className="text-h2 font-bold text-ink">Persetujuan mengikuti profil deployment</h2>
+              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti profil deployment</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Satu profil organisasi menentukan teks notice dan syarat persetujuan. Tidak ada asumsi sektor di dalam kode.
               </p>
@@ -204,7 +211,8 @@ export function HomePage() {
               <Panel className="flex flex-col gap-2">
                 <p className="text-body font-bold text-ink">Persetujuan sesuai kebijakan organisasi</p>
                 <p className="text-body-sm text-muted">
-                  Bila organisasi mewajibkan persetujuan pihak berwenang, kiriman ditolak sampai bukti yang sah dilampirkan.
+                  Bila organisasi mewajibkan persetujuan orang tua atau wali, kiriman ditolak sampai pernyataan wali dan referensi
+                  buktinya diisi. Referensi dicatat apa adanya, tidak diverifikasi aplikasi.
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
@@ -221,11 +229,11 @@ export function HomePage() {
 
           {/* Alur kerja */}
           <section aria-labelledby="alur" className="flex flex-col gap-4">
-            <h2 id="alur" className="text-h2 font-bold text-ink">Dari instrumen kosong ke hasil terbaca</h2>
+            <h2 id="alur" className="text-h2 font-bold text-ink wrap-anywhere">Dari instrumen kosong ke hasil terbaca</h2>
             <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {FLOW.map((f, i) => (
                 <li key={f.step} className="flex flex-col gap-2 rounded-lg border border-n200 p-4">
-                  <span className="font-mono text-caption font-bold tracking-mono text-n400">
+                  <span className="font-mono text-caption font-bold tracking-mono text-n600">
                     LANGKAH {i + 1}
                   </span>
                   <p className="text-body font-bold text-ink">{f.step}</p>
@@ -239,7 +247,7 @@ export function HomePage() {
           {/* Dua bentuk skala */}
           <section aria-labelledby="contoh" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="contoh" className="text-h2 font-bold text-ink">Satu aplikasi, dua bentuk skala</h2>
+              <h2 id="contoh" className="text-h2 font-bold text-ink wrap-anywhere">Satu aplikasi, dua bentuk skala</h2>
               <p className="max-w-[65ch] text-body text-muted">
                 Jumlah titik dan label diatur per pertanyaan. Skala 5 titik menyediakan jawaban tengah, skala 4 titik
                 memaksa peserta memilih arah.
@@ -250,12 +258,12 @@ export function HomePage() {
                 <div className="self-start"><Badge tone="neutral">Skala 5 titik</Badge></div>
                 <p className="text-body font-bold text-ink">Dengan titik tengah</p>
                 <ul className="flex flex-col gap-1.5">
-                  {scale5.map((o) => (
+                  {SCALE_5.map((label) => (
                     <li
-                      key={o.id}
+                      key={label}
                       className="inline-flex min-h-[36px] items-center rounded-sm border border-n200 px-3 text-body-sm text-n600"
                     >
-                      {o.label}
+                      {label}
                     </li>
                   ))}
                 </ul>
@@ -265,12 +273,12 @@ export function HomePage() {
                 <div className="self-start"><Badge tone="neutral">Skala 4 titik</Badge></div>
                 <p className="text-body font-bold text-ink">Tanpa titik tengah</p>
                 <ul className="flex flex-col gap-1.5">
-                  {scale4.map((o) => (
+                  {SCALE_4.map((label) => (
                     <li
-                      key={o.id}
+                      key={label}
                       className="inline-flex min-h-[36px] items-center rounded-sm border border-n200 px-3 text-body-sm text-n600"
                     >
-                      {o.label}
+                      {label}
                     </li>
                   ))}
                 </ul>
@@ -281,7 +289,7 @@ export function HomePage() {
 
           {/* FAQ */}
           <section aria-labelledby="faq" className="flex flex-col gap-4">
-            <h2 id="faq" className="text-h2 font-bold text-ink">Pertanyaan yang sering muncul</h2>
+            <h2 id="faq" className="text-h2 font-bold text-ink wrap-anywhere">Pertanyaan yang sering muncul</h2>
             <div className="flex flex-col">
               {FAQ.map((item, i) => (
                 <details key={item.q} className={`group py-4 ${i > 0 ? 'border-t border-n200' : ''}`}>
@@ -298,7 +306,7 @@ export function HomePage() {
 
           {/* Penutup */}
           <section aria-labelledby="penutup" className="flex flex-col items-start gap-4 rounded-lg border border-n200 bg-n50 p-6 lg:p-8">
-            <h2 id="penutup" className="text-h2 font-bold text-ink">Siap menyusun instrumen pertama?</h2>
+            <h2 id="penutup" className="text-h2 font-bold text-ink wrap-anywhere">Siap menyusun instrumen pertama?</h2>
             <p className="max-w-[60ch] text-body text-muted">
               Masuk sebagai pengelola untuk membuat draf, atau isi contoh formulir lebih dulu untuk melihat alur responden.
             </p>

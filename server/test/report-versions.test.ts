@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { Client } from 'pg';
 
 import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
@@ -73,10 +74,15 @@ function likert(code: string, label: string) {
   };
 }
 
+interface SurveyDetail {
+  versions: Array<{ number: number; status: string }>;
+}
+
 interface Payload {
   data?: {
     survey?: { id?: string };
     version?: { id?: string; number?: number };
+    detail?: SurveyDetail;
     publicLink?: { token?: string };
     total?: number;
     items?: Array<{ code: string }>;
@@ -99,7 +105,7 @@ after(async () => {
   await closeTestDatabase();
 });
 
-test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', async () => {
+test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', async (t) => {
   const creator = await login('creator.a@svara.local');
   const created = await call('/surveys', { method: 'POST', body: { title: 'Uji ringkasan versi' }, cookie: creator });
   assert.equal(created.status, 201, created.text);
@@ -117,28 +123,55 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
     assert.equal(result.status, 200, result.text);
     return (result.body as Payload).data!;
   };
-  const submit = async (token: string, answers: Record<string, number>, key: string) => {
+  const prepareSubmission = async (token: string, answers: Record<string, number>, key: string) => {
+    const context = await call(`/public/surveys/${token}`);
+    const versionId = (context.body as { data?: { consent_version?: string } }).data?.consent_version ?? '';
     const consent = await call(`/public/surveys/${token}/consent`, {
       method: 'POST',
-      body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali kelas 9A' },
+      body: { version_id: versionId, respondent_click: true, eligibility: true, guardian_evidence_ref: 'Wali kelas 9A' },
     });
     assert.equal(consent.status < 300, true, consent.text);
     const consentId = (consent.body as { data?: { consent_id?: string } }).data?.consent_id ?? '';
-    const result = await call(`/public/surveys/${token}/responses`, {
+    return () => call(`/public/surveys/${token}/responses`, {
       method: 'POST',
+      cookie: consent.headers.get('set-cookie')?.split(';')[0],
       headers: { 'Idempotency-Key': key },
       body: { consent_id: consentId, answers: Object.entries(answers).map(([code, value]) => ({ question_code: code, text: String(value) })) },
     });
-    assert.equal(result.status < 300, true, result.text);
   };
 
   assert.equal((await save([likert('OLD1', 'Pertanyaan versi satu')])).status, 200);
   const first = await publish();
-  await submit(first.publicLink!.token!, { OLD1: 4 }, 'kunci-versi-satu');
+  const submitFirst = await prepareSubmission(first.publicLink!.token!, { OLD1: 4 }, 'kunci-versi-satu');
+  assert.equal((await submitFirst()).status, 201);
+  const lateFirst = await prepareSubmission(first.publicLink!.token!, { OLD1: 3 }, 'terlambat-versi-satu');
 
   assert.equal((await save([likert('NEW1', 'Pertanyaan versi dua'), likert('NEW2', 'Pertanyaan lainnya')])).status, 200);
   const second = await publish();
-  await submit(second.publicLink!.token!, { NEW1: 5, NEW2: 2 }, 'kunci-versi-dua');
+  const submitSecond = await prepareSubmission(second.publicLink!.token!, { NEW1: 5, NEW2: 2 }, 'kunci-versi-dua');
+  assert.equal((await submitSecond()).status, 201);
+  const lateSecond = await prepareSubmission(second.publicLink!.token!, { NEW1: 2, NEW2: 4 }, 'terlambat-versi-dua');
+
+  await t.test('BF-04: publikasi versi kedua hanya menyisakan satu versi terbit', async () => {
+    assert.deepEqual(second.detail?.versions.map(({ number, status }) => ({ number, status })), [
+      { number: 1, status: 'closed' },
+      { number: 2, status: 'published' },
+    ]);
+    const oldLink = await call(`/public/surveys/${first.publicLink!.token!}`);
+    assert.equal(oldLink.status, 200, oldLink.text);
+    assert.equal((oldLink.body as Payload).data?.version?.number, 2, 'tautan umum lama melayani versi terbit');
+  });
+
+  await t.test('BF-04: setelah penutupan, kedua tautan menolak kiriman baru', async () => {
+    const closed = await call(`/surveys/${surveyId}/close`, { method: 'POST', cookie: creator });
+    assert.equal(closed.status, 200, closed.text);
+    const submissions = await Promise.all([lateFirst(), lateSecond()]);
+    assert.deepEqual(submissions.map(({ status }) => status), [409, 409]);
+    assert.deepEqual(submissions.map(({ body }) => body?.code), ['submission_closed', 'submission_closed']);
+    const detail = closed.body?.data as SurveyDetail | undefined;
+    assert.deepEqual(detail?.versions.map(({ status }) => status), ['closed', 'closed']);
+    assert.equal((await submitFirst()).status, 200, 'retry idempoten tetap memulihkan bukti versi lama');
+  });
 
   const emptyFor = async (versionId: string) => {
     const result = await call(`/surveys/${surveyId}/summary?version=${versionId}`, { cookie: creator });
@@ -157,4 +190,27 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
   const mismatched = await call(`/surveys/${surveyId}/summary?version=v_demo1_1`, { cookie: creator });
   assert.equal(mismatched.status, 403, mismatched.text);
   assert.equal((mismatched.body as { code?: string }).code, 'forbidden_version');
+});
+
+test('BF-04: penutupan memperbaiki beberapa versi terbit lama tanpa mengaktifkan tautan yang dicabut', async () => {
+  const creator = await login('creator.a@svara.local');
+  const published = await call('/surveys/s_demo1/publish', { method: 'POST', cookie: creator });
+  assert.equal(published.status, 200, published.text);
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    // Modelkan data lama yang sudah memiliki dua versi berstatus terbit.
+    await db.query("UPDATE survey_versions SET status = 'published', closed_at = NULL WHERE id = 'v_demo1_1'");
+    await db.query("UPDATE public_links SET status = 'active' WHERE version_id = 'v_demo1_1'");
+    await db.query("UPDATE public_links SET status = 'revoked' WHERE version_id = 'v_demo1_2'");
+
+    const closed = await call('/surveys/s_demo1/close', { method: 'POST', cookie: creator });
+    assert.equal(closed.status, 200, closed.text);
+    const detail = closed.body?.data as SurveyDetail | undefined;
+    assert.deepEqual(detail?.versions.map(({ status }) => status), ['closed', 'closed']);
+    const links = await db.query<{ status: string }>("SELECT status FROM public_links WHERE survey_id = 's_demo1' ORDER BY version_id");
+    assert.deepEqual(links.rows.map(({ status }) => status), ['closed', 'revoked']);
+  } finally {
+    await db.end();
+  }
 });

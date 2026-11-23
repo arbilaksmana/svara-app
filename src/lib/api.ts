@@ -97,12 +97,16 @@ export interface BootstrapData {
   auditLogs: AuditLog[];
   integrationEvents: IntegrationEvent[];
   dataRequests: Array<Record<string, unknown>>;
-  summaries: Record<string, unknown>;
   serverTime: string;
 }
 
 export async function bootstrap(): Promise<BootstrapData> {
   return call<BootstrapData>('/bootstrap');
+}
+
+/** Akun dari cookie sesi saja, tanpa data bootstrap. Tetap berdiri sendiri saat bootstrap gagal. */
+export async function me(): Promise<{ account: (Account & { email: string }) | null }> {
+  return call<{ account: (Account & { email: string }) | null }>('/auth/me');
 }
 
 export async function login(email: string, password: string): Promise<{ account: Account & { email: string } }> {
@@ -169,8 +173,21 @@ export async function createSurvey(title: string, ownerScope?: SurveyScope): Pro
   return call<SurveyDetail>('/surveys', { method: 'POST', body: { title, owner_scope: ownerScope } });
 }
 
-export async function saveSurvey(id: string, payload: SurveyPayload): Promise<SurveyDetail> {
-  return call<SurveyDetail>(`/surveys/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
+export interface InstrumentChange {
+  changed: boolean;
+  affectedResponses: number;
+}
+
+export interface SurveySaveResult extends SurveyDetail {
+  instrumentChange: InstrumentChange;
+}
+
+export async function previewSurveyChange(id: string, payload: SurveyPayload): Promise<SurveySaveResult> {
+  return call<SurveySaveResult>(`/surveys/${encodeURIComponent(id)}?preview=true`, { method: 'PUT', body: payload });
+}
+
+export async function saveSurvey(id: string, payload: SurveyPayload): Promise<SurveySaveResult> {
+  return call<SurveySaveResult>(`/surveys/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
 }
 
 export interface PublishResult {
@@ -337,6 +354,10 @@ export interface DataRequest {
   handled_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Jejak balasan (migrasi 016); NULL pada baris yang belum pernah ditandai dengan kanal balasan. */
+  response_channel?: string | null;
+  responded_by?: string | null;
+  responded_at?: string | null;
 }
 
 export async function submitDataRequest(input: { type: string; contact: string; note?: string }): Promise<DataRequest> {
@@ -347,10 +368,22 @@ export async function getDataRequests(): Promise<DataRequest[]> {
   return call<DataRequest[]>('/admin/data-requests');
 }
 
-export async function updateDataRequest(id: string, status: DataRequestStatus, outcomeNote: string): Promise<{ ok: boolean; status: DataRequestStatus }> {
-  return call<{ ok: boolean; status: DataRequestStatus }>(`/admin/data-requests/${encodeURIComponent(id)}`, {
+/** Server menolak status `handled` tanpa `response_channel` (422 `response_evidence_required`). */
+export type DataRequestUpdate =
+  | { status: 'handled'; outcome_note: string; response_channel: string }
+  | { status: Exclude<DataRequestStatus, 'handled'>; outcome_note: string };
+
+export interface DataRequestUpdated {
+  ok: boolean;
+  status: DataRequestStatus;
+  responded_at: string | null;
+  response_channel: string | null;
+}
+
+export async function updateDataRequest(id: string, input: DataRequestUpdate): Promise<DataRequestUpdated> {
+  return call<DataRequestUpdated>(`/admin/data-requests/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: { status, outcome_note: outcomeNote },
+    body: input,
   });
 }
 
@@ -364,14 +397,16 @@ export interface PublicContextData {
   state: 'active' | 'closed' | 'expired' | 'revoked' | 'used';
   canSubmit: boolean;
   guardianRequired: boolean;
-  survey: Survey;
-  version: SurveyVersion;
-  questions: Question[];
+  retryOnly?: true;
+  survey: Pick<Survey, 'title' | 'purpose' | 'object_label' | 'instructions'>;
+  version: Pick<SurveyVersion, 'number' | 'notice_version'>;
+  /** Token buram versi yang dirender; wajib dikirim balik saat mencatat persetujuan. */
+  consent_version: string;
+  questions: Omit<Question, 'version_id'>[];
   options: QuestionOption[];
   profile: DeploymentProfile;
   notice: Notice;
-  invitation: (Invitation & { token?: string }) | null;
-  assignment: { id: string; survey_id: string; version_id: string; label: string; participant_ref: string } | null;
+  invitation: Pick<Invitation, 'code' | 'status'> | null;
 }
 
 export async function publicContext(token: string): Promise<PublicContextData> {
@@ -387,9 +422,9 @@ export interface PublicFormData extends PublicContextData {
   };
 }
 
-export async function publicForm(token: string, consentId: string): Promise<PublicFormData> {
+export async function publicForm(token: string, consentId: string, view: 'form' | 'review'): Promise<PublicFormData> {
   return call<PublicFormData>(
-    `/public/surveys/${encodeURIComponent(token)}/form?consent_id=${encodeURIComponent(consentId)}`,
+    `/public/surveys/${encodeURIComponent(token)}/${view}?consent_id=${encodeURIComponent(consentId)}`,
   );
 }
 
@@ -398,7 +433,7 @@ export interface ConsentPayload {
   respondent_click: boolean;
   basis: string;
   notice_version: string;
-  guardian_evidence_status: 'not_required' | 'verified';
+  guardian_evidence_status: 'not_required' | 'self_attested';
   guardian_evidence_ref: string | null;
 }
 
@@ -412,11 +447,17 @@ export interface ConsentRecord {
 
 export async function createConsent(
   token: string,
+  versionId: string,
   guardianEvidenceRef: string | null,
 ): Promise<ConsentRecord> {
   return call<ConsentRecord>(`/public/surveys/${encodeURIComponent(token)}/consent`, {
     method: 'POST',
-    body: { respondent_click: true, eligibility: true, guardian_evidence_ref: guardianEvidenceRef ?? undefined },
+    body: {
+      version_id: versionId,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: guardianEvidenceRef ?? undefined,
+    },
   });
 }
 
@@ -429,7 +470,6 @@ export interface AnswerPayload {
 export interface ReceiptData {
   response_id: string;
   survey_id: string;
-  version_id: string;
   version_number: number;
   submitted_at: string;
   status: string;

@@ -50,12 +50,19 @@ const PRESS = 'transition-[transform,background-color,color] duration-150 ease-o
 const PRESS_LINK = `${PRESS} motion-safe:active:scale-[0.96]`;
 const PRESS_BUTTON = `${PRESS} motion-safe:enabled:active:scale-[0.96]`;
 
+/* Deretan tautan desktop mulai sm; nav panjang (admin, ±880px) baru muat mulai 60rem, di bawahnya memakai menu ringkas. */
+const DESKTOP_NAV = {
+  short: { fit: 'sm:w-fit', gap: 'sm:gap-5', row: 'sm:w-auto sm:justify-start', block: 'sm:block', flex: 'sm:flex', inlineFlex: 'sm:inline-flex', hidden: 'sm:hidden' },
+  long: { fit: 'min-[60rem]:w-fit', gap: 'min-[60rem]:gap-5', row: 'min-[60rem]:w-auto min-[60rem]:justify-start', block: 'min-[60rem]:block', flex: 'min-[60rem]:flex', inlineFlex: 'min-[60rem]:inline-flex', hidden: 'min-[60rem]:hidden' },
+};
+
 function Wordmark({ to }: { to: string }) {
   const guard = useNavigationGuard();
   return (
     <Link
       href={to}
       onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
+      aria-label="Svara"
       className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
       <BrandMark />
@@ -71,8 +78,8 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
       href={to}
       onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
       aria-current={active ? 'page' : undefined}
-      className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal no-underline ${PRESS_LINK} ${
-        active ? 'text-n0' : 'text-n400 hover:text-n0'
+      className={`inline-flex min-h-[44px] shrink-0 items-center rounded-full px-2.5 text-body-sm font-normal ${PRESS_LINK} ${
+        active ? 'text-n0 underline decoration-2 underline-offset-4' : 'text-n400 no-underline hover:text-n0'
       }`}
     >
       {label}
@@ -80,7 +87,7 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   );
 }
 
-function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; homeTo: string }) {
+function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; guestActions?: boolean; homeTo: string }) {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const notify = useToast();
@@ -89,6 +96,9 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
   // Di landing, pengguna dianggap belum masuk walau stor masih menyimpan sesi.
   const current = guestOnly ? null : session;
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLElement>(null);
+  const bp = DESKTOP_NAV[nav.length > GUEST_NAV.length ? 'long' : 'short'];
 
   useEffect(() => {
     setMenuOpen(false);
@@ -97,7 +107,9 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key !== 'Escape') return;
+      if (menuRef.current?.contains(document.activeElement)) menuButtonRef.current?.focus();
+      setMenuOpen(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -114,8 +126,8 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
 
   return (
     <header className="sticky top-0 z-nav">
-      <div className="relative mx-auto w-[calc(100%-3.5rem)] sm:w-fit">
-        <div className={`relative flex items-center gap-3 bg-dark p-2 sm:gap-5 ${OUTER}`}>
+      <div className={`relative mx-auto w-[calc(100%-3.5rem)] ${bp.fit}`}>
+        <div className={`relative flex items-center gap-3 bg-dark p-2 ${bp.gap} ${OUTER}`}>
           {/* Fillet cekung, path diambil dari SVG nav referensi (20x20 per sudut). */}
           {([-1, 1] as const).map((side) => (
             <span
@@ -128,11 +140,11 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
               </svg>
             </span>
           ))}
-          <div className="flex w-full min-w-0 items-center justify-between gap-5 sm:w-auto sm:justify-start">
+          <div className={`flex w-full min-w-0 items-center justify-between gap-5 ${bp.row}`}>
             <Wordmark to={homeTo} />
 
           {/* Desktop: deretan tautan seperti referensi. */}
-            <nav aria-label="Navigasi utama" className="hidden sm:block">
+            <nav aria-label="Navigasi utama" className={`hidden ${bp.block}`}>
               <ul className="flex items-center gap-1">
                 {nav.map((item) => (
                   <li key={item.to}>
@@ -143,41 +155,44 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
             </nav>
 
             {/* Mobile: satu pemicu menu, jadi tidak ada tautan yang terpotong. */}
-            <button
-              type="button"
-              aria-expanded={menuOpen}
-              aria-controls="pill-menu"
-              aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
-              onClick={() => setMenuOpen((v) => !v)}
-              className={`inline-flex size-11 items-center justify-center rounded-full text-n400 sm:hidden ${PRESS_BUTTON} hover:text-n0`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 20 20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                className="size-5"
+            {(nav.length > 0 || current || guestActions) && (
+              <button
+                ref={menuButtonRef}
+                type="button"
+                aria-expanded={menuOpen}
+                aria-controls="pill-menu"
+                aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
+                onClick={() => setMenuOpen((v) => !v)}
+                className={`inline-flex size-11 items-center justify-center rounded-full text-n400 ${bp.hidden} ${PRESS_BUTTON} hover:text-n0`}
               >
-                {menuOpen ? (
-                  <>
-                    <path d="M5 5l10 10" />
-                    <path d="M15 5 5 15" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M3 6h14" />
-                    <path d="M3 10h14" />
-                    <path d="M3 14h14" />
-                  </>
-                )}
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  className="size-5"
+                >
+                  {menuOpen ? (
+                    <>
+                      <path d="M5 5l10 10" />
+                      <path d="M15 5 5 15" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M3 6h14" />
+                      <path d="M3 10h14" />
+                      <path d="M3 14h14" />
+                    </>
+                  )}
+                </svg>
+              </button>
+            )}
           </div>
 
           {current ? (
-            <div className="hidden shrink-0 items-center gap-1 sm:flex">
+            <div className={`hidden shrink-0 items-center gap-1 ${bp.flex}`}>
               <button
                 type="button"
                 onClick={handleSignOut}
@@ -186,21 +201,22 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 Keluar
               </button>
             </div>
-          ) : (
+          ) : guestActions ? (
             <Link
               href={ROUTES.login}
-              className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 sm:inline-flex ${PRESS_LINK}`}
+              className={`hidden min-h-[44px] min-w-[88px] shrink-0 items-center justify-center rounded-[18px] corner-squircle bg-n0 px-5 text-body-sm font-semibold text-ink no-underline hover:bg-n100 ${bp.inlineFlex} ${PRESS_LINK}`}
             >
               Masuk
             </Link>
-          )}
+          ) : null}
         </div>
 
         {menuOpen && (
           <nav
+            ref={menuRef}
             id="pill-menu"
             aria-label="Navigasi seluler"
-            className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay sm:hidden rounded-[16px] corner-squircle`}
+            className={`absolute left-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-[24rem] -translate-x-1/2 border border-n200 bg-n0 p-1.5 shadow-overlay ${bp.hidden} rounded-[16px] corner-squircle`}
           >
             <ul className="flex flex-col gap-1">
               {nav.map((item) => (
@@ -221,31 +237,33 @@ function PillNavbar({ nav, activePath, guestOnly = false, homeTo }: { nav: NavEn
                 </li>
               ))}
             </ul>
-            <div className="mt-1 border-t border-n200 pt-1">
-              {current ? (
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0"
-                >
-                  Keluar
-                </button>
-              ) : (
-                <Link
-                  href={ROUTES.login}
-                  onClick={(event) => {
-                    if (!allowNavigation(event, guard)) {
-                      event.preventDefault();
-                      return;
-                    }
-                    setMenuOpen(false);
-                  }}
-                  className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
-                >
-                  Masuk
-                </Link>
-              )}
-            </div>
+            {(current || guestActions) && (
+              <div className="mt-1 border-t border-n200 pt-1">
+                {current ? (
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex min-h-[44px] w-full items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0"
+                  >
+                    Keluar
+                  </button>
+                ) : (
+                  <Link
+                    href={ROUTES.login}
+                    onClick={(event) => {
+                      if (!allowNavigation(event, guard)) {
+                        event.preventDefault();
+                        return;
+                      }
+                      setMenuOpen(false);
+                    }}
+                    className="flex min-h-[44px] items-center justify-center rounded-[10px] bg-dark px-3 text-body-sm font-semibold text-n0 no-underline"
+                  >
+                    Masuk
+                  </Link>
+                )}
+              </div>
+            )}
           </nav>
         )}
       </div>
@@ -294,14 +312,16 @@ export function Shell({
         ? ROUTES.adminOrg
         : ROUTES.creator;
   const isOrgAdmin = activeSession?.role === 'org_admin';
-  // Super admin memakai /admin/*; org_admin mendapat ruang organisasinya sendiri.
+  // Ruang kerja hanya diisi setelah sesi klien dikenal; tamu tidak pernah melihat nav tamu di sana.
   const topNav = activeSession
     ? isOrgAdmin
       ? ORG_NAV
       : activeSession.role === 'admin'
         ? NAV.admin
         : NAV.creator
-    : GUEST_NAV;
+    : inWorkspace
+      ? []
+      : GUEST_NAV;
   // Sidebar: org_admin hanya melihat entri Organisasi, meski halaman dirender sebagai admin.
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const activePath = kind === 'respondent' ? ROUTES.home : pathname;
@@ -315,7 +335,7 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} homeTo={homeTo} />}
+      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} guestActions={!inWorkspace} homeTo={homeTo} />}
 
       {chromeless ? (
         <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
@@ -353,7 +373,7 @@ export function Shell({
         <main id="konten-utama" ref={mainRef} tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
           {!hideHeading && (
             <div className="mb-6 flex flex-col gap-2">
-              <h1 className="text-h1 font-bold text-ink">{title}</h1>
+              <h1 className="text-h1 font-bold text-ink wrap-break-word">{title}</h1>
               {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
             </div>
           )}

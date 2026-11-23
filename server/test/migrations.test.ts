@@ -1,6 +1,8 @@
 import { after, before, test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
+import { provisionOrganizationNotice } from '../notice-provisioning.ts';
 import { closeTestDatabase, databaseUrl, indexExists, resetTestDatabase, tableCount } from './test-db.ts';
 
 async function appliedVersions(): Promise<string[]> {
@@ -22,6 +24,8 @@ after(async () => {
   await closeTestDatabase();
 });
 
+const HOT_PATH_INDEXES = ['ix_public_links_token_hash', 'ix_invitations_token_hash', 'ix_responses_version_submitted', 'ix_audit_org_at'];
+
 const VERSIONS = [
   '001_initial.sql',
   '002_operational_indexes.sql',
@@ -32,10 +36,20 @@ const VERSIONS = [
   '007_organization_invitations.sql',
   '008_organization_invitation_lifecycle.sql',
   '009_organization_invitation_expiry_backfill.sql',
+  '010_consent_notice_source.sql',
+  '011_integration_token_scope.sql',
+  '012_consent_context_binding.sql',
+  '013_consent_notice_backfill.sql',
+  '014_public_link_close_reason.sql',
+  '015_notice_source_catalog.sql',
+  '016_data_request_retention.sql',
+  '017_hot_path_indexes.sql',
+  '018_notice_survey_profile_backfill.sql',
+  '019_close_superseded_published_versions.sql',
 ];
 
-test('migrasi membuat 24 tabel aplikasi dan mencatat versi', async () => {
-  assert.equal(await tableCount(), 24);
+test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
+  assert.equal(await tableCount(), 30);
   const versions = await appliedVersions();
   assert.deepEqual(versions, VERSIONS);
 });
@@ -44,7 +58,7 @@ test('migrasi kedua idempoten dan tidak menerapkan ulang', async () => {
   const { migrate } = await import('../migrate.ts');
   const applied = await migrate();
   assert.deepEqual(applied, []);
-  assert.equal(await tableCount(), 24);
+  assert.equal(await tableCount(), 30);
   assert.deepEqual(await appliedVersions(), VERSIONS);
 });
 
@@ -53,6 +67,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   await resetSchema();
   assert.deepEqual(await migrate({ to: '001' }), ['001_initial.sql']);
   assert.equal(await indexExists('ix_sessions_expires'), false, 'indeks 002 belum ada');
+  assert.equal(await indexExists('ix_responses_version_submitted'), false, 'indeks 017 belum ada');
 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
@@ -70,6 +85,7 @@ test('upgrade path 001 → terbaru mempertahankan data dan menambah indeks opera
   assert.equal(await indexExists('ix_sessions_expires'), true);
   assert.equal(await indexExists('ix_audit_actor_at'), true);
   assert.equal(await indexExists('ux_public_links_survey_version'), true);
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), true, `${name} dibuat oleh 017`);
 
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();
@@ -115,7 +131,7 @@ test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari la
     await client.end();
   }
 
-  assert.deepEqual(await migrate(), ['009_organization_invitation_expiry_backfill.sql']);
+  assert.deepEqual(await migrate(), VERSIONS.slice(8));
 
   const verify = new Client({ connectionString: databaseUrl });
   await verify.connect();
@@ -181,4 +197,197 @@ test('foreign key dan unique constraint ditegakkan Postgres', async () => {
   } finally {
     await client.end();
   }
+});
+
+/**
+ * Organisasi + survei terbit + tautan publik tanpa seed demo. Nama organisasi sengaja sama dengan profil
+ * legacy agar aturan nama 013 teruji; data main yang namanya tidak cocok diuji di notice-upgrade.test.ts.
+ */
+async function seedUpgradedDeployment(): Promise<void> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(`
+      INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+        policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
+      VALUES ('p_deploy', 'Yayasan Nyata', 'organization', 'adult', 'self', '/p', '/t', 30, 'privasi@nyata.id', 0, '1.0', 0),
+             ('p_platform', 'Svara', 'platform', 'adult', 'self', '/p', '/t', NULL, 'privasi@svara.id', 0, '2.0', 0);
+      INSERT INTO notices (id, profile_id, version, effective_date, purpose, data_categories, module15_usage,
+        retention_text, recipients, contact, rights, child_data_text, cross_border_text, synthetic_placeholder)
+      VALUES ('n_deploy', 'p_deploy', '1.0', '2026-01-05', 'Tujuan nyata', 'Kat nyata', 'Mod nyata', 'Retensi nyata',
+              'Penerima nyata', 'privasi@nyata.id', 'Hak nyata', 'Anak nyata', 'Lintas nyata', 0),
+             ('n_platform', 'p_platform', '2.0', '2026-02-01', 'Tujuan platform', 'Kat platform', 'Mod platform',
+              'Retensi platform', 'Penerima platform', 'privasi@svara.id', 'Hak platform', 'Anak platform',
+              'Lintas platform', 0);
+      INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at)
+      VALUES ('u_real', 'real@nyata.id', 'Real', 'org_admin', 'active', 'scrypt$x$y', '2026-11-01T00:00:00Z');
+      INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, data_request_contact,
+        cross_border_transfer, notice_version, created_at)
+      VALUES ('org_real', 'Yayasan Nyata', 'organization', '/p', '/t', 'privasi@nyata.id', 0, '1.0', '2026-11-01T00:00:00Z');
+      INSERT INTO platform_profile (id, organization_name, organization_type, policy_url, terms_url, data_request_contact,
+        cross_border_transfer, notice_version, updated_at)
+      VALUES ('platform', 'Svara', 'platform', '/p', '/t', 'privasi@svara.id', 0, '2.0', '2026-11-01T00:00:00Z');
+      INSERT INTO surveys (id, owner_id, profile_id, organization_id, title, purpose, object_label, instructions,
+        status, created_at, updated_at)
+      VALUES ('s_real', 'u_real', 'p_deploy', 'org_real', 'Survei nyata', 'Tujuan', 'Objek', 'Instruksi',
+              'published', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z');
+      INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at)
+      VALUES ('v_real', 's_real', 1, 'published', '1.0', '2026-11-01T00:00:00Z');
+      UPDATE surveys SET current_version_id = 'v_real' WHERE id = 's_real';
+    `);
+    await client.query(
+      `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
+       VALUES ('pl_real', 's_real', 'v_real', 'token-nyata', $1, 'Umum', 'active', NULL, '2026-11-01T00:00:00Z')`,
+      [createHash('sha256').update('token-nyata').digest('hex')],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+interface NoticeColumns {
+  version: string;
+  effective_date: string;
+  purpose: string;
+  data_categories: string;
+  module15_usage: string;
+  retention_text: string;
+  recipients: string;
+  contact: string;
+  rights: string;
+  child_data_text: string;
+  cross_border_text: string;
+}
+
+const NOTICE_FIELDS = [
+  'version', 'effective_date', 'purpose', 'data_categories', 'module15_usage', 'retention_text', 'recipients',
+  'contact', 'rights', 'child_data_text', 'cross_border_text',
+] as const;
+
+function noticeValues(row: NoticeColumns): string[] {
+  return NOTICE_FIELDS.map((field) => row[field]);
+}
+
+const LEGACY_DEPLOY_NOTICE = [
+  '1.0', '2026-01-05', 'Tujuan nyata', 'Kat nyata', 'Mod nyata', 'Retensi nyata', 'Penerima nyata',
+  'privasi@nyata.id', 'Hak nyata', 'Anak nyata', 'Lintas nyata',
+];
+
+test('upgrade 010 → 013 mengisi notice lingkup organisasi dan platform dari notice legacy', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '010' });
+  await seedUpgradedDeployment();
+
+  assert.deepEqual(await migrate(), VERSIONS.slice(10));
+
+  const after = new Client({ connectionString: databaseUrl });
+  await after.connect();
+  try {
+    const orgRows = await after.query<NoticeColumns>(
+      `SELECT ${NOTICE_FIELDS.join(', ')} FROM organization_notices WHERE organization_id = 'org_real'`,
+    );
+    assert.deepEqual(orgRows.rows.map(noticeValues), [LEGACY_DEPLOY_NOTICE], 'notice organisasi = notice legacy yang tadinya tampil');
+    const platformRows = await after.query<NoticeColumns & { id: string }>(
+      `SELECT id, ${NOTICE_FIELDS.join(', ')} FROM platform_notices`,
+    );
+    assert.deepEqual(platformRows.rows.map((row) => row.id), ['pn_2_0']);
+    assert.deepEqual(platformRows.rows.map(noticeValues), [[
+      '2.0', '2026-02-01', 'Tujuan platform', 'Kat platform', 'Mod platform', 'Retensi platform',
+      'Penerima platform', 'privasi@svara.id', 'Hak platform', 'Anak platform', 'Lintas platform',
+    ]]);
+  } finally {
+    await after.end();
+  }
+});
+
+test('013 idempoten dan tidak menimpa notice yang disesuaikan pengelola', async () => {
+  const { migrate } = await import('../migrate.ts');
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query("UPDATE organization_notices SET rights = 'Hak disesuaikan' WHERE organization_id = 'org_real'");
+    const before = await client.query<{ c: number }>('SELECT COUNT(*)::int AS c FROM organization_notices');
+    assert.deepEqual(await migrate(), []);
+    await client.query('BEGIN');
+    try {
+      await client.query("DELETE FROM schema_migrations WHERE version = '013_consent_notice_backfill.sql'");
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+    assert.deepEqual(await migrate(), ['013_consent_notice_backfill.sql'], 'menerapkan ulang 013');
+    const rows = await client.query<{ rights: string }>('SELECT rights FROM organization_notices ORDER BY id');
+    assert.deepEqual(rows.rows, [{ rights: 'Hak disesuaikan' }], 'baris tidak berlipat dan isi tidak ditimpa');
+    assert.equal((await client.query<{ c: number }>('SELECT COUNT(*)::int AS c FROM organization_notices')).rows[0]?.c, before.rows[0]?.c);
+    assert.equal((await client.query<{ c: number }>('SELECT COUNT(*)::int AS c FROM platform_notices')).rows[0]?.c, 1);
+  } finally {
+    await client.end();
+  }
+});
+
+test('organisasi baru setelah migrasi mendapat notice dari jalur provisioning yang sama', async () => {
+  // Jalur provisioning butuh katalog 015; suite ini sengaja berhenti di 013 (lihat VERSIONS.slice(10))
+  // untuk menguji backfill, jadi pindah ke schema terbaru dulu agar organisasi baru diuji seperti di produksi.
+  const { migrate } = await import('../migrate.ts');
+  await migrate();
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(`
+      INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, data_request_contact,
+        cross_border_transfer, notice_version, created_at)
+      VALUES ('org_kedua', 'Yayasan Nyata', 'organization', '/p', '/t', 'privasi@nyata.id', 0, '1.0', '2026-11-22T00:00:00Z');
+      INSERT INTO surveys (id, owner_id, profile_id, organization_id, title, purpose, object_label, instructions,
+        status, created_at, updated_at)
+      VALUES ('s_kedua', 'u_real', 'p_deploy', 'org_kedua', 'Survei kedua', 'Tujuan', 'Objek', 'Instruksi',
+              'published', '2026-11-22T00:00:00Z', '2026-11-22T00:00:00Z');
+      INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at)
+      VALUES ('v_kedua', 's_kedua', 1, 'published', '1.0', '2026-11-22T00:00:00Z');
+    `);
+
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Tidak Ada Profil'), 0, 'tanpa padanan tidak ada notice');
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Yayasan Nyata'), 1);
+    assert.equal(await provisionOrganizationNotice('org_kedua', 'Yayasan Nyata'), 0, 'provisioning ulang tidak menggandakan notice');
+    // Aturan nama+tipe 013 hanya berlaku untuk organisasi yang sudah ada; organisasi baru memakai
+    // padanan profil legacy yang dipilih eksplisit. org_real (dari 013) tidak ikut berubah.
+    const notices = await client.query<{ organization_id: string; version: string; rights: string }>(
+      "SELECT organization_id, version, rights FROM organization_notices WHERE organization_id = 'org_kedua'",
+    );
+    assert.deepEqual(notices.rows, [{ organization_id: 'org_kedua', version: '1.0', rights: 'Hak nyata' }]);
+  } finally {
+    await client.end();
+  }
+});
+
+test('upgrade 016 → 017 menambah indeks jalur panas tanpa mengubah data dan aman diterapkan ulang', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '016' });
+  await seedUpgradedDeployment();
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), false, `${name} belum ada di 016`);
+
+  assert.deepEqual(await migrate(), VERSIONS.slice(16));
+  for (const name of HOT_PATH_INDEXES) assert.equal(await indexExists(name), true, `${name} dibuat oleh 017`);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const link = await client.query<{ id: string }>('SELECT id FROM public_links WHERE token_hash = $1', [
+      createHash('sha256').update('token-nyata').digest('hex'),
+    ]);
+    assert.deepEqual(link.rows, [{ id: 'pl_real' }], 'tautan lama tetap ditemukan lewat token_hash');
+    assert.deepEqual(await migrate(), [], 'migrasi kedua tidak menerapkan ulang 017');
+    await client.query("DELETE FROM schema_migrations WHERE version = '017_hot_path_indexes.sql'");
+    assert.deepEqual(await migrate(), ['017_hot_path_indexes.sql'], 'IF NOT EXISTS: 017 dapat diterapkan ulang tanpa galat');
+    const indexes = await client.query<{ c: number }>(
+      "SELECT COUNT(*)::int AS c FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
+      [HOT_PATH_INDEXES],
+    );
+    assert.equal(indexes.rows[0]?.c, HOT_PATH_INDEXES.length, 'indeks tidak berlipat');
+  } finally {
+    await client.end();
+  }
+  assert.deepEqual(await appliedVersions(), VERSIONS);
 });

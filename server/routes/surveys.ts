@@ -9,26 +9,33 @@ import {
   asString,
   audit,
   canExport,
+  canExportIndividual,
   canReadAggregate,
   canReadFreeText,
   canReadIndividual,
   canReadSurveyMetadata,
+  CSV_BOM,
+  CSV_EOL,
   csvDocument,
+  csvLine,
   fail,
   newId,
   noticeVersionFor,
   parseLimit,
   requireManageSurvey,
-  requirePublishedVersion,
   requireSurvey,
   requireVersion,
   sendError,
   sha256Hex,
   surveyProfileFor,
+  type VersionRow,
 } from '../http.ts';
 import { summaryFor } from '../summary.ts';
+import { CONTINUABLE_CLOSE_REASONS, requirePublishableNotice } from './public.ts';
 
 type QuestionType = 'likert' | 'short_text' | 'single_choice';
+
+type ExportFormat = 'csv' | 'codebook';
 
 interface VersionDbRow {
   id: string;
@@ -104,9 +111,46 @@ interface AnswerDbRow {
 
 export const surveysRouter = Router();
 
+/**
+ * Header Accept permintaan apa adanya (dipotong) untuk audit ekspor. Penerima dan tujuan akhir berkas
+ * setelah diunduh tidak diketahui server, jadi tidak dicatat seolah-olah diketahui.
+ */
+function requestAccept(req: AuthedRequest): string | null {
+  return req.get('accept')?.slice(0, 200) ?? null;
+}
+
+/** Respons per batch ekspor CSV. EXPORT_BATCH_SIZE hanya bisa menurunkannya (test memaksa banyak batch). */
+const EXPORT_BATCH_SIZE = Math.min(500, Math.max(1, Number.parseInt(process.env.EXPORT_BATCH_SIZE ?? '', 10) || 500));
+
 function stringOrNull(value: unknown, field: string, max = 2000): string | null {
   if (value === null || value === undefined || value === '') return null;
   return asString(value, field, max);
+}
+
+/** `YYYY-MM-DD`, atau tanggal-waktu ISO-8601 yang wajib berzona (`Z`/`±hh:mm`). */
+const INVITATION_EXPIRY = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2})))?$/;
+const INVITATION_EXPIRY_ERROR = 'Batas waktu undangan harus tanggal YYYY-MM-DD atau tanggal-waktu ISO-8601 dengan zona waktu.';
+
+/**
+ * Batas waktu undangan dinormalisasi ke ISO UTC; tanggal saja berarti akhir hari itu (UTC).
+ * Kosong = tanpa batas. Nilai lain yang bukan tanggal nyata di masa depan ditolak 422, karena
+ * Date.parse memberi NaN (tidak pernah kedaluwarsa) atau menggulirkan tanggal yang tidak ada
+ * (2026-02-30 → 2 Maret, 24:00 → hari berikutnya).
+ */
+function invitationExpiresAt(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  const match = INVITATION_EXPIRY.exec(value);
+  if (!match) fail(422, 'validation_error', INVITATION_EXPIRY_ERROR, { field: 'expires_at' });
+  const part = (index: number) => Number(match[index] ?? 0);
+  const day = new Date(Date.UTC(part(1), part(2) - 1, part(3)));
+  const real =
+    day.getUTCFullYear() === part(1) && day.getUTCMonth() === part(2) - 1 && day.getUTCDate() === part(3) &&
+    part(4) <= 23 && part(5) <= 59 && part(6) <= 59 && part(7) <= 23 && part(8) <= 59;
+  const at = Date.parse(match[4] === undefined ? `${value}T23:59:59.000Z` : value);
+  if (!real || Number.isNaN(at)) fail(422, 'validation_error', INVITATION_EXPIRY_ERROR, { field: 'expires_at' });
+  if (at <= Date.now()) fail(422, 'validation_error', 'Batas waktu undangan harus di masa depan.', { field: 'expires_at' });
+  return new Date(at).toISOString();
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -190,6 +234,21 @@ function parseQuestions(raw: unknown): QuestionInput[] {
       options,
     };
   });
+}
+
+async function questionInputsFor(versionId: string): Promise<QuestionInput[]> {
+  const rows = await questionRows(versionId);
+  return parseQuestions(await Promise.all(rows.map(serializeQuestion)));
+}
+
+function instrumentSignature(questions: QuestionInput[]): string {
+  return JSON.stringify(questions.map((question) => JSON.stringify([
+    question.code,
+    question.type,
+    question.label,
+    question.required,
+    question.options.map(({ label, value }) => JSON.stringify([label, value])).sort(),
+  ])).sort());
 }
 
 function validateForPublish(title: string, purpose: string, questions: QuestionInput[]): string[] {
@@ -294,7 +353,6 @@ async function currentOrDraft(
 surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    // Satu sumber lingkup: creator hanya miliknya, org_admin organisasinya; tidak ada filter ganda.
     res.json({ data: await accessibleSurveys(req.account) });
   } catch (error) {
     sendError(res, error);
@@ -375,10 +433,38 @@ surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
     const instructions = asString(req.body?.instructions ?? '', 'instructions', 2000);
     const questions = parseQuestions(req.body?.questions ?? []);
     const notice = await noticeVersionFor(survey.organization_id);
-    await withTx(async () => {
-      const { draft } = await currentOrDraft(survey.id);
-      const target = draft ?? (await createDraft(survey.id, notice.notice_version));
-      await writeDraftQuestions(target.id, questions);
+    const preview = req.query.preview === 'true';
+    const instrumentChange = await withTx(async () => {
+      await get<{ id: string }>('SELECT id FROM surveys WHERE id = ? FOR UPDATE', survey.id);
+      const versions = await versionRows(survey.id);
+      const draft = versions.find((version) => version.status === 'draft');
+      // Versi yang sudah ditutup tetap menjadi acuan bila survei pernah terbit.
+      const published = versions.findLast((version) => version.published_at !== null);
+      const draftQuestions = draft ? await questionInputsFor(draft.id) : undefined;
+      const baseline = published ? await questionInputsFor(published.id) : draftQuestions ?? [];
+      const signature = instrumentSignature(questions);
+      const changed = signature !== instrumentSignature(baseline);
+      let affectedResponses = 0;
+      if (changed) {
+        const counts = await all<{ version_id: string; count: number }>(
+          `SELECT r.version_id, COUNT(*) AS count FROM responses r
+           JOIN survey_versions v ON v.id = r.version_id
+           WHERE r.survey_id = ? AND v.published_at IS NOT NULL GROUP BY r.version_id`,
+          survey.id,
+        );
+        for (const row of counts) {
+          const previous = row.version_id === published?.id ? baseline : await questionInputsFor(row.version_id);
+          if (signature !== instrumentSignature(previous)) affectedResponses += row.count;
+        }
+      }
+      const change = { changed, affectedResponses };
+      if (preview) return change;
+      let target = draft ?? published;
+      const savedQuestions = draftQuestions ?? baseline;
+      if (JSON.stringify(questions) !== JSON.stringify(savedQuestions)) {
+        target = draft ?? (await createDraft(survey.id, notice.notice_version));
+        await writeDraftQuestions(target.id, questions);
+      }
       const status = survey.status === 'archived' ? 'draft' : survey.status === 'published' ? 'published' : 'draft';
       await run(
         'UPDATE surveys SET title = ?, purpose = ?, object_label = ?, instructions = ?, status = ?, updated_at = ?, current_version_id = ? WHERE id = ?',
@@ -388,12 +474,13 @@ surveysRouter.put('/surveys/:id', async (req: AuthedRequest, res: Response) => {
         instructions,
         status,
         nowIso(),
-        target.id,
+        target?.id ?? survey.current_version_id,
         survey.id,
       );
+      return change;
     });
-    await audit(req, 'Simpan draf', survey.id, 'berhasil');
-    res.json({ data: await detailFor(survey.id) });
+    if (!preview) await audit(req, 'Simpan draf', survey.id, 'berhasil');
+    res.json({ data: { ...await detailFor(survey.id), instrumentChange } });
   } catch (error) {
     sendError(res, error);
   }
@@ -451,33 +538,64 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
   }
 });
 
+/** `reason`: 'superseded' saat publish versi baru, 'closed' saat survei ditutup; keduanya boleh di-remap. */
+async function closePublishedVersions(
+  surveyId: string,
+  now: string,
+  reason: (typeof CONTINUABLE_CLOSE_REASONS)[number],
+): Promise<Array<{ number: number }>> {
+  return all<{ number: number }>(
+    `WITH closed_versions AS (
+       UPDATE survey_versions SET status = 'closed', closed_at = ?
+       WHERE survey_id = ? AND status = 'published'
+       RETURNING id, number
+     ), closed_links AS (
+       UPDATE public_links SET status = 'closed', closed_reason = ?
+       WHERE version_id IN (SELECT id FROM closed_versions) AND status = 'active'
+         AND CASE
+               WHEN expires_at IS NULL THEN true
+               WHEN pg_input_is_valid(expires_at, 'timestamptz') THEN expires_at::timestamptz >= ?::timestamptz
+               ELSE true
+             END
+     )
+     SELECT number FROM closed_versions ORDER BY number`,
+    now,
+    surveyId,
+    reason,
+    now,
+  );
+}
+
 surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireManageSurvey(req.account, req.params.id);
-    const { draft } = await currentOrDraft(survey.id);
-    if (!draft) fail(409, 'no_draft', 'Tidak ada draf untuk diterbitkan.');
-    const questionRowsForDraft = await questionRows(draft.id);
-    const questions: QuestionInput[] = [];
-    for (const question of questionRowsForDraft) {
-      questions.push({
-        code: question.code,
-        type: question.type,
-        required: question.required === 1,
-        section: question.section,
-        label: question.label,
-        hint: question.hint,
-        group_code: question.group_code,
-        dimension_code: question.dimension_code,
-        direction: question.direction,
-        options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
-      });
-    }
-    const errors = validateForPublish(survey.title, survey.purpose, questions);
-    if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
-    const now = nowIso();
-    let publicToken = '';
-    await withTx(async () => {
+    const { draft, publicToken } = await withTx(async () => {
+      // Serialkan transisi survei tanpa menghalangi FK kiriman ke survei.
+      await get('SELECT id FROM surveys WHERE id = ? FOR NO KEY UPDATE', survey.id);
+      const { draft } = await currentOrDraft(survey.id);
+      if (!draft) fail(409, 'no_draft', 'Tidak ada draf untuk diterbitkan.');
+      const questionRowsForDraft = await questionRows(draft.id);
+      const questions: QuestionInput[] = [];
+      for (const question of questionRowsForDraft) {
+        questions.push({
+          code: question.code,
+          type: question.type,
+          required: question.required === 1,
+          section: question.section,
+          label: question.label,
+          hint: question.hint,
+          group_code: question.group_code,
+          dimension_code: question.dimension_code,
+          direction: question.direction,
+          options: (await optionRows(question.id)).map((option) => ({ label: option.label, value: option.value ?? 0 })),
+        });
+      }
+      const errors = validateForPublish(survey.title, survey.purpose, questions);
+      if (errors.length > 0) fail(422, 'publish_blocked', 'Draf belum memenuhi syarat publikasi.', { errors });
+      await requirePublishableNotice(survey, draft.notice_version);
+      const now = nowIso();
+      await closePublishedVersions(survey.id, now, 'superseded');
       await run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
       await run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
       const existing = await get<{ token: string }>(
@@ -485,10 +603,8 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
         survey.id,
         draft.id,
       );
-      if (existing) {
-        publicToken = existing.token;
-      } else {
-        publicToken = `pl_${randomBytes(12).toString('base64url')}`;
+      const publicToken = existing?.token ?? `pl_${randomBytes(12).toString('base64url')}`;
+      if (!existing) {
         await run(
           `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?)`,
@@ -501,6 +617,7 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
           now,
         );
       }
+      return { draft, publicToken };
     });
     await audit(req, 'Publikasi versi', `${survey.id} · v${draft.number}`, 'berhasil');
     res.json({
@@ -519,15 +636,15 @@ surveysRouter.post('/surveys/:id/close', async (req: AuthedRequest, res: Respons
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireManageSurvey(req.account, req.params.id);
-    const published = (await versionRows(survey.id)).find((version) => version.status === 'published');
-    if (!published) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
-    const now = nowIso();
-    await withTx(async () => {
-      await run('UPDATE survey_versions SET status = ?, closed_at = ? WHERE id = ?', 'closed', now, published.id);
+    const published = await withTx(async () => {
+      await get('SELECT id FROM surveys WHERE id = ? FOR NO KEY UPDATE', survey.id);
+      const now = nowIso();
+      const closedVersions = await closePublishedVersions(survey.id, now, 'closed');
+      if (closedVersions.length === 0) fail(409, 'no_published_version', 'Tidak ada versi terbit untuk ditutup.');
       await run('UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?', 'closed', now, survey.id);
-      await run("UPDATE public_links SET status = 'closed' WHERE version_id = ?", published.id);
+      return closedVersions;
     });
-    await audit(req, 'Tutup versi', `${survey.id} · v${published.number}`, 'berhasil');
+    await audit(req, 'Tutup versi', `${survey.id} · ${published.map(({ number }) => `v${number}`).join(', ')}`, 'berhasil');
     res.json({ data: await detailFor(survey.id) });
   } catch (error) {
     sendError(res, error);
@@ -546,7 +663,15 @@ surveysRouter.post('/surveys/:id/archive', async (req: AuthedRequest, res: Respo
         now,
         survey.id,
       );
-      await run("UPDATE public_links SET status = 'closed' WHERE survey_id = ?", survey.id);
+      // Tautan terbuka, dan tautan tertutup yang masih boleh di-remap (superseded/closed), ditandai
+      // 'archived' agar terbit ulang tidak menghidupkannya. revoked/expired/used adalah keputusan
+      // eksplisit pengelola atau hasil kedaluwarsa dan tidak boleh ditimpa.
+      await run(
+        `UPDATE public_links SET status = 'closed', closed_reason = 'archived'
+          WHERE survey_id = ? AND (status = 'active' OR (status = 'closed' AND closed_reason IN (${CONTINUABLE_CLOSE_REASONS.map(() => '?').join(', ')})))`,
+        survey.id,
+        ...CONTINUABLE_CLOSE_REASONS,
+      );
     });
     await audit(req, 'Arsipkan survei', survey.id, 'berhasil');
     res.json({ data: await detailFor(survey.id) });
@@ -563,10 +688,7 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
     if (!published) fail(409, 'no_published_version', 'Terbitkan versi sebelum membuat undangan.');
     const label = asString(req.body?.label ?? '', 'label', 200);
     if (!label) fail(422, 'validation_error', 'Label penugasan wajib diisi.');
-    const expiresAt = typeof req.body?.expires_at === 'string' && req.body.expires_at ? `${req.body.expires_at}T23:59:59.000Z` : null;
-    if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
-      fail(422, 'validation_error', 'Batas waktu undangan harus di masa depan.');
-    }
+    const expiresAt = invitationExpiresAt(req.body?.expires_at);
     const assignmentId = newId('a');
     const invitationId = newId('inv');
     const code = `UND-${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -594,7 +716,8 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
         nowIso(),
       );
     });
-    await audit(req, 'Buat undangan', `${survey.id} · ${code}`, 'berhasil');
+    // Kode undangan dapat ditukar menjadi token lewat resolver publik; audit hanya memuat ID.
+    await audit(req, 'Buat undangan', `${survey.id} · ${invitationId}`, 'berhasil');
     res.status(201).json({
       data: {
         invitation: { id: invitationId, code, assignment_id: assignmentId, version_id: published.id, status: 'active', expires_at: expiresAt },
@@ -610,14 +733,23 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
 surveysRouter.post('/invitations/:id/revoke', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
-    const invitation = await get<{ id: string; survey_id: string; code: string }>(
-      'SELECT id, survey_id, code FROM invitations WHERE id = ?',
+    const invitation = await get<{ id: string; survey_id: string }>(
+      'SELECT id, survey_id FROM invitations WHERE id = ?',
       req.params.id,
     );
     if (!invitation) fail(404, 'invitation_not_found', 'Undangan tidak ditemukan.');
     await requireManageSurvey(req.account, invitation.survey_id);
-    await run("UPDATE invitations SET status = 'revoked', revoked_at = ? WHERE id = ?", nowIso(), invitation.id);
-    await audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.code}`, 'berhasil');
+    // Undangan terpakai tetap 'used' (sama dengan undangan organisasi). Guard di WHERE menutup
+    // balapan dengan kiriman yang mengunci baris undangan dan menandainya used di transaksinya.
+    const revoked = await run(
+      `UPDATE invitations SET status = 'revoked', revoked_at = ?
+        WHERE id = ? AND status <> 'used' AND used_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM responses r WHERE r.assignment_id = invitations.assignment_id)`,
+      nowIso(),
+      invitation.id,
+    );
+    if (revoked === 0) fail(409, 'invitation_used', 'Undangan sudah dipakai dan tidak dapat dicabut.');
+    await audit(req, 'Cabut undangan', `${invitation.survey_id} · ${invitation.id}`, 'berhasil');
     res.json({ data: { ok: true } });
   } catch (error) {
     sendError(res, error);
@@ -661,6 +793,21 @@ surveysRouter.put('/surveys/:id/settings', async (req: AuthedRequest, res: Respo
   }
 });
 
+/**
+ * Versi ringkasan, jawaban, dan ekspor bila `?version` tidak dikirim: versi terbit, atau setelah survei ditutup atau
+ * diarsipkan, versi terakhir yang pernah terbit. Draf yang ikut ditutup arsip tidak punya published_at.
+ */
+async function defaultResultVersion(surveyId: string): Promise<VersionRow> {
+  const version = await get<VersionRow>(
+    `SELECT * FROM survey_versions
+      WHERE survey_id = ? AND (status = 'published' OR (status = 'closed' AND published_at IS NOT NULL))
+      ORDER BY status = 'published' DESC, number DESC LIMIT 1`,
+    surveyId,
+  );
+  if (!version) fail(409, 'no_published_version', 'Belum ada versi terbit untuk survei ini.');
+  return version;
+}
+
 surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
@@ -669,7 +816,7 @@ surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Respon
       fail(403, 'forbidden_summary', 'Ringkasan tidak tersedia untuk akun ini.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     res.json({ data: await summaryFor(version.id) });
   } catch (error) {
@@ -677,14 +824,45 @@ surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Respon
   }
 });
 
-async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow[]>> {
-  if (versionIds.length === 0) return new Map();
-  const rows = await all<AnswerDbRow>(
-    `SELECT a.response_id, a.question_code, a.option_id, a.value, a.text, a.skipped
-       FROM answers a JOIN responses r ON r.id = a.response_id
-      WHERE r.version_id IN (${versionIds.map(() => '?').join(',')})`,
-    ...versionIds,
+/** Satu batch respons ekspor; keyset `(submitted_at, id)` mengikuti urutan `ORDER BY submitted_at, id`. */
+async function responseBatch(surveyId: string, versionId: string, after: ResponseDbRow | undefined): Promise<ResponseDbRow[]> {
+  if (!after) {
+    return all<ResponseDbRow>(
+      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id LIMIT ?',
+      surveyId,
+      versionId,
+      EXPORT_BATCH_SIZE,
+    );
+  }
+  return all<ResponseDbRow>(
+    `SELECT * FROM responses
+      WHERE survey_id = ? AND version_id = ? AND (submitted_at, id) > (?, ?)
+      ORDER BY submitted_at, id LIMIT ?`,
+    surveyId,
+    versionId,
+    after.submitted_at,
+    after.id,
+    EXPORT_BATCH_SIZE,
   );
+}
+
+/** Tulis potongan CSV dan tunggu `drain` bila buffer penuh; false bila koneksi klien sudah tertutup. */
+async function writeCsv(res: Response, chunk: string): Promise<boolean> {
+  if (!res.write(chunk) && !res.destroyed) {
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        res.off('drain', done);
+        res.off('close', done);
+        resolve();
+      };
+      res.on('drain', done);
+      res.on('close', done);
+    });
+  }
+  return !res.destroyed;
+}
+
+function byResponse(rows: AnswerDbRow[]): Map<string, AnswerDbRow[]> {
   const map = new Map<string, AnswerDbRow[]>();
   for (const row of rows) {
     const list = map.get(row.response_id) ?? [];
@@ -694,18 +872,46 @@ async function answerRows(versionIds: string[]): Promise<Map<string, AnswerDbRow
   return map;
 }
 
+/** Jawaban hanya untuk respons yang sudah dipaginasi, bukan seluruh jawaban versi. */
+async function answersForResponses(responseIds: string[]): Promise<Map<string, AnswerDbRow[]>> {
+  if (responseIds.length === 0) return new Map();
+  const rows = await all<AnswerDbRow>(
+    `SELECT a.response_id, a.question_code, a.option_id, a.value, a.text, a.skipped
+       FROM answers a
+      WHERE a.response_id IN (${responseIds.map(() => '?').join(',')})`,
+    ...responseIds,
+  );
+  return byResponse(rows);
+}
+
 surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
     const survey = await requireSurvey(req.params.id);
+    const format: ExportFormat = req.query.format === 'codebook' ? 'codebook' : 'csv';
     if (!(await canExport(req.account, survey))) {
-      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', { format: req.query.format ?? 'csv' });
+      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
+        format,
+        reason: 'forbidden_export',
+        request_accept: requestAccept(req),
+      });
       fail(403, 'forbidden_export', 'Akun ini tidak memiliki izin ekspor pada survei ini.');
     }
+    if (format === 'csv' && !(await canExportIndividual(req.account, survey))) {
+      await audit(req, 'Ekspor hasil', survey.id, 'ditolak', {
+        format,
+        reason: 'forbidden_export_individual',
+        request_accept: requestAccept(req),
+      });
+      fail(
+        403,
+        'forbidden_export_individual',
+        'Ekspor CSV memuat data per responden; izin membaca jawaban individual atau pengaturan survei menolaknya. Gunakan format=codebook untuk agregat.',
+      );
+    }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
-    const format = req.query.format === 'codebook' ? 'codebook' : 'csv';
     const questions = await questionRows(version.id);
     const includeText = await canReadFreeText(req.account, survey);
     if (format === 'codebook') {
@@ -725,18 +931,21 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
           }
         }
       }
-      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil');
+      const filename = `kodebook-${survey.id}-v${version.number}.csv`;
+      await audit(req, 'Ekspor kodebook', `${survey.id} · v${version.number}`, 'berhasil', {
+        format,
+        rows: rows.length - 1,
+        includeText,
+        individual: false,
+        filename,
+        questions: codebookQuestions.map((question) => question.code),
+        request_accept: requestAccept(req),
+      });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="kodebook-${survey.id}-v${version.number}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(csvDocument(rows));
       return;
     }
-    const responses = await all<ResponseDbRow>(
-      'SELECT * FROM responses WHERE survey_id = ? AND version_id = ? ORDER BY submitted_at, id',
-      survey.id,
-      version.id,
-    );
-    const answersByResponse = await answerRows([version.id]);
     const textQuestions = new Set(questions.filter((question) => question.type === 'short_text').map((question) => question.code));
     const exportQuestions = includeText ? questions : questions.filter((question) => !textQuestions.has(question.code));
     const header = [
@@ -750,31 +959,78 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       'submitted_at',
       ...exportQuestions.map((question) => question.code),
     ];
-    const rows = responses.map((response) => {
-      const answers = answersByResponse.get(response.id) ?? [];
-      const byCode = new Map(answers.map((answer) => [answer.question_code, answer]));
-      return [
-        response.id,
-        response.respondent_id,
-        response.survey_id,
-        version.number,
-        response.assignment_id ?? '',
-        response.collection_mode,
-        response.identity_source,
-        response.submitted_at,
-        ...exportQuestions.map((question) => {
-          const answer = byCode.get(question.code);
-          if (!answer || answer.skipped === 1) return '';
-          if (question.type === 'short_text') return includeText ? answer.text ?? '' : '';
-          return answer.value ?? '';
-        }),
-      ];
+    const object = `${survey.id} · v${version.number}`;
+    const filename = `hasil-${survey.id}-v${version.number}.csv`;
+    // Fail-closed: jejak audit ditulis sebelum data respons dibaca dan sebelum byte pertama dikirim.
+    // Bila INSERT gagal, galat keluar sebagai 500 JSON tanpa isi CSV. Baris ini berstatus 'dimulai' dan
+    // satu-satunya yang memuat kolom dan Accept; hasil akhir dan jumlah baris dicatat terpisah di bawah.
+    await audit(req, 'Mulai ekspor CSV', object, 'dimulai', {
+      format,
+      includeText,
+      individual: true,
+      filename,
+      columns: header,
+      request_accept: requestAccept(req),
     });
-    await audit(req, 'Ekspor CSV', `${survey.id} · v${version.number}`, 'berhasil', { rows: rows.length, includeText });
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="hasil-${survey.id}-v${version.number}.csv"`);
-    res.send(csvDocument([header, ...rows]));
+    // Baris ditulis per batch; header HTTP baru terkirim bersama batch pertama sehingga galat sebelumnya tetap JSON.
+    let text = `${CSV_BOM}${csvLine(header)}${CSV_EOL}`;
+    let rows = 0;
+    let stopped: string | undefined;
+    try {
+      for (let after: ResponseDbRow | undefined; ; ) {
+        const batch = await responseBatch(survey.id, version.id, after);
+        const answersByResponse = await answersForResponses(batch.map((response) => response.id));
+        if (res.destroyed) break;
+        for (const response of batch) {
+          const answers = answersByResponse.get(response.id) ?? [];
+          const byCode = new Map(answers.map((answer) => [answer.question_code, answer]));
+          text += `${csvLine([
+            response.id,
+            response.respondent_id,
+            response.survey_id,
+            version.number,
+            response.assignment_id ?? '',
+            response.collection_mode,
+            response.identity_source,
+            response.submitted_at,
+            ...exportQuestions.map((question) => {
+              const answer = byCode.get(question.code);
+              if (!answer || answer.skipped === 1) return '';
+              if (question.type === 'short_text') return includeText ? answer.text ?? '' : '';
+              return answer.value ?? '';
+            }),
+          ])}${CSV_EOL}`;
+        }
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        }
+        const open = text === '' || (await writeCsv(res, text));
+        rows += batch.length;
+        if (!open || batch.length < EXPORT_BATCH_SIZE) break;
+        text = '';
+        after = batch[batch.length - 1];
+      }
+    } catch (error) {
+      if (!res.headersSent) throw error;
+      console.error('[api] ekspor CSV terhenti di tengah aliran', error);
+      stopped = 'stream_error';
+    }
+    const metadata = { format, rows, includeText, individual: true, filename };
+    if (stopped || res.destroyed) {
+      // Sebagian baris mungkin sudah keluar; putus koneksi agar klien tidak menganggap berkas lengkap.
+      res.destroy();
+      await audit(req, 'Ekspor CSV', object, 'gagal', { ...metadata, reason: stopped ?? 'client_closed' });
+      return;
+    }
+    await audit(req, 'Ekspor CSV', object, 'berhasil', metadata);
+    res.end();
   } catch (error) {
+    if (res.headersSent) {
+      console.error('[api] ekspor CSV terhenti di tengah aliran', error);
+      res.destroy();
+      return;
+    }
     sendError(res, error);
   }
 });
@@ -788,7 +1044,7 @@ surveysRouter.get('/surveys/:id/responses', async (req: AuthedRequest, res: Resp
       fail(403, 'forbidden_individual', 'Akun ini tidak memiliki izin membaca jawaban individual.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     const includeText = await canReadFreeText(req.account, survey);
     const rows = await all<ResponseDbRow>(
@@ -798,7 +1054,7 @@ surveysRouter.get('/surveys/:id/responses', async (req: AuthedRequest, res: Resp
       parseLimit(req.query.limit),
       Number.parseInt(typeof req.query.offset === 'string' ? req.query.offset : '0', 10) || 0,
     );
-    const answersByResponse = await answerRows([version.id]);
+    const answersByResponse = await answersForResponses(rows.map((response) => response.id));
     await audit(req, 'Baca jawaban individual', `${survey.id} · v${version.number}`, 'berhasil', { count: rows.length, includeText });
     res.json({
       data: rows.map((response) => ({

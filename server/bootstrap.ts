@@ -1,7 +1,6 @@
 import { all, get, nowIso } from './db.ts';
-import type { AccountRow } from './security.ts';
-import { accessibleSurveys, canReadAggregate, surveyProfileFor, type SurveyProfile } from './http.ts';
-import { summaryFor, type VersionSummary } from './summary.ts';
+import { redactAuditRow, type AccountRow } from './security.ts';
+import { accessibleSurveys, surveyProfileFor, type SurveyProfile } from './http.ts';
 
 interface ProfileRow {
   id: string;
@@ -188,7 +187,6 @@ export interface BootstrapPayload {
   auditLogs: unknown[];
   integrationEvents: unknown[];
   dataRequests: unknown[];
-  summaries: Record<string, VersionSummary>;
   serverTime: string;
 }
 
@@ -223,7 +221,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       auditLogs: [],
       integrationEvents: [],
       dataRequests: [],
-      summaries: {},
       serverTime: nowIso(),
     };
   }
@@ -267,6 +264,9 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
   const manageableSurveyIds = surveys
     .filter((survey) => account.role === 'super_admin' || survey.owner_id === account.id)
     .map((survey) => survey.id);
+  const versionStatus = new Map(versions.map((row) => [row.id, row.status]));
+  // Status tampilan saja (baris DB tidak diubah), urutannya sama dengan formulir publik: kedaluwarsa
+  // didahulukan, lalu 'closed' bila versi undangan tidak lagi terbit (mis. sesudah versi baru terbit).
   const invitations = manageableSurveyIds.length
     ? (
         await all<InvitationRow>(
@@ -276,9 +276,13 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       ).map((row) => ({
         ...row,
         status:
-          row.status === 'active' && row.expires_at && new Date(row.expires_at).getTime() < Date.now()
-            ? 'expired'
-            : row.status,
+          row.status !== 'active'
+            ? row.status
+            : row.expires_at && new Date(row.expires_at).getTime() < Date.now()
+              ? 'expired'
+              : versionStatus.get(row.version_id) !== 'published'
+                ? 'closed'
+                : row.status,
         token_hash: '',
       }))
     : [];
@@ -323,7 +327,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       : [];
   const auditLogs =
     account.role === 'super_admin'
-      ? await all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')
+      ? (await all<AuditRow>('SELECT * FROM audit_logs ORDER BY at DESC LIMIT 250')).map(redactAuditRow)
       : [];
   const integrationEvents =
     account.role === 'super_admin'
@@ -346,14 +350,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       { allowResults: boolean(row.allow_results), allowIndividual: boolean(row.allow_individual) },
     ]),
   );
-
-  const summaries: Record<string, VersionSummary> = {};
-  for (const version of versions) {
-    const survey = surveys.find((item) => item.id === version.survey_id);
-    if (survey && (await canReadAggregate(account, survey))) {
-      summaries[version.id] = await summaryFor(version.id);
-    }
-  }
 
   // UI tidak menyusun profil dari fixture: payload membawa profil kebijakan tiap survei.
   const surveyProfiles: Record<string, SurveyProfile> = {};
@@ -388,7 +384,6 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
     auditLogs,
     integrationEvents: integrationEvents.map((row) => ({ ...row, simulated: boolean(row.simulated) })),
     dataRequests,
-    summaries,
     serverTime: nowIso(),
   };
 }

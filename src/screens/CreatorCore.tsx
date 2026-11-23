@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Shell } from '../components/Shell';
 import {
@@ -29,13 +29,14 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor } from '../lib/fixtures/surveys';
+import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
-import { ApiError, type SurveyScope } from '../lib/api';
+import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
-import { createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
+import { ShortTextAnswer } from './Respondent';
+import { allPublicLinks, canManageAs, createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -47,7 +48,7 @@ const STATUS_TONE = {
 export function MissingSurvey() {
   return (
     <Card>
-      <h1 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h1>
+      <h2 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h2>
       <p className="mt-2 text-body text-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
       <div className="mt-4"><ActionLink to={ROUTES.creator}>Kembali ke daftar survei</ActionLink></div>
     </Card>
@@ -58,7 +59,7 @@ export function SurveyNav({ id }: { id: string }) {
   const pathname = usePathname() ?? '';
   const { session } = useStore();
   const survey = findSurvey(id);
-  const canManage = Boolean(session?.serverRole === 'creator' && survey?.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const links = canManage
     ? [
         { to: ROUTES.creatorEdit(id), label: 'Editor' },
@@ -155,7 +156,7 @@ export function CreatorListPage() {
                 id="filter-status"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as typeof filter)}
-                className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
               >
                 <option value="semua">Semua</option>
                 <option value="draft">Draf</option>
@@ -172,7 +173,7 @@ export function CreatorListPage() {
                   value={scope}
                   onChange={(e) => setScopeChoice(e.target.value as SurveyScope)}
                   aria-describedby="new-survey-scope-hint"
-                  className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                  className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                 >
                   <option value="organization">Organisasi</option>
                   <option value="individual">Individu</option>
@@ -227,16 +228,16 @@ export function CreatorListPage() {
               <Table head={['Judul', 'Status', 'Versi', 'Diperbarui', 'Aksi']}>
                 {rows.map((s) => {
                   const vs = versionsFor(s.id);
-                  const canManage = canCreate && s.owner_id === session?.id;
+                  const canManage = canManageAs(session, s);
                   return (
                     <tr key={s.id}>
                       <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block text-caption text-muted">{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {s.updated_at.slice(0, 10)}</span>
+                        <span className="mt-1 block text-caption text-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {formatWIB(s.updated_at)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>
-                      <Td>{s.updated_at.slice(0, 10)}</Td>
+                      <Td>{formatWIB(s.updated_at)}</Td>
                       <Td>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           {canManage && <PlainLink to={link(ROUTES.creatorEdit(s.id))}>Buka editor</PlainLink>}
@@ -293,6 +294,7 @@ interface EditableQuestion {
   hint: string;
   group_code: string;
   dimension_code: string;
+  direction: string | null;
   options: EditableOption[];
 }
 
@@ -317,6 +319,7 @@ function editableQuestionsFor(versionId: string, drafts: Record<string, { codes:
     hint: question.hint ?? '',
     group_code: question.group_code ?? '',
     dimension_code: question.dimension_code ?? '',
+    direction: question.direction ?? null,
     options: optionsFor(question.id).map((option) => ({
       key: option.id,
       label: option.label,
@@ -336,6 +339,7 @@ function blankQuestion(): EditableQuestion {
     hint: '',
     group_code: '',
     dimension_code: '',
+    direction: null,
     options: [
       { key: nextEditorKey('o'), label: '', value: '1' },
       { key: nextEditorKey('o'), label: '', value: '2' },
@@ -349,7 +353,7 @@ export function EditorPage({ id }: { id: string }) {
   const profile = surveyProfileOf(id);
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state } = useScreenState('creator-edit');
   const activeVersion = editorVersionFor(id);
   const [title, setTitle] = useState(drafts[id]?.title ?? survey?.title ?? '');
@@ -364,6 +368,8 @@ export function EditorPage({ id }: { id: string }) {
   const [attempted, setAttempted] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [pendingSave, setPendingSave] = useState<{ payload: SurveyPayload; snapshot: string; affectedResponses: number } | null>(null);
+  const saveTriggerRef = useRef<HTMLButtonElement | null>(null);
   const baselineRef = useRef<string | null>(null);
   const snapshot = JSON.stringify({ title, purpose, instructions, editorQuestions });
 
@@ -374,6 +380,12 @@ export function EditorPage({ id }: { id: string }) {
     }
     setDirty(snapshot !== baselineRef.current);
   }, [snapshot]);
+
+  useEffect(() => {
+    if (pendingSave || busy || !saveTriggerRef.current) return;
+    saveTriggerRef.current.focus();
+    saveTriggerRef.current = null;
+  }, [pendingSave, busy]);
 
   const duplicate = editorQuestions
     .map((question) => question.code.trim().toUpperCase())
@@ -398,7 +410,7 @@ export function EditorPage({ id }: { id: string }) {
   }
   const showIssues = attempted || state === 'validation';
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Editor instrumen" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -434,12 +446,28 @@ export function EditorPage({ id }: { id: string }) {
     });
   };
 
-  const onSave = () => {
+  const persistDraft = async (payload: SurveyPayload, savedSnapshot: string) => {
+    const at = await saveDraft(id, payload);
+    baselineRef.current = savedSnapshot;
+    setDirty(false);
+    setSaved(at);
+    setPendingSave(null);
+    notify('Draf berhasil disimpan.');
+  };
+
+  const reportSaveError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Draf gagal disimpan.';
+    setSaveError(message);
+    notify(message, 'danger');
+  };
+
+  const onSave = (event: MouseEvent<HTMLButtonElement>) => {
+    const trigger = event.currentTarget;
     setAttempted(true);
     setSaveError(null);
     if (editorQuestions.length === 0) return;
     setBusy(true);
-    void saveDraft(id, {
+    const payload: SurveyPayload = {
       title,
       purpose,
       object_label: survey.object_label,
@@ -453,26 +481,25 @@ export function EditorPage({ id }: { id: string }) {
         hint: question.hint.trim() || null,
         group_code: question.group_code.trim() || null,
         dimension_code: question.dimension_code.trim() || null,
-        direction: null,
+        direction: question.direction,
         options: question.type === 'short_text'
           ? []
           : question.options.map((option, optionIndex) => ({
               label: option.label,
-              value: Number(option.value) || optionIndex + 1,
+              value: option.value.trim() === '' ? optionIndex + 1 : Number(option.value),
             })),
       })),
-    })
-      .then((at) => {
-        baselineRef.current = snapshot;
-        setDirty(false);
-        setSaved(at);
-        notify('Draf berhasil disimpan.');
+    };
+    void previewSurveyChange(id, payload)
+      .then(async ({ instrumentChange }) => {
+        if (instrumentChange.changed && instrumentChange.affectedResponses > 0) {
+          saveTriggerRef.current = trigger;
+          setPendingSave({ payload, snapshot, affectedResponses: instrumentChange.affectedResponses });
+          return;
+        }
+        await persistDraft(payload, snapshot);
       })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Draf gagal disimpan.';
-        setSaveError(message);
-        notify(message, 'danger');
-      })
+      .catch(reportSaveError)
       .finally(() => setBusy(false));
   };
 
@@ -486,7 +513,7 @@ export function EditorPage({ id }: { id: string }) {
         emptyTitle="Belum ada pertanyaan"
         emptyDetail="Draf ini belum memiliki item. Tambahkan bagian dan pertanyaan sebelum diterbitkan."
         emptyAction={<ActionLink to={ROUTES.creatorPublish(id)} variant="secondary">Lihat validasi publikasi</ActionLink>}
-        permissionDetail="Hanya pemilik survei yang dapat mengubah draf ini."
+        permissionDetail="Hanya pemilik atau admin organisasi survei yang dapat mengubah draf ini."
       >
         <div className="flex flex-col gap-5">
           
@@ -751,6 +778,23 @@ export function EditorPage({ id }: { id: string }) {
         </Shell>
       </NavigationGuardProvider>
       <ConfirmDialog
+        open={pendingSave !== null}
+        title="Simpan perubahan pertanyaan?"
+        detail={`${new Intl.NumberFormat('id-ID').format(pendingSave?.affectedResponses ?? 0)} jawaban terdampak. Jawaban lama tidak akan sebanding dengan versi baru. Jawaban yang sudah masuk tetap tersimpan.`}
+        confirmLabel="Tetap simpan draf"
+        tone="primary"
+        busy={busy}
+        onClose={() => setPendingSave(null)}
+        onConfirm={() => {
+          if (!pendingSave) return;
+          setSaveError(null);
+          setBusy(true);
+          void persistDraft(pendingSave.payload, pendingSave.snapshot)
+            .catch(reportSaveError)
+            .finally(() => setBusy(false));
+        }}
+      />
+      <ConfirmDialog
         open={Boolean(pendingDelete)}
         title={pendingDelete?.kind === 'option' ? 'Hapus opsi ini?' : 'Hapus pertanyaan ini?'}
         detail={pendingDelete
@@ -784,12 +828,12 @@ export function PreviewPage({ id }: { id: string }) {
   const survey = findSurvey(id);
   const { session, revision } = useStore();
   void revision;
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state, link } = useScreenState('creator-preview');
   const version = editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Pratinjau tampilan responden" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -804,7 +848,7 @@ export function PreviewPage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada item untuk dipratinjau"
         emptyDetail="Tambahkan pertanyaan pada editor terlebih dahulu."
-        permissionDetail="Pratinjau hanya tersedia bagi pemilik survei."
+        permissionDetail="Pratinjau hanya tersedia bagi pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -828,6 +872,7 @@ export function PreviewPage({ id }: { id: string }) {
               <fieldset key={q.id} className="flex flex-col gap-2 border-0 p-0">
                 <legend className="text-body font-bold text-ink">
                   {q.order}. {q.label} {q.required && <span className="text-danger">*</span>}
+                  {q.required && <span className="sr-only"> (wajib)</span>}
                 </legend>
                 {q.type !== 'short_text' ? (
                   <div className="flex flex-wrap gap-2">
@@ -839,9 +884,9 @@ export function PreviewPage({ id }: { id: string }) {
                     ))}
                   </div>
                 ) : (
-                  <TextArea aria-label={q.label} placeholder="Isian singkat (opsional)" />
+                  <ShortTextAnswer id={`preview-${q.id}-text`} required={q.required} hint={q.hint} />
                 )}
-                {q.hint && <p className="text-caption text-muted">{q.hint}</p>}
+                {q.type !== 'short_text' && q.hint && <p className="text-caption text-muted">{q.hint}</p>}
               </fieldset>
             ))}
           </Card>
@@ -864,7 +909,7 @@ export function PublishPage({ id }: { id: string }) {
   const { revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state, link } = useScreenState('creator-publish');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -873,6 +918,11 @@ export function PublishPage({ id }: { id: string }) {
   const [publishedToken, setPublishedToken] = useState<string | null>(null);
   const draft = draftVersionFor(id);
   const hasDraft = Boolean(draft);
+  const published = publishedVersionFor(id);
+  // Tautan aktif versi terbit dibaca dari bootstrap agar kontrol berbagi tetap ada setelah halaman dimuat ulang.
+  const shareToken = publishedToken
+    ?? allPublicLinks().find((item) => item.survey_id === id && item.version_id === published?.id && item.status === 'active')?.token
+    ?? null;
   const version = draft ?? editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
   const duplicateCodes = items
@@ -894,7 +944,7 @@ export function PublishPage({ id }: { id: string }) {
   ];
   const blocking = !hasDraft || blockers.length > 0 || state === 'closed' || state === 'permission-denied' || state === 'error' || state === 'loading';
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Publikasi versi" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -907,7 +957,7 @@ export function PublishPage({ id }: { id: string }) {
       <StateView
         routeId="creator-publish"
         state={state}
-        permissionDetail="Publikasi hanya dapat dilakukan pemilik survei."
+        permissionDetail="Publikasi hanya dapat dilakukan pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -981,16 +1031,16 @@ export function PublishPage({ id }: { id: string }) {
                 {publishedToken ? 'Versi sudah diterbitkan' : hasDraft ? 'Terbitkan versi' : 'Tidak ada draf'}
               </Button>
               <ActionLink to={ROUTES.creatorEdit(id)} variant="secondary">Kembali ke editor</ActionLink>
-              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!publishedToken}>
+              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!shareToken && !published} disabledReason="Terbitkan satu versi terlebih dahulu">
                 Kelola tautan
               </ActionLink>
             </div>
             <p className="text-caption text-muted">
               {session ? `Diterbitkan oleh ${session.name}. ` : ''}Perubahan isi setelah terbit memerlukan versi baru.
             </p>
-            {publishedToken && (
-              <Banner tone="success" title="Tautan responden">
-                <PlainLink to={ROUTES.respondentIntro(publishedToken)}>/s/{publishedToken}</PlainLink>
+            {shareToken && (
+              <Banner tone={publishedToken ? 'success' : 'info'} title="Tautan responden">
+                <PlainLink to={ROUTES.respondentIntro(shareToken)}>/s/{shareToken}</PlainLink>
                 <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Buka halaman pembagian</ActionLink></div>
               </Banner>
             )}

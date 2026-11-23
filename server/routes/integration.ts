@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { all, get, nowIso, run } from '../db.ts';
@@ -5,16 +6,26 @@ import { fail, newId, parseLimit, sendError } from '../http.ts';
 
 interface SurveyRow {
   id: string;
-  title: string;
-  status: string;
-  current_version_id: string | null;
+  organization_id: string | null;
+}
+
+interface IntegrationTokenScope {
+  organization_id: string | null;
+  survey_id: string | null;
 }
 
 interface VersionRow {
   id: string;
   number: number;
-  status: string;
+  status: 'published' | 'closed';
 }
+
+/**
+ * SEC-12 hanya menolak draf. Versi yang pernah terbit tetap terbaca setelah ditutup oleh versi baru
+ * atau oleh penutupan survei (PRD §8: skema berversi, filter versi); draf yang ikut ditutup arsip
+ * tidak pernah punya published_at sehingga tetap ditolak.
+ */
+const PUBLISHED_ONCE = "(status = 'published' OR (status = 'closed' AND published_at IS NOT NULL))";
 
 interface ResponseRow {
   id: string;
@@ -34,39 +45,55 @@ interface AnswerRow {
 
 export const integrationRouter = Router();
 
-function serviceAuthorized(req: Request): boolean {
-  const expected = process.env.INTEGRATION_TOKEN;
-  const header = req.get('authorization') ?? '';
-  return Boolean(expected) && header === `Bearer ${expected}`;
+function serviceToken(req: Request): string | undefined {
+  const expected = process.env.INTEGRATION_TOKEN?.trim();
+  return expected && req.get('authorization') === `Bearer ${expected}` ? expected : undefined;
+}
+
+async function integrationScope(token: string): Promise<IntegrationTokenScope | undefined> {
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const scope = await get<IntegrationTokenScope>(
+    'SELECT organization_id, survey_id FROM integration_token_scopes WHERE token_hash = ?',
+    tokenHash,
+  );
+  if (!scope || Boolean(scope.organization_id) === Boolean(scope.survey_id)) return undefined;
+  return scope;
 }
 
 integrationRouter.get('/integration/survey-data', async (req: Request, res: Response) => {
   try {
-    if (!serviceAuthorized(req)) {
-      fail(401, 'unauthenticated_service', 'Kredensial layanan tidak valid.');
-    }
+    const token = serviceToken(req);
+    if (!token) fail(401, 'unauthenticated_service', 'Kredensial layanan tidak valid.');
+    const scope = await integrationScope(token);
+    if (!scope) fail(403, 'forbidden_service_scope', 'Cakupan kredensial layanan tidak tersedia.');
     const surveyId = typeof req.query.survey_id === 'string' ? req.query.survey_id : '';
-    const survey = await get<SurveyRow>('SELECT id, title, status, current_version_id FROM surveys WHERE id = ?', surveyId);
+    const survey = await get<SurveyRow>('SELECT id, organization_id FROM surveys WHERE id = ?', surveyId);
     if (!survey) fail(404, 'not_found', 'Survei tidak ditemukan untuk cakupan layanan.');
+    if (
+      (scope.organization_id && survey.organization_id !== scope.organization_id) ||
+      (scope.survey_id && survey.id !== scope.survey_id)
+    ) {
+      fail(404, 'not_found', 'Survei tidak ditemukan untuk cakupan layanan.');
+    }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
     let version: VersionRow | undefined;
     if (requested) {
       const requestedNumber = Number(requested);
       version = Number.isInteger(requestedNumber)
         ? await get<VersionRow>(
-            'SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND (id = ? OR number = ?)',
+            `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} AND (id = ? OR number = ?)`,
             survey.id,
             requested,
             requestedNumber,
           )
         : await get<VersionRow>(
-            'SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND id = ?',
+            `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} AND id = ?`,
             survey.id,
             requested,
           );
     } else {
       version = await get<VersionRow>(
-        "SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND status = 'published' ORDER BY number DESC LIMIT 1",
+        `SELECT id, number, status FROM survey_versions WHERE survey_id = ? AND ${PUBLISHED_ONCE} ORDER BY number DESC LIMIT 1`,
         survey.id,
       );
     }
@@ -124,6 +151,7 @@ integrationRouter.get('/integration/survey-data', async (req: Request, res: Resp
       label: 'SIMULASI Modul 15 — bukan integrasi nyata.',
       survey_id: survey.id,
       survey_version: version.number,
+      survey_version_status: version.status,
       collection_modes: ['standalone', 'integrated'],
       identity_sources: ['local', 'module_13'],
       columns: ['response_id', 'respondent_id', 'submitted_at', 'assignment_id', 'question_code', 'value', 'option_id'],

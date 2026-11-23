@@ -12,6 +12,7 @@ import {
   Code,
   ConfirmDialog,
   Divider,
+  EmptyState,
   Field,
   Label,
   Muted,
@@ -27,7 +28,6 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
-import { accessGrants } from '../lib/fixtures/records';
 import { formatWIB } from '../lib/summary';
 import { getSummary, getResponses, downloadExport, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
 import { useToast } from '../components/Toast';
@@ -36,8 +36,10 @@ import {
   allInvitations,
   allPublicLinks,
   archiveSurvey,
+  canManageAs,
   closeVersion,
   createInvitation,
+  localGrantsFor,
   revokeInvitation,
   saveSettings,
   surveyProfileOf,
@@ -61,7 +63,7 @@ export function SharePage({ id }: { id: string }) {
   const { revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const hasPublishedVersion = Boolean(publishedVersionFor(id));
   const canInvite = hasPublishedVersion && survey?.status !== 'closed' && survey?.status !== 'archived' && state !== 'closed';
   const [label, setLabel] = useState('');
@@ -87,7 +89,7 @@ export function SharePage({ id }: { id: string }) {
     }
   }
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Bagikan survei" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -102,7 +104,7 @@ export function SharePage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada tautan atau undangan"
         emptyDetail="Buat tautan umum atau undangan individual untuk mulai menerima jawaban."
-        permissionDetail="Hanya pemilik survei yang dapat membuat dan mencabut undangan."
+        permissionDetail="Hanya pemilik atau admin organisasi survei yang dapat membuat dan mencabut undangan."
       >
         <div className="flex flex-col gap-5">
           
@@ -192,9 +194,9 @@ export function SharePage({ id }: { id: string }) {
                     <span className="mt-1 block font-mono text-caption text-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
                   </Td>
                   <Td><Badge tone={INVITATION_STATUS_TONE[i.status]}>{INVITATION_STATUS_LABEL[i.status]}</Badge></Td>
-                  <Td>{i.expires_at ? i.expires_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{i.used_at ? i.used_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{i.revoked_at ? i.revoked_at.slice(0, 10) : 'Belum ada'}</Td>
+                  <Td>{i.expires_at ? formatWIB(i.expires_at) : 'Belum ada'}</Td>
+                  <Td>{i.used_at ? formatWIB(i.used_at) : 'Belum ada'}</Td>
+                  <Td>{i.revoked_at ? formatWIB(i.revoked_at) : 'Belum ada'}</Td>
                   <Td>
                     {i.status === 'active' ? (
                       <button
@@ -286,13 +288,14 @@ export function SharePage({ id }: { id: string }) {
 
 export function ResultsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { revision, session, grants, settings } = useStore();
+  const { revision, session, grants, settings, admin } = useStore();
   void revision;
   const { state } = useScreenState('creator-results');
-  const survey = findSurvey(id);
+  // Daftar survei dari bootstrap server; sebelum itu tidak ada data nyata yang boleh dirender (NEW-UX-A).
+  const survey = admin?.surveys.find((entry) => entry.id === id);
   const versionList = versionsFor(id);
   const selectableVersions = versionList.filter((version) => version.status !== 'draft');
-  const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? versionList[0]?.id ?? '';
+  const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? '';
   const [versionId, setVersionId] = useState(fallbackVersion);
   useEffect(() => {
     if (versionId && versionList.some((version) => version.id === versionId)) return;
@@ -333,13 +336,19 @@ export function ResultsPage({ id }: { id: string }) {
 
   const denied = loadError instanceof ApiError && loadError.status === 403;
   const responsesDenied = responsesError instanceof ApiError && responsesError.status === 403;
-  const myGrants = accessGrants.filter(
-    (grant) => grant.account_id === session?.id && grant.survey_id === id,
-  );
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
-  const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
-  const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
-  const availableVersions = selectableVersions.length > 0 ? selectableVersions : versionList;
+  // Grant dibaca dari bootstrap server lewat store, bukan fixture (NEW-UX-A), tetapi tetap per akun+survei.
+  const myGrants = localGrantsFor(session?.id ?? '').filter((grant) => grant.survey_id === id);
+  const canManage = canManageAs(session, survey);
+  // Server: canExport/canReadIndividual/canExportIndividual mengembalikan true untuk pengelola (pemilik atau org_admin lingkup).
+  const exportAllowed = canManage || myGrants.some((grant) => grants[grant.id]?.export);
+  const individualAllowed = canManage || (myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual));
+  // CSV memuat baris per responden: server mensyaratkan izin ekspor dan izin baca individual (canExportIndividual).
+  const csvAllowed = exportAllowed && individualAllowed;
+  const csvBlockedReason = !exportAllowed || csvAllowed
+    ? null
+    : myGrants.some((grant) => grants[grant.id]?.read)
+      ? 'Pengaturan survei belum mengizinkan petugas berizin membaca jawaban individual, jadi CSV per responden tidak dapat diunduh. Kodebook tetap dapat diunduh.'
+      : 'CSV memuat jawaban per responden dan memerlukan izin membaca jawaban individual. Administrator dapat memberikan izin itu; kodebook tetap dapat diunduh.';
 
   const loadResponses = () => {
     setResponsesBusy(true);
@@ -356,11 +365,34 @@ export function ResultsPage({ id }: { id: string }) {
   if (!survey) {
     return (
       <Shell kind="creator" title="Hasil per versi" subtitle="Survei tidak ditemukan.">
-        <Card>
-          <h1 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h1>
-          <p className="mt-2 text-body text-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
-          <div className="mt-4"><ActionLink to={ROUTES.creator}>Kembali ke daftar survei</ActionLink></div>
-        </Card>
+        <MissingSurvey />
+      </Shell>
+    );
+  }
+
+  // Draf tidak menerima kiriman; tanpa versi terbit tidak ada selector, ringkasan, atau ekspor yang bisa dipakai.
+  if (selectableVersions.length === 0) {
+    return (
+      <Shell kind="creator" title="Hasil per versi" subtitle="Distribusi jawaban per versi. Opsi tanpa pemilih tetap ditampilkan sebagai nol.">
+        <StateView
+          routeId="creator-results"
+          state={state}
+          emptyTitle="Belum ada versi diterbitkan"
+          emptyDetail="Hasil hanya tersedia setelah versi diterbitkan."
+          permissionDetail="Unduhan jawaban individual memerlukan izin ekspor terpisah."
+        >
+          <div className="flex flex-col gap-5">
+            <SurveyNav id={id} />
+            <EmptyState
+              title="Belum ada versi diterbitkan"
+              action={canManage ? <ActionLink to={ROUTES.creatorPublish(id)}>Lanjut ke publikasi</ActionLink> : undefined}
+            >
+              {canManage
+                ? 'Hasil dan ekspor tersedia setelah versi diterbitkan. Terbitkan draf dari halaman publikasi untuk mulai menerima jawaban.'
+                : 'Hasil dan ekspor tersedia setelah pemilik atau admin organisasi menerbitkan versi.'}
+            </EmptyState>
+          </div>
+        </StateView>
       </Shell>
     );
   }
@@ -393,9 +425,9 @@ export function ResultsPage({ id }: { id: string }) {
                     setResponses(null);
                     setResponsesError(null);
                   }}
-                  className="mt-1 min-h-[52px] w-full rounded-md border border-n200 bg-n0 px-3 text-body-sm text-ink"
+                  className="mt-1 min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                 >
-                  {availableVersions.map((v) => (
+                  {selectableVersions.map((v) => (
                     <option key={v.id} value={v.id}>Versi {v.number} · {STATUS_LABEL[v.status]}</option>
                   ))}
                 </select>
@@ -536,6 +568,10 @@ export function ResultsPage({ id }: { id: string }) {
               <Banner tone="info" title="Izin ekspor diperlukan">
                 Akun ini belum memiliki izin ekspor pada survei ini. Administrator dapat memberikan izin ekspor terpisah.
               </Banner>
+            ) : csvBlockedReason ? (
+              <Banner tone="info" title="Hanya kodebook yang dapat diunduh">
+                <span id="alasan-csv-nonaktif">{csvBlockedReason}</span>
+              </Banner>
             ) : (
               <Banner tone="info" title="Ekspor diizinkan">
                 CSV UTF-8 per versi dan kodebook. Nama tidak masuk ekspor standar; token tidak pernah diekspor.
@@ -544,7 +580,8 @@ export function ResultsPage({ id }: { id: string }) {
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="secondary"
-                disabled={!exportAllowed || denied || !summary || summary.total === 0 || loading || busy}
+                disabled={!csvAllowed || denied || !summary || summary.total === 0 || loading || busy}
+                aria-describedby={!denied && csvBlockedReason ? 'alasan-csv-nonaktif' : undefined}
                 loading={busy}
                 onClick={() => {
                   setBusy(true);
@@ -609,7 +646,7 @@ export function SettingsPage({ id }: { id: string }) {
   // Pemberitahuan dibaca dari bootstrap server, bukan fixture; tidak ada fallback ke profil lain.
   const notice = notices.find((row) => row.profile_id === profile?.id) ?? null;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
   const [allowIndividual, setAllowIndividual] = useState(settings[id]?.allowIndividual ?? false);
   const [busy, setBusy] = useState(false);
@@ -620,7 +657,7 @@ export function SettingsPage({ id }: { id: string }) {
     setAllowIndividual(settings[id]?.allowIndividual ?? false);
   }, [id, settings]);
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Pengaturan dan pemberitahuan" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -633,7 +670,7 @@ export function SettingsPage({ id }: { id: string }) {
       <StateView
         routeId="creator-settings"
         state={state}
-        permissionDetail="Pengaturan hanya dapat diubah pemilik survei."
+        permissionDetail="Pengaturan hanya dapat diubah pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -718,14 +755,14 @@ export function HistoryPage({ id }: { id: string }) {
   void revision;
   const { state, link } = useScreenState('creator-history');
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const versionList = versionsFor(id);
   const activeVersion = versionList.find((version) => version.status === 'published');
   const archived = survey?.status === 'archived' || state === 'closed';
   const [pending, setPending] = useState<'close' | 'archive' | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Riwayat versi" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -740,7 +777,7 @@ export function HistoryPage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada versi"
         emptyDetail="Versi dibuat saat publikasi pertama."
-        permissionDetail="Riwayat hanya dapat dibaca pemilik survei."
+        permissionDetail="Riwayat hanya dapat dibaca pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -755,8 +792,8 @@ export function HistoryPage({ id }: { id: string }) {
                 <tr key={v.id}>
                   <Th><Code>v{v.number}</Code></Th>
                   <Td><Badge tone={v.status === 'published' ? 'success' : v.status === 'closed' ? 'warning' : 'neutral'}>{STATUS_LABEL[v.status]}</Badge></Td>
-                  <Td>{v.published_at ? v.published_at.slice(0, 10) : 'Belum ada'}</Td>
-                  <Td>{v.closed_at ? v.closed_at.slice(0, 10) : 'Belum ada'}</Td>
+                  <Td>{v.published_at ? formatWIB(v.published_at) : 'Belum ada'}</Td>
+                  <Td>{v.closed_at ? formatWIB(v.closed_at) : 'Belum ada'}</Td>
                   <Td>{questionsFor(v.id).length}</Td>
                 </tr>
               ))}

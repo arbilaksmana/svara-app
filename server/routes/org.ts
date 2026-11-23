@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
-import { all, get, nowIso, run } from '../db.ts';
-import type { AuthedRequest } from '../security.ts';
+import { all, get, nowIso, run, withTx } from '../db.ts';
+import { redactAuditRow, revokeSessionsOnStatusChange, type AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
 import {
   INVITATION_LIST_LIMIT, INVITATION_TTL_DAYS,
@@ -179,8 +179,8 @@ orgRouter.patch('/org/members/:id', async (req: AuthedRequest, res: Response) =>
     if (!['active', 'suspended'].includes(status)) {
       fail(422, 'validation_error', 'Status harus active atau suspended.');
     }
-    const member = await get<{ id: string; role: string; organization_id: string | null }>(
-      'SELECT id, role, organization_id FROM accounts WHERE id = ?',
+    const member = await get<{ id: string; role: string; status: string; organization_id: string | null }>(
+      'SELECT id, role, status, organization_id FROM accounts WHERE id = ?',
       pathParam(req, 'id'),
     );
     // 404 untuk akun di luar organisasi: jangan membocorkan keberadaan akun organisasi lain.
@@ -188,7 +188,10 @@ orgRouter.patch('/org/members/:id', async (req: AuthedRequest, res: Response) =>
     if (member.role !== 'creator') {
       fail(403, 'forbidden_member_role', 'Hanya status creator di organisasi ini yang dapat diubah.');
     }
-    await run('UPDATE accounts SET status = ? WHERE id = ?', status, member.id);
+    await withTx(async () => {
+      await run('UPDATE accounts SET status = ? WHERE id = ?', status, member.id);
+      await revokeSessionsOnStatusChange(member.id, member.status, status);
+    });
     await audit(req, 'Ubah status anggota', member.id, 'berhasil', { status });
     const row = await get<Record<string, unknown>>(`SELECT ${MEMBER_COLUMNS} FROM accounts WHERE id = ?`, member.id);
     res.json({ data: { member: row } });
@@ -293,14 +296,14 @@ orgRouter.get('/org/audit', async (req: AuthedRequest, res: Response) => {
   try {
     const organizationId = requireOrgScope(req, 'org_admin');
     const limit = Math.min(Math.max(Number.parseInt(typeof req.query.limit === 'string' ? req.query.limit : '', 10) || 100, 1), 500);
-    const rows = await all<Record<string, unknown>>(
+    const rows = await all<{ id: string; at: string; actor: string; action: string; object: string; outcome: string }>(
       `SELECT id, at, actor, action, object, outcome FROM audit_logs
         WHERE organization_id = ? ORDER BY at DESC, id DESC LIMIT ?`,
       organizationId,
       limit,
     );
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: { rows } });
+    res.json({ data: { rows: rows.map(redactAuditRow) } });
   } catch (error) {
     sendError(res, error);
   }
