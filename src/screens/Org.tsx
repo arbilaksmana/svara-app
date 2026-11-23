@@ -39,6 +39,7 @@ import {
   ROLE_LABEL,
 } from '../lib/labels';
 import { cancelOrgWorkspaceLoad, loadOrgWorkspace, useStore } from '../lib/store';
+import { AuditActor } from './Admin';
 import { formatWIB } from '../lib/summary';
 import type { AgeCategory, ConsentMode, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
 
@@ -207,6 +208,7 @@ export function AdminOrgPage() {
     );
   }
   const { members, invitations, audit } = org;
+  const memberNames = new Map(members.map((member) => [member.id, member.display_name]));
 
   return (
     <Shell kind="admin" title="Organisasi" subtitle="Profil kebijakan, anggota, undangan, dan audit lingkup organisasi Anda.">
@@ -428,7 +430,7 @@ export function AdminOrgPage() {
                 {audit.map((row) => (
                   <tr key={row.id}>
                     <Td>{formatWIB(row.at)}</Td>
-                    <Td>{row.actor}</Td>
+                    <Td><AuditActor actor={row.actor} names={memberNames} /></Td>
                     <Td>{row.action}</Td>
                     <Td><Code>{row.object}</Code></Td>
                     <Td>{row.outcome}</Td>
