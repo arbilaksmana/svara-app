@@ -35,6 +35,7 @@ import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
 import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
+import { ShortTextAnswer } from './Respondent';
 import { allPublicLinks, createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
 const STATUS_TONE = {
@@ -871,6 +872,7 @@ export function PreviewPage({ id }: { id: string }) {
               <fieldset key={q.id} className="flex flex-col gap-2 border-0 p-0">
                 <legend className="text-body font-bold text-ink">
                   {q.order}. {q.label} {q.required && <span className="text-danger">*</span>}
+                  {q.required && <span className="sr-only"> (wajib)</span>}
                 </legend>
                 {q.type !== 'short_text' ? (
                   <div className="flex flex-wrap gap-2">
@@ -882,9 +884,9 @@ export function PreviewPage({ id }: { id: string }) {
                     ))}
                   </div>
                 ) : (
-                  <TextArea aria-label={q.label} placeholder="Isian singkat (opsional)" />
+                  <ShortTextAnswer id={`preview-${q.id}-text`} required={q.required} hint={q.hint} />
                 )}
-                {q.hint && <p className="text-caption text-muted">{q.hint}</p>}
+                {q.type !== 'short_text' && q.hint && <p className="text-caption text-muted">{q.hint}</p>}
               </fieldset>
             ))}
           </Card>

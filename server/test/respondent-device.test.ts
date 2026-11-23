@@ -113,13 +113,14 @@ test('SEC-07/BF-08: bukti dan kunci idempotensi disimpan per token, bukan global
 });
 
 test('SEC-07/BF-08: kirim sukses menghapus consent, draft, dan kunci token itu; retry sebelumnya memakai kunci sama', () => {
+  // Urutan alur nyata: persetujuan di pengantar lebih dulu, kunci kirim dibuat saat tombol kirim ditekan.
+  storage.writeConsent('tok_a', consent('c_a'));
+  storage.writeConsent('tok_b', consent('c_b'));
   const keyA = storage.submissionKey('tok_a', 1, false)!;
   assert.equal(storage.submissionKey('tok_a', 1, false), keyA, 'Retry identik sebelum bukti diterima memakai kunci yang sama');
   assert.equal(storage.submissionKey('tok_a', 1, true), keyA);
   const keyB = storage.submissionKey('tok_b', 1, false)!;
 
-  storage.writeConsent('tok_a', consent('c_a'));
-  storage.writeConsent('tok_b', consent('c_b'));
   sessionStorage.setItem('svara.draft.tok_a.1', JSON.stringify({ Q1: { optionId: 'o_a', text: '' } }));
   sessionStorage.setItem('svara.draft.tok_b.1', JSON.stringify({ Q1: { optionId: 'o_b', text: '' } }));
   assert.equal(storage.readConsent('tok_a')?.consent_id, 'c_a');

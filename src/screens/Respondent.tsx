@@ -32,8 +32,11 @@ import { ROUTES } from '../lib/routes';
 import { useToast } from '../components/Toast';
 import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
+import { RECEIPT_STATUS_LABEL } from '../lib/labels';
 import {
   completeSubmission,
+  discardAttempt,
+  hasUnsentAttempt,
   readConsent,
   readReceipt,
   saveReceipt,
@@ -240,10 +243,77 @@ function MissingToken() {
 
 /* ---------------- Pengantar + notice ---------------- */
 
+/** `unsent`: tab menyimpan isian token ini yang belum dikirim dan responden belum memilih; `resumed`: memilih melanjutkan. */
+export type IntroAttempt = 'none' | 'unsent' | 'resumed';
+
 export function IntroPage({ token }: { token: string }) {
   const { ctx, loading, loadError, reload } = usePublicPage(token);
+  // Dibaca dari penyimpanan tab sesudah mount; disimpan di sini agar pilihan responden bertahan saat konteks dimuat ulang.
+  const [attempt, setAttempt] = useState<IntroAttempt | null>(null);
+
+  useEffect(() => {
+    setAttempt(hasUnsentAttempt(token) ? 'unsent' : 'none');
+  }, [token]);
+
+  if (loading || attempt === null) return <PublicLoading />;
+  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
+  if (!ctx) return <MissingToken />;
+  return (
+    <IntroView
+      token={token}
+      ctx={ctx}
+      attempt={attempt}
+      onChoose={(choice) => setAttempt(choice === 'resume' ? 'resumed' : 'none')}
+      reload={reload}
+    />
+  );
+}
+
+/**
+ * SEC-07/BF-08: isian yang ditinggalkan sebelum bukti tidak diteruskan diam-diam ke orang berikutnya di tab yang sama.
+ * "Mulai sebagai responden baru" menghapus persetujuan, draft, dan kunci kirim token ini; "Lanjutkan" mempertahankannya
+ * sehingga retry identik sebelum bukti tetap memakai kunci yang sama.
+ */
+export function UnsentAttemptChoice({ token, onChoose }: { token: string; onChoose: (choice: 'resume' | 'restart') => void }) {
+  return (
+    <Card className="flex flex-col gap-3">
+      <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
+      <p className="text-body-sm text-muted">
+        Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
+        lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
+        responden baru agar isian itu dihapus dari tab ini.
+      </p>
+      <div className="flex flex-wrap gap-3">
+        <Button variant="secondary" onClick={() => onChoose('resume')}>Lanjutkan isian sebelumnya</Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            discardAttempt(token);
+            onChoose('restart');
+          }}
+        >
+          Mulai sebagai responden baru
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+export function IntroView({
+  token,
+  ctx,
+  attempt,
+  onChoose,
+  reload,
+}: {
+  token: string;
+  ctx: PublicContextData;
+  attempt: IntroAttempt;
+  onChoose: (choice: 'resume' | 'restart') => void;
+  reload: () => void;
+}) {
   // Muat ulang intro membatalkan konteks lama: kosongkan pilihan agar responden menyetujui ulang notice yang tampil.
-  const consentVersion = ctx?.consent_version;
+  const consentVersion = ctx.consent_version;
   useEffect(() => {
     setConsent(false);
     setEligibility(false);
@@ -253,6 +323,7 @@ export function IntroPage({ token }: { token: string }) {
   }, [consentVersion]);
   const { state } = useScreenState('respondent-intro');
   const router = useRouter();
+  const notify = useToast();
   const [consent, setConsent] = useState(false);
   const [guardianEvidence, setGuardianEvidence] = useState(false);
   const [guardianRef, setGuardianRef] = useState('');
@@ -260,14 +331,19 @@ export function IntroPage({ token }: { token: string }) {
   const [busy, setBusy] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
 
-  if (loading) return <PublicLoading />;
-  if (loadError) return <PublicLoadError token={token} error={loadError} onRetry={reload} />;
-  if (!ctx) return <MissingToken />;
   const { survey, version, isPublicLink, invitation, notice, guardianRequired } = ctx;
   const effectiveState = state === 'default' ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(effectiveState) || usedInvite;
   const consentComplete = state === 'success' || (consent && eligibility && (!guardianRequired || (guardianEvidence && guardianRef.trim().length > 0)));
+  // Persetujuan baru tidak dapat dicatat sebelum responden memilih nasib isian yang tertinggal di tab ini.
+  const choosing = attempt === 'unsent' && !blocked;
+  const wasChoosing = useRef(choosing);
+  useEffect(() => {
+    // Kartu pilihan diganti kartu persetujuan: pindahkan fokus agar tidak jatuh ke body.
+    if (wasChoosing.current && !choosing) document.getElementById('consent-kelayakan')?.focus();
+    wasChoosing.current = choosing;
+  }, [choosing]);
 
   return (
     <Shell kind="respondent" title={survey.title} subtitle={`Pengantar dan pemberitahuan · versi ${version.number}`}>
@@ -320,99 +396,112 @@ export function IntroPage({ token }: { token: string }) {
             <PolicyLinks className="border-t border-n200 pt-3" />
           </Card>
 
-          <Card className="flex flex-col gap-3">
-            <SectionTitle>Persetujuan</SectionTitle>
-            <Checkbox
-              id="consent-kelayakan"
-              label="Saya mengonfirmasi kelayakan konteks pengisian ini."
-              checked={eligibility}
-              onChange={setEligibility}
-            />
-            <Checkbox
-              id="consent-utama"
-              label={<>Saya telah membaca pemberitahuan di atas dan menyetujui pemrosesan jawaban untuk tujuan survei ini.</>}
-              checked={consent}
-              onChange={setConsent}
-            />
-            {guardianRequired && (
-              <div className="rounded-md border border-warning-soft bg-n50 p-3">
-                <p className="text-body-sm font-bold text-ink">Bukti wali wajib</p>
-                <p className="mt-1 text-body-sm text-muted">
-                  Survei ini ditujukan untuk responden anak. Kiriman baru ditolak bila bukti verifikasi wali belum tersedia atau dicabut.
-                </p>
-                <div className="mt-2 flex flex-col gap-2">
-                  <Checkbox
-                    id="consent-wali"
-                    label="Saya menyatakan memiliki bukti persetujuan wali. Statusnya dicatat sebagai pernyataan, belum diverifikasi pengelola."
-                    checked={guardianEvidence}
-                    onChange={setGuardianEvidence}
-                  />
-                  <Field id="guardian-ref" label="Referensi bukti persetujuan wali" required>
-                    {(aria) => (
-                      <TextInput
-                        {...aria}
-                        value={guardianRef}
-                        onChange={(e) => setGuardianRef(e.target.value)}
-                        placeholder="Nomor atau kode verifikasi dari pengelola"
-                      />
-                    )}
-                  </Field>
-                </div>
-              </div>
-            )}
-            {!guardianRequired && (
-              <p className="text-caption text-muted">Persetujuan diri tetap mencatat ConsentRecord dan versi notice.</p>
-            )}
-            {invitation && (
-              <p className="text-caption text-muted">
-                Undangan individual: <Code>{invitation.code}</Code>. Status <Badge tone={invitation.status === 'active' ? 'success' : 'neutral'}>{INVITE_LABEL_ID[invitation.status]}</Badge>
-              </p>
-            )}
-          </Card>
-
-          <div className="flex flex-col gap-2">
-            {consentError && <Banner tone="danger" title="Persetujuan gagal dicatat">{consentError}</Banner>}
-            <Button
-              block
-              disabled={!consentComplete || blocked || busy}
-              loading={busy}
-              onClick={() => {
-                setBusy(true);
-                setConsentError(null);
-                void createConsent(token, ctx.consent_version, guardianRequired ? guardianRef.trim() : null)
-                  .then((record) => {
-                    writeConsent(token, {
-                      consent_id: record.consent_id,
-                      respondent_click: true,
-                      basis: record.basis,
-                      notice_version: record.notice_version,
-                      guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
-                      guardian_evidence_ref: guardianRequired ? guardianRef.trim() : null,
-                    });
-                    router.push(ROUTES.respondentForm(token));
-                  })
-                  .catch((error: unknown) => {
-                    // SEC-02: versi/notice berganti di antara intro dan klik setuju — muat ulang intro tanpa pesan teknis.
-                    if (error instanceof ApiError && error.code === 'notice_changed') {
-                      reload();
-                      return;
-                    }
-                    setConsentError(
-                      error instanceof ApiError ? error.message : 'Koneksi gagal. Coba lagi sebelum mengisi formulir.',
-                    );
-                  })
-                  .finally(() => setBusy(false));
+          {choosing ? (
+            <UnsentAttemptChoice
+              token={token}
+              onChoose={(choice) => {
+                if (choice === 'restart') notify('Isian sebelumnya dihapus dari tab ini.');
+                onChoose(choice);
               }}
-            >
-              Lanjut ke formulir
-            </Button>
-            {!consentComplete && !blocked && (
-              <p role="status" className="text-caption font-bold text-danger">
-                Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ' dan bukti wali sah' : ''}.
-              </p>
-            )}
-            <PolicyLinks className="mt-2" />
-          </div>
+            />
+          ) : (
+            <>
+              <Card className="flex flex-col gap-3">
+                <SectionTitle>Persetujuan</SectionTitle>
+                <Checkbox
+                  id="consent-kelayakan"
+                  label="Saya mengonfirmasi kelayakan konteks pengisian ini."
+                  checked={eligibility}
+                  onChange={setEligibility}
+                />
+                <Checkbox
+                  id="consent-utama"
+                  label={<>Saya telah membaca pemberitahuan di atas dan menyetujui pemrosesan jawaban untuk tujuan survei ini.</>}
+                  checked={consent}
+                  onChange={setConsent}
+                />
+                {guardianRequired && (
+                  <div className="rounded-md border border-warning-soft bg-n50 p-3">
+                    <p className="text-body-sm font-bold text-ink">Bukti wali wajib</p>
+                    <p className="mt-1 text-body-sm text-muted">
+                      Survei ini ditujukan untuk responden anak. Kiriman baru ditolak bila pernyataan wali belum dicentang atau
+                      referensi bukti persetujuan belum diisi. Aplikasi mencatat referensi itu apa adanya dan tidak memeriksa keasliannya.
+                    </p>
+                    <div className="mt-2 flex flex-col gap-2">
+                      <Checkbox
+                        id="consent-wali"
+                        label="Saya menyatakan memiliki bukti persetujuan wali. Statusnya dicatat sebagai pernyataan, belum diverifikasi pengelola."
+                        checked={guardianEvidence}
+                        onChange={setGuardianEvidence}
+                      />
+                      <Field id="guardian-ref" label="Referensi bukti persetujuan wali" required>
+                        {(aria) => (
+                          <TextInput
+                            {...aria}
+                            value={guardianRef}
+                            onChange={(e) => setGuardianRef(e.target.value)}
+                            placeholder="Contoh: surat izin orang tua/wali 12/XI/2026"
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  </div>
+                )}
+                {!guardianRequired && (
+                  <p className="text-caption text-muted">Persetujuan diri tetap mencatat ConsentRecord dan versi notice.</p>
+                )}
+                {invitation && (
+                  <p className="text-caption text-muted">
+                    Undangan individual: <Code>{invitation.code}</Code>. Status <Badge tone={invitation.status === 'active' ? 'success' : 'neutral'}>{INVITE_LABEL_ID[invitation.status]}</Badge>
+                  </p>
+                )}
+              </Card>
+
+              <div className="flex flex-col gap-2">
+                {consentError && <Banner tone="danger" title="Persetujuan gagal dicatat">{consentError}</Banner>}
+                <Button
+                  block
+                  disabled={!consentComplete || blocked || busy}
+                  loading={busy}
+                  onClick={() => {
+                    setBusy(true);
+                    setConsentError(null);
+                    void createConsent(token, ctx.consent_version, guardianRequired ? guardianRef.trim() : null)
+                      .then((record) => {
+                        writeConsent(token, {
+                          consent_id: record.consent_id,
+                          respondent_click: true,
+                          basis: record.basis,
+                          notice_version: record.notice_version,
+                          guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
+                          guardian_evidence_ref: guardianRequired ? guardianRef.trim() : null,
+                        }, { resume: attempt === 'resumed' });
+                        router.push(ROUTES.respondentForm(token));
+                      })
+                      .catch((error: unknown) => {
+                        // SEC-02: versi/notice berganti di antara intro dan klik setuju — muat ulang intro tanpa pesan teknis.
+                        if (error instanceof ApiError && error.code === 'notice_changed') {
+                          reload();
+                          return;
+                        }
+                        setConsentError(
+                          error instanceof ApiError ? error.message : 'Koneksi gagal. Coba lagi sebelum mengisi formulir.',
+                        );
+                      })
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Lanjut ke formulir
+                </Button>
+                {!consentComplete && !blocked && (
+                  <p role="status" className="text-caption font-bold text-danger">
+                    Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ', pernyataan wali dicentang, dan referensi bukti diisi' : ''}.
+                  </p>
+                )}
+                <PolicyLinks className="mt-2" />
+              </div>
+            </>
+          )}
         </div>
       </StateView>
       
@@ -480,25 +569,53 @@ export function QuestionField({
           )}
         </div>
       ) : (
-        <Field
+        <ShortTextAnswer
           id={`${token}-${q.id}-text`}
-          label="Jawaban singkat"
           required={q.required}
-          hint={q.hint ?? (q.required ? undefined : 'Opsional.')}
+          hint={q.hint}
           error={showError ? 'Item wajib ini belum diisi.' : undefined}
-          announceError={false}
-        >
-          {(aria) => (
-            <TextArea
-              {...aria}
-              value={value.text}
-              onChange={(e) => setText(q.code, e.target.value)}
-              placeholder="Tulis jawaban singkat…"
-            />
-          )}
-        </Field>
+          value={value.text}
+          onChange={(text) => setText(q.code, text)}
+        />
       )}
     </fieldset>
+  );
+}
+
+/** Isian singkat formulir responden; pratinjau creator memakai komponen yang sama agar label dan status wajibnya identik. */
+export function ShortTextAnswer({
+  id,
+  required,
+  hint,
+  error,
+  value,
+  onChange,
+}: {
+  id: string;
+  required: boolean;
+  hint: string | null;
+  error?: string;
+  value?: string;
+  onChange?: (text: string) => void;
+}) {
+  return (
+    <Field
+      id={id}
+      label="Jawaban singkat"
+      required={required}
+      hint={hint ?? (required ? undefined : 'Opsional.')}
+      error={error}
+      announceError={false}
+    >
+      {(aria) => (
+        <TextArea
+          {...aria}
+          value={value}
+          onChange={onChange && ((e) => onChange(e.target.value))}
+          placeholder="Tulis jawaban singkat…"
+        />
+      )}
+    </Field>
   );
 }
 
@@ -919,7 +1036,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
                     <tr><Th>ID bukti</Th><Td><Code>{receipt.response_id}</Code></Td></tr>
                     <tr><Th>Versi</Th><Td>{receipt.version_number}</Td></tr>
                     <tr><Th>Waktu server</Th><Td>{formatWIB(receipt.submitted_at)}</Td></tr>
-                    <tr><Th>Status</Th><Td>{receipt.status}</Td></tr>
+                    <tr><Th>Status</Th><Td>{RECEIPT_STATUS_LABEL[receipt.status] ?? receipt.status}</Td></tr>
                     <tr><Th>Kunci pengiriman</Th><Td><Code>{receipt.idempotency_key}</Code></Td></tr>
                   </Table>
                 </div>
@@ -927,7 +1044,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
                   <div><dt className="text-caption font-bold text-muted">ID bukti</dt><dd className="mt-1 break-all"><Code>{receipt.response_id}</Code></dd></div>
                   <div><dt className="text-caption font-bold text-muted">Versi</dt><dd className="mt-1">{receipt.version_number}</dd></div>
                   <div><dt className="text-caption font-bold text-muted">Waktu server</dt><dd className="mt-1">{formatWIB(receipt.submitted_at)}</dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Status</dt><dd className="mt-1">{receipt.status}</dd></div>
+                  <div><dt className="text-caption font-bold text-muted">Status</dt><dd className="mt-1">{RECEIPT_STATUS_LABEL[receipt.status] ?? receipt.status}</dd></div>
                   <div><dt className="text-caption font-bold text-muted">Kunci pengiriman</dt><dd className="mt-1 break-all"><Code>{receipt.idempotency_key}</Code></dd></div>
                 </dl>
               </>
