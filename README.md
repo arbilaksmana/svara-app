@@ -52,11 +52,15 @@ Prasyarat: Node.js 24 atau lebih baru, pnpm 11.5.2 (dikunci di `packageManager`,
 
 ```bash
 pnpm install --frozen-lockfile
+cp .env.example .env          # sesuaikan DATABASE_URL dan POSTGRES_PORT bila perlu
 docker compose up -d db
-export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
 SEED_DEMO=1 pnpm db:reset
 pnpm dev
 ```
+
+`pnpm db:*` dan `pnpm dev` sama-sama membaca `.env`. Nilai yang diekspor di shell tetap menang,
+dan `TEST_DATABASE_URL` selalu menang atas keduanya sehingga `pnpm test` tidak pernah menyentuh
+basis data dev.
 
 PowerShell:
 
