@@ -39,8 +39,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-svara}:${POSTGRES_PASSWORD:-svara_dev_password}@db:5432/${POSTGRES_DB:-svara}
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
       APP_ORIGIN: ${APP_ORIGIN:-http://127.0.0.1:3000,http://localhost:3000}
-      COOKIE_SECURE: ${COOKIE_SECURE:-0}
-      ENABLE_HSTS: ${ENABLE_HSTS:-0}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      ENABLE_HSTS: ${ENABLE_HSTS:-}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-8}
       INTEGRATION_TOKEN: ${INTEGRATION_TOKEN:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
@@ -79,7 +79,7 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:3001
-      ENABLE_HSTS: ${ENABLE_HSTS:-0}
+      ENABLE_HSTS: ${ENABLE_HSTS:-}
     healthcheck:
       test:
         [

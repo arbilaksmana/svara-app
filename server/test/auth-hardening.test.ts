@@ -24,6 +24,7 @@ interface Result {
   json: Record<string, unknown> | null;
   text: string;
   setCookie: string;
+  headers: Headers;
 }
 
 async function call(path: string, options: { body?: unknown; headers?: Record<string, string> } = {}): Promise<Result> {
@@ -44,7 +45,7 @@ async function call(path: string, options: { body?: unknown; headers?: Record<st
   } catch {
     json = null;
   }
-  return { status: response.status, json, text: text.slice(0, 300), setCookie: response.headers.get('set-cookie') ?? '' };
+  return { status: response.status, json, text: text.slice(0, 300), setCookie: response.headers.get('set-cookie') ?? '', headers: response.headers };
 }
 
 function login(email: string, password: string, headers: Record<string, string> = {}): Promise<Result> {
@@ -313,3 +314,132 @@ test('NR-09: pengaman kasar 200 kegagalan per alamat tetap menahan banjir lintas
   assert.equal((await failedLoginAudit()).count, audit.count, 'penolakan 429 tidak menulis audit');
 });
 
+
+const HSTS_VALUE = 'max-age=15552000; includeSubDomains';
+
+interface EnvSnapshot {
+  NODE_ENV: string | undefined;
+  APP_ORIGIN: string | undefined;
+  COOKIE_SECURE: string | undefined;
+  ENABLE_HSTS: string | undefined;
+}
+
+function snapshotEnv(): EnvSnapshot {
+  return {
+    NODE_ENV: process.env.NODE_ENV,
+    APP_ORIGIN: process.env.APP_ORIGIN,
+    COOKIE_SECURE: process.env.COOKIE_SECURE,
+    ENABLE_HSTS: process.env.ENABLE_HSTS,
+  };
+}
+
+function restoreEnv(snapshot: EnvSnapshot): void {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
+test('OPS-04: produksi dengan APP_ORIGIN https memaksa cookie Secure dan HSTS pada permintaan HTTPS', async () => {
+  const env = snapshotEnv();
+  const trustProxy = app.get('trust proxy');
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.APP_ORIGIN = 'https://app.example.org';
+    resetRateLimits();
+    delete process.env.COOKIE_SECURE;
+    delete process.env.ENABLE_HSTS;
+    app.set('trust proxy', trustProxySetting('loopback'));
+
+    const secure = await login('creator.a@svara.local', DEMO_PASSWORD, { 'X-Forwarded-Proto': 'https' });
+    assert.equal(secure.status, 200, secure.text);
+    assert.match(secure.setCookie, SECURE_ATTR, `production+https → Secure tanpa COOKIE_SECURE: ${secure.setCookie}`);
+    assert.equal(secure.headers.get('strict-transport-security'), HSTS_VALUE);
+
+    const plain = await login('creator.a@svara.local', DEMO_PASSWORD);
+    assert.equal(plain.status, 200, plain.text);
+    assert.match(plain.setCookie, SECURE_ATTR, 'default produksi tetap memaksa Secure di permintaan HTTP');
+    assert.equal(plain.headers.get('strict-transport-security'), null, 'HSTS hanya dikirim untuk permintaan HTTPS');
+  } finally {
+    app.set('trust proxy', trustProxy);
+    restoreEnv(env);
+  }
+});
+
+test('OPS-04: COOKIE_SECURE=0 dan ENABLE_HSTS=0 tetap menjadi override eksplisit produksi', async () => {
+  const env = snapshotEnv();
+  const trustProxy = app.get('trust proxy');
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.APP_ORIGIN = 'https://app.example.org';
+    resetRateLimits();
+    process.env.COOKIE_SECURE = '0';
+    process.env.ENABLE_HSTS = '0';
+    app.set('trust proxy', false);
+
+    const plain = await login('creator.a@svara.local', DEMO_PASSWORD);
+    assert.equal(plain.status, 200, plain.text);
+    assert.doesNotMatch(plain.setCookie, SECURE_ATTR, `COOKIE_SECURE=0 mematikan default produksi: ${plain.setCookie}`);
+
+    app.set('trust proxy', trustProxySetting('loopback'));
+    const secure = await login('creator.a@svara.local', DEMO_PASSWORD, { 'X-Forwarded-Proto': 'https' });
+    assert.equal(secure.status, 200, secure.text);
+    assert.match(secure.setCookie, SECURE_ATTR, 'permintaan HTTPS tetap memakai Secure');
+    assert.equal(secure.headers.get('strict-transport-security'), null, 'ENABLE_HSTS=0 mematikan HSTS');
+  } finally {
+    app.set('trust proxy', trustProxy);
+    restoreEnv(env);
+  }
+});
+
+test('OPS-04: produksi tanpa HTTPS tetap login tanpa Secure/HSTS dan memberi peringatan satu baris', async () => {
+  const env = snapshotEnv();
+  const trustProxy = app.get('trust proxy');
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.APP_ORIGIN = 'http://127.0.0.1:3000';
+    resetRateLimits();
+    delete process.env.COOKIE_SECURE;
+    delete process.env.ENABLE_HSTS;
+    app.set('trust proxy', false);
+
+    const result = await login('creator.a@svara.local', DEMO_PASSWORD);
+    assert.equal(result.status, 200, `login HTTP produksi harus tetap berjalan: ${result.text}`);
+    assert.doesNotMatch(result.setCookie, SECURE_ATTR, 'instalasi HTTP tidak boleh dipaksa Secure');
+    assert.equal(result.headers.get('strict-transport-security'), null);
+
+    const { productionWithoutHttpsWarning } = await import('../security.ts');
+    assert.match(String(productionWithoutHttpsWarning()), /HTTPS/, 'peringatan produksi tanpa HTTPS');
+
+    process.env.APP_ORIGIN = 'https://app.example.org';
+    assert.equal(productionWithoutHttpsWarning(), null, 'produksi HTTPS tidak memperingatkan');
+
+    process.env.NODE_ENV = 'test';
+    process.env.APP_ORIGIN = 'http://127.0.0.1:3000';
+    assert.equal(productionWithoutHttpsWarning(), null, 'dev tidak memperingatkan');
+  } finally {
+    app.set('trust proxy', trustProxy);
+    restoreEnv(env);
+  }
+});
+
+test('OPS-04: dev tetap tanpa Secure/HSTS walau APP_ORIGIN https', async () => {
+  const env = snapshotEnv();
+  const trustProxy = app.get('trust proxy');
+  try {
+    process.env.NODE_ENV = 'test';
+    process.env.APP_ORIGIN = 'https://app.example.org';
+    resetRateLimits();
+    delete process.env.COOKIE_SECURE;
+    delete process.env.ENABLE_HSTS;
+    app.set('trust proxy', false);
+
+    const result = await login('creator.a@svara.local', DEMO_PASSWORD);
+    assert.equal(result.status, 200, result.text);
+    assert.doesNotMatch(result.setCookie, SECURE_ATTR, `dev HTTP tetap tanpa Secure: ${result.setCookie}`);
+    assert.equal(result.headers.get('strict-transport-security'), null);
+  } finally {
+    app.set('trust proxy', trustProxy);
+    restoreEnv(env);
+  }
+});

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { HSTS_VALUE, hstsEnabled } from './lib/security-headers';
 
 /**
  * Next.js 16 renamed the `middleware` file convention to `proxy`.
@@ -35,8 +36,9 @@ export function proxy(request: NextRequest): NextResponse {
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  if (process.env.ENABLE_HSTS === '1') {
-    response.headers.set('Strict-Transport-Security', 'max-age=31536000');
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  if (hstsEnabled(process.env, request.nextUrl.protocol === 'https:' || forwardedProto === 'https')) {
+    response.headers.set('Strict-Transport-Security', HSTS_VALUE);
   }
   return response;
 }
