@@ -119,12 +119,12 @@ test('PERF-10: jumlah query bootstrap tidak bertambah per survei', async () => {
       small.queries.filter((query) => /FROM organizations\b/i.test(query.sql)).length,
     );
     assert.equal(grown.result.surveys.length, small.result.surveys.length + 19);
-    assert.deepEqual(Object.keys(grown.result.surveyProfiles).sort(), grown.result.surveys.map((survey: { id: string }) => survey.id).sort());
-    const sample = grown.result.surveyProfiles[added[0]!] as Record<string, unknown> | undefined;
+    assert.deepEqual(Object.keys(grown.result.surveyProfiles).sort(), (grown.result.surveys as Array<{ id: string }>).map((survey) => survey.id).sort());
+    const sample = grown.result.surveyProfiles[added[0]!] as unknown as Record<string, unknown> | undefined;
     assert.equal(sample?.source, 'platform');
     assert.equal(
       sample?.organization_name,
-      (grown.result.surveyProfiles[added[1]!] as Record<string, unknown>).organization_name,
+      (grown.result.surveyProfiles[added[1]!] as unknown as Record<string, unknown>).organization_name,
       'survei platform berbagi profil yang sama tanpa query per survei',
     );
   } finally {
