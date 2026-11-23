@@ -104,6 +104,11 @@ export async function bootstrap(): Promise<BootstrapData> {
   return call<BootstrapData>('/bootstrap');
 }
 
+/** Akun dari cookie sesi saja, tanpa data bootstrap. Tetap berdiri sendiri saat bootstrap gagal. */
+export async function me(): Promise<{ account: (Account & { email: string }) | null }> {
+  return call<{ account: (Account & { email: string }) | null }>('/auth/me');
+}
+
 export async function login(email: string, password: string): Promise<{ account: Account & { email: string } }> {
   return call<{ account: Account & { email: string } }>('/auth/login', {
     method: 'POST',
