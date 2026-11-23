@@ -18,6 +18,7 @@ import type {
   Question,
   QuestionOption,
   Survey,
+  SurveyNotice,
   SurveyProfile,
   SurveyVersion,
 } from './types';
@@ -85,6 +86,8 @@ export interface BootstrapData {
   notices: Notice[];
   surveys: Survey[];
   surveyProfiles: Record<string, SurveyProfile>;
+  /** Notice per survei dari sumber kebijakan yang sama dengan halaman publik (opsional pada payload lama). */
+  surveyNotices?: Record<string, SurveyNotice | null>;
   versions: SurveyVersion[];
   questions: Array<Question & { ord?: number }>;
   options: QuestionOption[];
@@ -408,6 +411,17 @@ export interface PublicContextData {
   profile: DeploymentProfile;
   notice: Notice;
   invitation: Pick<Invitation, 'code' | 'status'> | null;
+}
+
+export interface PublicPolicyData {
+  data_request_contact: string | null;
+  effective_date: string;
+  synthetic_placeholder: boolean;
+}
+
+/** Kontak pengendali tingkat deployment untuk halaman /privacy (tanpa konteks survei). */
+export async function getPublicPolicy(): Promise<PublicPolicyData> {
+  return call<PublicPolicyData>('/public/policy');
 }
 
 export async function publicContext(token: string): Promise<PublicContextData> {

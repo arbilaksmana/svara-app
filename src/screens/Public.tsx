@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BrandMark } from '../components/Brand';
@@ -10,6 +10,7 @@ import {
   Banner,
   Button,
   Card,
+  ContactChannel,
   Field,
   PlainLink,
   PolicyLinks,
@@ -20,7 +21,7 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
 import { signIn } from '../lib/store';
-import { ApiError, submitDataRequest } from '../lib/api';
+import { ApiError, getPublicPolicy, submitDataRequest } from '../lib/api';
 import { ROUTES } from '../lib/routes';
 
 /* ---------------- Login ---------------- */
@@ -176,7 +177,7 @@ export function NotFoundPage() {
 /* ---------------- Kebijakan ---------------- */
 
 const PRIVACY_SECTIONS = [
-  { title: 'Identitas dan kontak', body: 'Pengendali data adalah organisasi yang menerbitkan survei. Kontak permintaan data tersedia pada pemberitahuan tiap survei.' },
+  { title: 'Identitas dan kontak', body: 'Pengendali data adalah organisasi yang menerbitkan survei. Kanal permintaan datanya ditampilkan pada kartu kanal di halaman ini; pemberitahuan tiap survei mencatat kanal organisasi yang sama.' },
   { title: 'Tujuan dan dasar pemrosesan', body: 'Mengumpulkan tanggapan survei untuk diringkas per versi. Dasar pemrosesan, termasuk persetujuan wali bila responden anak, ditetapkan pengendali sebelum data nyata.' },
   { title: 'Kategori data', body: 'Jawaban skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Tidak meminta nama, tanggal lahir, atau nomor identitas secara default.' },
   { title: 'Penerima', body: 'Pembuat survei, petugas berizin, dan konsumen integrasi Modul 13/15 sesuai cakupan dan izin terpisah.' },
@@ -286,6 +287,22 @@ function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
   const isPrivacy = which === 'privacy';
   const title = isPrivacy ? 'Kebijakan privasi' : 'Ketentuan layanan';
   const sections = isPrivacy ? PRIVACY_SECTIONS : TERMS_SECTIONS;
+  // UIX-08: kanal kontak deployment dibaca dari server; tidak ada alamat contoh yang ditebak di klien.
+  const [contact, setContact] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!isPrivacy) return;
+    let cancelled = false;
+    void getPublicPolicy()
+      .then((policy) => {
+        if (!cancelled) setContact(policy.data_request_contact);
+      })
+      .catch(() => {
+        if (!cancelled) setContact(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPrivacy]);
 
   return (
     <Shell kind="public" title={title} subtitle="Kebijakan dan ketentuan berlaku untuk seluruh survei pada workspace ini.">
@@ -303,7 +320,16 @@ function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
           <Card className="h-fit">
             <SectionTitle>Kanal permintaan data</SectionTitle>
             <p className="mt-2 text-body-sm text-muted">
-              Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kontak pada profil deployment. Verifikasi pemohon dicatat; log tidak memuat jawaban atau token.
+              Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal pengendali berikut. Verifikasi pemohon dicatat; log tidak memuat jawaban atau token.
+            </p>
+            <p className="mt-2 text-body-sm font-bold text-ink">
+              <ContactChannel
+                contact={contact ?? null}
+                empty={contact === undefined ? 'Memuat kanal kontak…' : 'Kanal kontak pengendali belum ditetapkan.'}
+              />
+            </p>
+            <p className="mt-1 text-caption text-muted">
+              Kanal organisasi yang menerbitkan survei Anda tercatat pada pemberitahuan sebelum item pertama dan dapat dibuka dari tautan survei.
             </p>
             <div className="mt-3 flex flex-col gap-2">
               <PlainLink to={isPrivacy ? ROUTES.terms : ROUTES.privacy}>

@@ -100,12 +100,17 @@ export function attemptGateNeeded(token: string): boolean {
   return hasUnsentAttempt(token) && readJson(FLOW_PREFIX + token) !== true;
 }
 
-/** Hapus persetujuan, draft, dan kunci kirim satu token tanpa menyentuh token lain. */
+/**
+ * Hapus persetujuan, draft, kunci kirim, dan bukti milik satu token tanpa menyentuh token lain.
+ * "Mulai sebagai responden baru" memakai ini agar bukti orang sebelumnya tidak tampil lagi di tab yang
+ * sama (SEC-07); `completeSubmission` menyimpan bukti sesudah pembersihan.
+ */
 export function discardAttempt(token: string): void {
   removeKey(CONSENT_PREFIX + token);
   removeVersions(DRAFT_PREFIX, token);
   removeVersions(IDEMPOTENCY_PREFIX, token);
   removeKey(FLOW_PREFIX + token);
+  removeKey(RECEIPT_PREFIX + token);
 }
 
 /**
@@ -149,8 +154,8 @@ export function saveReceipt(token: string, receipt: ReceiptData, key: string): v
  * token itu dihapus agar responden berikutnya di tab yang sama mulai dari pengantar dengan kunci baru.
  */
 export function completeSubmission(token: string, receipt: ReceiptData, key: string): void {
-  saveReceipt(token, receipt, key);
   discardAttempt(token);
+  saveReceipt(token, receipt, key);
 }
 
 function readDraft(key: string | null): Record<string, DraftValue> {

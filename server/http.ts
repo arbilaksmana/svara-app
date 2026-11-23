@@ -222,6 +222,8 @@ export interface SurveyProfile {
   retention_days: number | null;
   data_request_contact: string | null;
   cross_border_transfer: number | null;
+  /** Versi notice yang berlaku di sumber ini; dipakai bila survei belum punya versi. */
+  notice_version: string;
   source: 'organization' | 'platform';
 }
 
@@ -236,7 +238,7 @@ export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<st
   if (organizationIds.length > 0) {
     const organizations = await all<Omit<SurveyProfile, 'source'>>(
       `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
-              policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer
+              policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
          FROM organizations WHERE id IN (${organizationIds.map(() => '?').join(',')})`,
       ...organizationIds,
     );
@@ -246,7 +248,7 @@ export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<st
     const platform = await get<Omit<SurveyProfile, 'source'>>(
       `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
               NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
-              cross_border_transfer
+              cross_border_transfer, notice_version
          FROM platform_profile WHERE id = 'platform'`,
     );
     if (platform) rows.set(platform.id, platform);
@@ -263,6 +265,93 @@ export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<st
 
 export async function surveyProfileFor(survey: SurveyRow): Promise<SurveyProfile> {
   return (await surveyProfilesFor([survey]))[survey.id]!;
+}
+
+/** Teks notice yang tampil untuk satu versi kebijakan; sumbernya organisasi pemilik survei atau platform. */
+export interface SurveyNotice {
+  id: string;
+  version: string;
+  effective_date: string;
+  purpose: string;
+  data_categories: string;
+  module15_usage: string;
+  retention_text: string;
+  recipients: string;
+  contact: string;
+  rights: string;
+  child_data_text: string;
+  cross_border_text: string;
+  source: 'organization' | 'platform';
+}
+
+const NOTICE_COLUMNS = `id, version, effective_date, purpose, data_categories, module15_usage, retention_text,
+  recipients, contact, rights, child_data_text, cross_border_text`;
+
+/**
+ * Satu-satunya pembaca text notice per sumber+versi: halaman publik, publish, dan bootstrap memakai
+ * baris yang sama. Tidak ada fallback ke versi lain; pemanggil menentukan sendiri apa yang terjadi
+ * bila baris tidak ada (publik gagal-tertutup, bootstrap mengirim null).
+ */
+export async function noticeRowFor(
+  source: 'organization' | 'platform',
+  sourceId: string,
+  version: string,
+): Promise<Omit<SurveyNotice, 'source'> | undefined> {
+  return source === 'organization'
+    ? get<Omit<SurveyNotice, 'source'>>(
+        `SELECT ${NOTICE_COLUMNS} FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1`,
+        sourceId,
+        version,
+      )
+    : get<Omit<SurveyNotice, 'source'>>(
+        `SELECT ${NOTICE_COLUMNS} FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1`,
+        version,
+      );
+}
+
+/**
+ * Notice per survei dengan jumlah query tetap (dua tabel katalog saja): versi yang terpasang pada versi
+ * survei saat ini, atau `notice_version` sumber dari `surveyProfilesFor` bila survei belum punya versi.
+ * Baris null berarti notice versi itu tidak ada; halaman publik yang memutuskan gagal-tertutup.
+ */
+export async function surveyNoticesFor(
+  surveys: SurveyRow[],
+  profiles: Record<string, SurveyProfile>,
+  versions: Array<{ id: string; notice_version: string }>,
+): Promise<Record<string, SurveyNotice | null>> {
+  if (surveys.length === 0) return {};
+  const versionNotices = new Map(versions.map((version) => [version.id, version.notice_version]));
+  const organizationIds = [...new Set(surveys.flatMap((survey) => (survey.organization_id ? [survey.organization_id] : [])))];
+  const rows = new Map<string, Omit<SurveyNotice, 'source'>>();
+  if (organizationIds.length > 0) {
+    const notices = await all<Omit<SurveyNotice, 'source'> & { organization_id: string }>(
+      `SELECT organization_id, ${NOTICE_COLUMNS} FROM organization_notices
+        WHERE organization_id IN (${organizationIds.map(() => '?').join(',')}) ORDER BY effective_date DESC`,
+      ...organizationIds,
+    );
+    for (const { organization_id: organizationId, ...notice } of notices) {
+      const key = `${organizationId}|${notice.version}`;
+      if (!rows.has(key)) rows.set(key, notice);
+    }
+  }
+  if (surveys.some((survey) => !survey.organization_id)) {
+    const notices = await all<Omit<SurveyNotice, 'source'>>(
+      `SELECT ${NOTICE_COLUMNS} FROM platform_notices ORDER BY effective_date DESC`,
+    );
+    for (const notice of notices) {
+      const key = `platform|${notice.version}`;
+      if (!rows.has(key)) rows.set(key, notice);
+    }
+  }
+  const result: Record<string, SurveyNotice | null> = {};
+  for (const survey of surveys) {
+    const sourceId = survey.organization_id ?? 'platform';
+    const version = (survey.current_version_id ? versionNotices.get(survey.current_version_id) : undefined)
+      ?? profiles[survey.id]?.notice_version;
+    const row = version ? rows.get(`${sourceId}|${version}`) : undefined;
+    result[survey.id] = row ? { ...row, source: survey.organization_id ? 'organization' : 'platform' } : null;
+  }
+  return result;
 }
 
 export async function requireSurvey(id: string): Promise<SurveyRow> {

@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
+import { evidenceProvenance } from './evidence-provenance.ts';
 
 const PORT = 3199;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
@@ -130,11 +131,18 @@ try {
     ]),
   );
 
+  // SEC-02: persetujuan mencantumkan token versi+notice yang dirender pengantar.
+  const publicIntro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
         method: 'POST',
-        body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'DEMO-AC13-WALI' },
+        body: {
+          version_id: publicIntro.consent_version,
+          respondent_click: true,
+          eligibility: true,
+          guardian_evidence_ref: 'DEMO-AC13-WALI',
+        },
       }),
     ),
   );
@@ -181,6 +189,7 @@ try {
   if (summary.total < 30) throw new Error(`ringkasan hanya ${summary.total} respons`);
 
   const report = {
+    provenance: evidenceProvenance(),
     label: 'DEMO ONLY — simulasi beban lokal, bukan bukti kapasitas produksi',
     generated_at: new Date().toISOString(),
     environment: {

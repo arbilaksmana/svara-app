@@ -494,6 +494,10 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
       ? await requireVersion(source.current_version_id)
       : (await versionRows(source.id))[0];
     if (!sourceVersion) fail(409, 'no_version', 'Survei sumber belum memiliki versi.');
+    // BF-05: salinan memakai notice yang berlaku di sumber kebijakan survei ini sekarang, bukan versi
+    // notice yang tersimpan pada versi sumber. Versi tanpa notice ditolak seperti publish.
+    const notice = await noticeVersionFor(source.organization_id);
+    await requirePublishableNotice(source, notice.notice_version);
     const id = newId('s');
     const now = nowIso();
     await withTx(async () => {
@@ -512,7 +516,7 @@ surveysRouter.post('/surveys/:id/duplicate', async (req: AuthedRequest, res: Res
         source.organization_id,
       );
       await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
-      const draft = await createDraft(id, sourceVersion.notice_version);
+      const draft = await createDraft(id, notice.notice_version);
       const questions = await questionRows(sourceVersion.id);
       const copies: QuestionInput[] = [];
       for (const question of questions) {
