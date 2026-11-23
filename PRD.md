@@ -105,6 +105,8 @@ Aturan:
 | **Layanan Modul 13** | Berikan identitas dan penugasan terverifikasi; terima status pengiriman | Autentikasi layanan, cakupan minimum, ID stabil |
 | **Layanan Modul 15** | Ambil data yang diizinkan melalui API atau konsumsi CSV | Filter cakupan dan kolom di server; catat akses dan penerima |
 
+**Pembacaan jawaban individual (keputusan 2026-11-24).** Pemilik survei dan `org_admin` organisasi survei itu membaca jawaban individual sebagai pengendali, tanpa grant: keduanya sudah memegang kendali atas survei dan kebijakan organisasinya, sehingga grant kepada diri sendiri tidak menegakkan batas apa pun. Grant tetap wajib bagi pihak lain (petugas berizin, creator rekan, layanan Modul 15), terikat pengaturan survei dan dipisah per izin baca, ekspor, serta teks bebas. Super admin tetap tidak otomatis; akses individualnya diperiksa terpisah.
+
 Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti ID objek. Identitas yang dikirim oleh browser tidak menentukan peran atau kepemilikan.
 
 **Tanggung jawab antarmodul.** Creator memiliki dan mengelola beberapa survei. Responden mengisi melalui tautan umum, undangan individual, atau identitas terintegrasi; mode mandiri tidak mensyaratkan akun. Modul 13 adalah sumber identitas dan konteks penugasan jika tersedia; aturan milestone dan kelulusan berada pada sistem pembelajaran. Modul 15 menerima data yang diizinkan, menggabungkannya dengan hasil asesmen Modul 13 (pada studi kasus: asesmen UI/UX), dan melakukan analitik profil serta rekomendasi.
@@ -119,7 +121,7 @@ Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti 
 | F-05–07 | P1 untuk Likert dan teks; P2 untuk pilihan tunggal | Skala Likert numerik 1–N dengan label dan nilai per opsi yang dapat diatur per pertanyaan; jawaban singkat opsional/wajib; pilihan tunggal kategorikal (contoh MVP cukup memakai isian kendala opsional) |
 | F-08–10 | P1 | Pratinjau tanpa data/respons produksi, publikasi versi tetap, tautan, pemberitahuan, tinjau, dan kirim |
 | F-11–13 | P1 | Validasi versi, undangan, item, dan nilai; respons final per transaksi; dashboard menampilkan total kiriman, frekuensi, dan jumlah yang menjawab tiap item per versi |
-| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual membutuhkan izin khusus; XLSX opsional |
+| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual pihak selain pemilik dan `org_admin` organisasi membutuhkan izin khusus; XLSX opsional |
 | F-15, F-16 | P1 mode mandiri; P2 integrasi nyata | Alur mandiri lengkap dan identitas lokal; kontrak serta uji simulasi Modul 13 tersedia untuk pengembangan paralel |
 | F-18–19 | P1 | Catat dasar pemrosesan dan bukti persetujuan sesuai konteks; audit perubahan izin/status, akses individual, publikasi, penolakan akses, dan ekspor |
 | F-20 | P2 | Pembaruan otomatis dashboard; pada MVP ringkasan yang dimuat ulang sudah akurat setelah transaksi tersimpan |
