@@ -7,7 +7,7 @@ import type { AccountRow } from '../security.ts';
 import { answerQueries, recordQueries } from './query-log.ts';
 
 const { app } = await import('../app.ts');
-const { get } = await import('../db.ts');
+const { get, nowIso, run } = await import('../db.ts');
 const { buildBootstrap } = await import('../bootstrap.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
@@ -63,4 +63,71 @@ test('PERF-01: gerbang server membaca akun dari /auth/me tanpa bootstrap', async
   assert.equal(queries.some((query) => /\bFROM (surveys|survey_versions|answers)\b/i.test(query.sql)), false);
   assert.equal(await accountForCookie(''), null);
   assert.equal(await accountForCookie('svara_session=tidak-valid'), null);
+});
+
+test('PERF-10: jumlah query bootstrap tidak bertambah per survei', async () => {
+  const account = await get<AccountRow>(
+    "SELECT id, email, display_name, role, status, organization_id FROM accounts WHERE email = 'creator.a@svara.local'",
+  );
+  assert.ok(account);
+  const baselineProfile = (
+    await get<{ profile_id: string }>(
+      'SELECT profile_id FROM surveys WHERE owner_id = ? ORDER BY id LIMIT 1',
+      account.id,
+    )
+  )?.profile_id;
+  assert.ok(baselineProfile, 'survei contoh creator tersedia');
+
+  const added: string[] = [];
+  const timestamp = nowIso();
+  const insertSurvey = async (index: number) => {
+    const id = `s_perf10_${index}`;
+    added.push(id);
+    await run(
+      `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+      id,
+      account.id,
+      baselineProfile,
+      `Survei perf 10 ${index}`,
+      'Uji jumlah query',
+      'Objek',
+      'Isi.',
+      timestamp,
+      timestamp,
+    );
+  };
+
+  try {
+    await insertSurvey(0);
+    const small = await recordQueries(() => buildBootstrap(account));
+    for (let index = 1; index < 20; index += 1) await insertSurvey(index);
+    const grown = await recordQueries(() => buildBootstrap(account));
+
+    assert.equal(
+      grown.queries.length,
+      small.queries.length,
+      `query bootstrap bertambah dari ${small.queries.length} menjadi ${grown.queries.length} saat survei bertambah`,
+    );
+    assert.equal(
+      grown.queries.filter((query) => /FROM platform_profile/i.test(query.sql)).length,
+      1,
+      'profil platform dibaca satu kali untuk semua survei',
+    );
+    assert.equal(
+      grown.queries.filter((query) => /FROM organizations\b/i.test(query.sql)).length,
+      small.queries.filter((query) => /FROM organizations\b/i.test(query.sql)).length,
+    );
+    assert.equal(grown.result.surveys.length, small.result.surveys.length + 19);
+    assert.deepEqual(Object.keys(grown.result.surveyProfiles).sort(), grown.result.surveys.map((survey: { id: string }) => survey.id).sort());
+    const sample = grown.result.surveyProfiles[added[0]!] as Record<string, unknown> | undefined;
+    assert.equal(sample?.source, 'platform');
+    assert.equal(
+      sample?.organization_name,
+      (grown.result.surveyProfiles[added[1]!] as Record<string, unknown>).organization_name,
+      'survei platform berbagi profil yang sama tanpa query per survei',
+    );
+  } finally {
+    await run(`DELETE FROM surveys WHERE id IN (${added.map(() => '?').join(',')})`, ...added);
+  }
 });
