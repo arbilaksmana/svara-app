@@ -45,11 +45,13 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_RATE_LIMITED = 'Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.';
 
 /**
- * Batas per alamat klien di samping batas 8 per alamat+email: 30 kredensial salah per 15 menit. Kuota dipotong
- * sebelum verifikasi agar permintaan paralel ikut terhitung, lalu dikembalikan bila login berhasil, ditolak batas
- * per email, atau gagal karena galat server. Klien di balik satu alamat (rewrite Next tanpa ingress) berbagi kuota ini.
+ * Kuota kredensial salah per 15 menit dari satu alamat klien, di samping batas 8 per alamat+email. Batas per
+ * alamat+email inilah yang menahan brute-force satu akun; batas 200 per alamat hanya pengaman kasar agar banjir
+ * lintas akun dari satu alamat tidak membebani hashing/audit, tanpa mengunci akun lain dari NAT/kantor.
+ * Kuota dipotong sebelum verifikasi agar permintaan paralel ikut terhitung, lalu dikembalikan bila login berhasil,
+ * ditolak batas per email (tanpa verifikasi), atau gagal karena galat server.
  */
-const LOGIN_FAILURES_PER_IP = 30;
+const LOGIN_FAILURES_PER_IP = 200;
 
 async function failLogin(actor: string): Promise<void> {
   await run(

@@ -12,7 +12,7 @@ process.env.SEED_PASSWORD = 'SvaraDemo123!';
 const { app } = await import('../app.ts');
 const { get } = await import('../db.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
-const { hashPassword, parseCookies, rateLimitBucketCount, trustProxySetting, verifyPassword } = await import('../security.ts');
+const { hashPassword, parseCookies, rateLimitBucketCount, resetRateLimits, trustProxySetting, verifyPassword } = await import('../security.ts');
 
 const DEMO_PASSWORD = 'SvaraDemo123!';
 
@@ -251,3 +251,65 @@ test('PERF-09: API hash async; hash format lama (scryptSync) tetap terverifikasi
   assert.equal(hash, scryptSync(DEMO_PASSWORD, newSalt!, 64).toString('hex'), 'parameter dan format scrypt tidak berubah');
   assert.equal(await verifyPassword(DEMO_PASSWORD, stored), true);
 });
+
+/* ---------------- NR-09: kuota login per akun, pengaman kasar per alamat ---------------- */
+
+/** `count` kredensial salah dari satu alamat klien, masing-masing untuk email berbeda (akun tak dikenal). */
+async function distinctFailures(prefix: string, count: number): Promise<number[]> {
+  const statuses: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    statuses.push((await login(`${prefix}.${i}@sekolah.contoh`, 'Salah-Sekali-2026!')).status);
+  }
+  return statuses;
+}
+
+test('NR-09: 30 kegagalan dari satu alamat dengan email berbeda tidak mengunci akun lain dari alamat itu', async () => {
+  resetRateLimits();
+  assert.deepEqual(await distinctFailures('nr09a', 30), Array(30).fill(401), '30 email berbeda dari satu alamat tidak terkena 429');
+
+  const legitimate = await login('admin@svara.local', DEMO_PASSWORD);
+  assert.equal(legitimate.status, 200, `sandi benar akun lain tidak terkunci: ${legitimate.text}`);
+  assert.match(legitimate.setCookie, /^svara_session=/);
+});
+
+test('NR-09: batas 8 kegagalan per alamat+akun tetap menahan akun itu tanpa mengunci akun lain', async () => {
+  resetRateLimits();
+  const email = 'creator.b@svara.local';
+  const statuses: number[] = [];
+  for (let i = 0; i < 9; i += 1) statuses.push((await login(email, 'Salah-Sekali-2026!')).status);
+  assert.deepEqual(statuses, [...Array(8).fill(401), 429], 'percobaan ke-9 ditolak');
+
+  const audit = await failedLoginAudit();
+  const blocked = await login(email, DEMO_PASSWORD);
+  assert.equal(blocked.status, 429, 'email itu tetap tertahan meski sandi benar');
+  assert.equal(blocked.json?.code, 'rate_limited');
+  assert.equal((await failedLoginAudit()).count, audit.count, 'penolakan 429 tidak menulis audit');
+
+  const other = await login('officer@svara.local', DEMO_PASSWORD);
+  assert.equal(other.status, 200, 'blokir satu akun tidak menjalar ke akun lain dari alamat yang sama');
+});
+
+test('NR-09: login sah tidak memotong kuota per alamat; kuota 200 utuh setelah 35 login berhasil', async () => {
+  resetRateLimits();
+  const accounts = ['admin@svara.local', 'creator.a@svara.local', 'creator.b@svara.local', 'officer@svara.local', 'orgadmin@svara.local'];
+  const successes: number[] = [];
+  for (let round = 0; round < 7; round += 1) {
+    for (const email of accounts) successes.push((await login(email, DEMO_PASSWORD)).status);
+  }
+  assert.deepEqual(successes, Array(35).fill(200));
+  // Bila 35 login berhasil ikut memotong kuota, kegagalan berikutnya akan 429 lebih cepat.
+  assert.deepEqual(await distinctFailures('nr09c', 200), Array(200).fill(401), 'kuota per alamat tetap 200 setelah 35 login berhasil');
+  assert.equal((await login('nr09c.last@sekolah.contoh', 'Salah-Sekali-2026!')).status, 429, 'kuota ke-201 habis');
+});
+
+test('NR-09: pengaman kasar 200 kegagalan per alamat tetap menahan banjir lintas akun', async () => {
+  resetRateLimits();
+  assert.deepEqual(await distinctFailures('nr09e', 200), Array(200).fill(401), '200 email berbeda dari satu alamat');
+  const audited = await login('nr09e.200@sekolah.contoh', 'Salah-Sekali-2026!');
+  assert.equal(audited.status, 429, 'kegagalan ke-201 ditolak sebelum query akun dan audit');
+  const audit = await failedLoginAudit();
+  const blocked = await login('admin@svara.local', DEMO_PASSWORD);
+  assert.equal(blocked.status, 429, 'alamat itu tertahan, termasuk sandi benar');
+  assert.equal((await failedLoginAudit()).count, audit.count, 'penolakan 429 tidak menulis audit');
+});
+

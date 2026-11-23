@@ -310,9 +310,9 @@ test(
 );
 
 test('SEC-05 kuota login per alamat memakai identitas TRUST_PROXY yang sama untuk setiap nilai yang didokumentasikan', async () => {
-  // Klien loopback mengganti X-Forwarded-For dan email di setiap percobaan (batas per email tidak pernah tercapai).
-  // 'header': loopback dipercaya sebagai proxy sehingga tiap alamat header jadi klien sendiri (risiko yang
-  // didokumentasikan untuk TRUST_PROXY=loopback tanpa ingress); 'socket': header diabaikan, kuota habis di percobaan ke-31.
+  // Klien loopback mengganti X-Forwarded-For dan email di setiap percobaan (batas 8 per alamat+email tidak pernah
+  // tercapai). 'header': loopback dipercaya sebagai proxy sehingga tiap alamat header jadi klien sendiri (risiko yang
+  // didokumentasikan untuk TRUST_PROXY=loopback tanpa ingress); 'socket': header diabaikan, kuota 200 per alamat habis.
   const identity: Record<string, 'socket' | 'header'> = {
     '': 'socket',
     '0': 'socket',
@@ -326,6 +326,7 @@ test('SEC-05 kuota login per alamat memakai identitas TRUST_PROXY yang sama untu
     true: 'socket',
     '10.0.0.0/8': 'socket',
   };
+  const attempts = 201;
   const warn = mock.method(console, 'warn', () => {});
   const results: Record<string, number[]> = {};
   try {
@@ -333,7 +334,7 @@ test('SEC-05 kuota login per alamat memakai identitas TRUST_PROXY yang sama untu
       resetRateLimits();
       await withTrustProxy(value, async (port) => {
         const statuses: number[] = [];
-        for (let i = 1; i <= 31; i += 1) {
+        for (let i = 1; i <= attempts; i += 1) {
           const res = await send(
             port,
             '/api/v1/auth/login',
@@ -352,7 +353,10 @@ test('SEC-05 kuota login per alamat memakai identitas TRUST_PROXY yang sama untu
   assert.deepEqual(
     results,
     Object.fromEntries(
-      Object.entries(identity).map(([value, kind]) => [value, kind === 'socket' ? [...Array(30).fill(401), 429] : Array(31).fill(401)]),
+      Object.entries(identity).map(([value, kind]) => [
+        value,
+        kind === 'socket' ? [...Array(attempts - 1).fill(401), 429] : Array(attempts).fill(401),
+      ]),
     ),
   );
 });
