@@ -2,10 +2,13 @@ import { createHash } from 'node:crypto';
 import { app } from './app.ts';
 import { closePool, run } from './db.ts';
 import { migrate } from './migrate.ts';
+import { productionWithoutHttpsWarning } from './security.ts';
 import { seedDemoIfEmpty } from './seed-data.ts';
 import { demoSeedEnabled } from './seed-policy.ts';
 
 const demoSeed = demoSeedEnabled();
+const httpsWarning = productionWithoutHttpsWarning();
+if (httpsWarning) console.warn(httpsWarning);
 await migrate();
 
 if (demoSeed) {

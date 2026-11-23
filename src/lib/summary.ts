@@ -83,6 +83,12 @@ export function formatWIB(iso: string): string {
   return `${WIB.format(new Date(iso))} WIB`;
 }
 
+/** Ukuran berkas untuk unggahan bukti wali; server menolak di atas 5 MB. */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'Asia/Jakarta' }).format(new Date(iso));
 }

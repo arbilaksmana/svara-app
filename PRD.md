@@ -105,6 +105,8 @@ Aturan:
 | **Layanan Modul 13** | Berikan identitas dan penugasan terverifikasi; terima status pengiriman | Autentikasi layanan, cakupan minimum, ID stabil |
 | **Layanan Modul 15** | Ambil data yang diizinkan melalui API atau konsumsi CSV | Filter cakupan dan kolom di server; catat akses dan penerima |
 
+**Pembacaan jawaban individual (keputusan 2026-11-24).** Pemilik survei dan `org_admin` organisasi survei itu membaca jawaban individual sebagai pengendali, tanpa grant: keduanya sudah memegang kendali atas survei dan kebijakan organisasinya, sehingga grant kepada diri sendiri tidak menegakkan batas apa pun. Grant tetap wajib bagi pihak lain (petugas berizin, creator rekan, layanan Modul 15), terikat pengaturan survei dan dipisah per izin baca, ekspor, serta teks bebas. Super admin tetap tidak otomatis; akses individualnya diperiksa terpisah.
+
 Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti ID objek. Identitas yang dikirim oleh browser tidak menentukan peran atau kepemilikan.
 
 **Tanggung jawab antarmodul.** Creator memiliki dan mengelola beberapa survei. Responden mengisi melalui tautan umum, undangan individual, atau identitas terintegrasi; mode mandiri tidak mensyaratkan akun. Modul 13 adalah sumber identitas dan konteks penugasan jika tersedia; aturan milestone dan kelulusan berada pada sistem pembelajaran. Modul 15 menerima data yang diizinkan, menggabungkannya dengan hasil asesmen Modul 13 (pada studi kasus: asesmen UI/UX), dan melakukan analitik profil serta rekomendasi.
@@ -119,7 +121,7 @@ Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti 
 | F-05–07 | P1 untuk Likert dan teks; P2 untuk pilihan tunggal | Skala Likert numerik 1–N dengan label dan nilai per opsi yang dapat diatur per pertanyaan; jawaban singkat opsional/wajib; pilihan tunggal kategorikal (contoh MVP cukup memakai isian kendala opsional) |
 | F-08–10 | P1 | Pratinjau tanpa data/respons produksi, publikasi versi tetap, tautan, pemberitahuan, tinjau, dan kirim |
 | F-11–13 | P1 | Validasi versi, undangan, item, dan nilai; respons final per transaksi; dashboard menampilkan total kiriman, frekuensi, dan jumlah yang menjawab tiap item per versi |
-| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual membutuhkan izin khusus; XLSX opsional |
+| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual pihak selain pemilik dan `org_admin` organisasi membutuhkan izin khusus; XLSX opsional |
 | F-15, F-16 | P1 mode mandiri; P2 integrasi nyata | Alur mandiri lengkap dan identitas lokal; kontrak serta uji simulasi Modul 13 tersedia untuk pengembangan paralel |
 | F-18–19 | P1 | Catat dasar pemrosesan dan bukti persetujuan sesuai konteks; audit perubahan izin/status, akses individual, publikasi, penolakan akses, dan ekspor |
 | F-20 | P2 | Pembaruan otomatis dashboard; pada MVP ringkasan yang dimuat ulang sudah akurat setelah transaksi tersimpan |
@@ -424,8 +426,9 @@ Uji fleksibilitas memakai survei kedua dengan topik berbeda, skala empat opsi, d
 | ID/daftar peserta, autentikasi, dan endpoint Modul 13 | Tim Modul 13 dan 14 | Gunakan ID lokal, kode individual, dan adapter simulasi |
 | Format skema nyata serta penerima terotorisasi Modul 15 | Tim Modul 14/15 dan pengendali | Penuhi kontrak CSV/fixture per versi; dokumentasikan pemetaan yang perlu disepakati |
 | Penanggung jawab, bukti wali, akses individual, retensi, hosting, dan prosedur insiden | Sekolah dan pengendali yang ditetapkan | Pisahkan lingkungan sintetis; siapkan konfigurasi dan bukti uji sebelum data nyata |
+| Alur bukti wali: unggahan responden dan moderasi `org_admin` | Pengendali dan sekolah | Wali mengunggah berkas (maks. 5 MB; JPG, PNG, WebP, PDF); status awal `self_attested`, lalu `verified`/`rejected` oleh `org_admin` dengan audit. `rejected` tidak memblokir respons tersetujui karena `responses` tidak merujuk `consent_records`; retensi berkas belum ditetapkan |
 
-Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, tata cara verifikasi wali, penerima individual, masa simpan per jenis data, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
+Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, siapa di sekolah yang berwenang memutuskan status bukti wali (alur unggah–moderasi sudah tersedia), penerima individual, masa simpan per jenis data dan retensi berkas bukti, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
 
 Pengesahan tertulis perubahan matriks topik belum tersedia; bukti arahan pembimbing berupa transkrip. Instrumen studi kasus masih menunggu penetapan.
 

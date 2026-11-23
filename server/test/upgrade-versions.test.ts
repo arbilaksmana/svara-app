@@ -11,6 +11,7 @@ import { migrate, resetSchema } from '../migrate.ts';
 process.env.NODE_ENV = 'test';
 
 const MIGRATION_019 = '019_close_superseded_published_versions.sql';
+const MIGRATION_020 = '020_guardian_evidence_moderation.sql';
 
 let server: Server;
 let origin: string;
@@ -316,7 +317,13 @@ async function historical() {
   return {
     responses: await sql('SELECT * FROM responses ORDER BY id'),
     answers: await sql('SELECT * FROM answers ORDER BY id'),
-    consents: await sql('SELECT * FROM consent_records ORDER BY id'),
+    // 020 menambah kolom bukti wali; yang harus utuh adalah kolom historis yang sudah ada di 018.
+    consents: await sql(
+      `SELECT id, survey_id, version_id, notice_version, basis, status, recorded_at, respondent_click,
+              guardian_evidence_status, guardian_evidence_ref, invitation_id, public_link_id,
+              respondent_session_hash, response_id
+         FROM consent_records ORDER BY id`,
+    ),
     respondents: await sql('SELECT * FROM respondents ORDER BY id'),
     attempts: await sql('SELECT * FROM submission_attempts ORDER BY id'),
     assignments: await sql('SELECT * FROM assignments ORDER BY id'),
@@ -474,7 +481,7 @@ test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', asyn
   // Data yang pernah diedit manual: tautan survei lain dan tautan versi yang akan ditutup memuat tanggal tak terurai.
   await sql("UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token = $1", [TOKENS.tunggal]);
   await sql("UPDATE public_links SET expires_at = '' WHERE token = $1", [TOKENS.layananV1]);
-  assert.deepEqual(await migrate(), [MIGRATION_019], 'migrasi 019 tetap berjalan');
+  assert.deepEqual(await migrate(), [MIGRATION_019, MIGRATION_020], 'migrasi 019 dan 020 tetap berjalan');
   assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
   // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.
   assert.deepEqual(await linkState(LAYANAN, 1), { status: 'closed', closed_reason: 'superseded' });

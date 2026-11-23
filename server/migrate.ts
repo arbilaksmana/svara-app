@@ -13,6 +13,11 @@ export interface MigrationFile {
   checksum: string;
 }
 
+/** Checksum stabil lintas checkout Windows/Linux (CRLF vs LF). Dipakai juga oleh reparasi checksum. */
+export function sqlChecksum(sql: string): string {
+  return createHash('sha256').update(sql.replace(/\r\n?/g, '\n')).digest('hex');
+}
+
 export function migrationFiles(): MigrationFile[] {
   return readdirSync(MIGRATIONS_DIR)
     .filter((name) => name.endsWith('.sql'))
@@ -20,9 +25,7 @@ export function migrationFiles(): MigrationFile[] {
     .map((name) => {
       const path = `${MIGRATIONS_DIR}/${name}`;
       const sql = readFileSync(path, 'utf8');
-      // Checksum harus stabil lintas checkout Windows/Linux (CRLF vs LF).
-      const canonical = sql.replace(/\r\n?/g, '\n');
-      return { version: name, path, sql, checksum: createHash('sha256').update(canonical).digest('hex') };
+      return { version: name, path, sql, checksum: sqlChecksum(sql) };
     });
 }
 

@@ -8,6 +8,7 @@
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "next dev -p 3000",
     "db:migrate": "tsx server/migrate.ts",
+    "db:repair-checksum": "tsx server/scripts/repair-checksum.ts",
     "db:reset": "tsx server/seed.ts --reset",
     "db:seed": "tsx server/seed.ts",
     "admin:bootstrap": "tsx server/scripts/bootstrap-admin.ts",

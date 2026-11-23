@@ -46,6 +46,7 @@ const VERSIONS = [
   '017_hot_path_indexes.sql',
   '018_notice_survey_profile_backfill.sql',
   '019_close_superseded_published_versions.sql',
+  '020_guardian_evidence_moderation.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -390,4 +391,94 @@ test('upgrade 016 → 017 menambah indeks jalur panas tanpa mengubah data dan am
     await client.end();
   }
   assert.deepEqual(await appliedVersions(), VERSIONS);
+});
+
+/**
+ * Checksum 019 yang tercatat oleh versi lama (sebelum perbaikan cast expires_at). Nilai ini berasal dari
+ * riwayat isi migrasi, bukan dihitung ulang oleh kode yang diuji.
+ */
+const LEGACY_019_CHECKSUM = '2fb61d46618321c3d558881cea7031ef552d70ecdd4a380fa5e812de28e3bcab';
+const VERSION_019 = '019_close_superseded_published_versions.sql';
+
+async function setStoredChecksum(version: string, checksum: string): Promise<void> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query('UPDATE schema_migrations SET checksum = $1 WHERE version = $2', [checksum, version]);
+  } finally {
+    await client.end();
+  }
+}
+
+async function storedChecksum(version: string): Promise<string | undefined> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query<{ checksum: string }>('SELECT checksum FROM schema_migrations WHERE version = $1', [version]);
+    return result.rows[0]?.checksum;
+  } finally {
+    await client.end();
+  }
+}
+
+test('NEW-PO-02: start menolak 019 yang isinya berubah, repair eksplisit mencetak diff dan memulihkan', async () => {
+  const { migrate } = await import('../migrate.ts');
+  const { repairChecksum } = await import('../migration-repair.ts');
+
+  await setStoredChecksum(VERSION_019, LEGACY_019_CHECKSUM);
+  await assert.rejects(
+    () => migrate(),
+    /019_close_superseded_published_versions\.sql sudah diterapkan dengan isi berbeda\. Buat migrasi baru\./,
+    'start wajib menolak checksum yang tidak cocok',
+  );
+
+  await assert.rejects(
+    () => repairChecksum({ version: VERSION_019, acceptChecksum: 'checksum-yang-salah' }),
+    /--accept/,
+    'repair wajib menolak bila pemanggil tidak menyebut checksum tersimpan',
+  );
+
+  const repaired = await repairChecksum({ version: VERSION_019, acceptChecksum: LEGACY_019_CHECKSUM });
+  assert.equal(repaired.previousChecksum, LEGACY_019_CHECKSUM);
+  assert.notEqual(repaired.checksum, LEGACY_019_CHECKSUM);
+  assert.match(repaired.diff, /^\+.*pg_input_is_valid\(expires_at, 'timestamptz'\)/m, 'diff memuat baris baru');
+  assert.match(repaired.diff, /^-.*expires_at IS NULL OR expires_at::timestamptz >= now\(\)/m, 'diff memuat baris lama');
+  assert.ok(repaired.auditId, 'reparasi tercatat sebagai baris audit');
+  assert.match(repaired.auditId, /^aud_/);
+  assert.deepEqual(await migrate(), [], 'start berjalan lagi tanpa menerapkan ulang migrasi');
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const audit = await client.query<{ actor: string; object: string; metadata: string }>(
+      "SELECT actor, object, metadata FROM audit_logs WHERE id = $1",
+      [repaired.auditId],
+    );
+    assert.equal(audit.rows[0]?.actor, 'operator:db-repair-checksum');
+    assert.equal(audit.rows[0]?.object, VERSION_019);
+    assert.match(audit.rows[0]?.metadata ?? '', /2fb61d46/, 'audit menyimpan checksum lama');
+  } finally {
+    await client.end();
+  }
+});
+
+test('NEW-PO-02: versi tanpa jalur reparasi tetap menolak checksum yang berubah', async () => {
+  const { migrate } = await import('../migrate.ts');
+  const { repairChecksum } = await import('../migration-repair.ts');
+  const version = '018_notice_survey_profile_backfill.sql';
+  const original = await storedChecksum(version);
+  assert.ok(original);
+  const bogus = 'f'.repeat(64);
+  await setStoredChecksum(version, bogus);
+  try {
+    await assert.rejects(() => migrate(), /sudah diterapkan dengan isi berbeda/);
+    await assert.rejects(
+      () => repairChecksum({ version, acceptChecksum: bogus }),
+      /tidak terdaftar/,
+      'hanya versi yang terdaftar yang boleh direparasi',
+    );
+  } finally {
+    await setStoredChecksum(version, original);
+  }
+  assert.deepEqual(await migrate(), [], 'pemulihan manual mengembalikan start normal');
 });
