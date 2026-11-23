@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
+import { readGuardianEvidence } from '../guardian-evidence.ts';
 import { redactAuditRow, revokeSessionsOnStatusChange, type AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
 import {
@@ -304,6 +305,140 @@ orgRouter.get('/org/audit', async (req: AuthedRequest, res: Response) => {
     );
     res.setHeader('Cache-Control', 'no-store');
     res.json({ data: { rows: rows.map(redactAuditRow) } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/* ---------- Moderasi bukti persetujuan wali (SEC-04/BF-03) ---------- */
+
+interface GuardianEvidenceRow {
+  consent_id: string;
+  survey_id: string;
+  survey_title: string;
+  basis: string;
+  recorded_at: string;
+  guardian_evidence_status: string;
+  guardian_evidence_ref: string | null;
+  guardian_evidence_file: string | null;
+  guardian_evidence_mime: string | null;
+  guardian_evidence_size: number | null;
+  guardian_evidence_uploaded_at: string | null;
+  guardian_evidence_reviewed_by: string | null;
+  guardian_evidence_reviewed_at: string | null;
+  guardian_evidence_review_note: string | null;
+}
+
+const EVIDENCE_LIST_LIMIT = 100;
+const EVIDENCE_STATUS = ['self_attested', 'verified', 'rejected', 'all'] as const;
+const EVIDENCE_COLUMNS = `cr.id AS consent_id, cr.survey_id, s.title AS survey_title, cr.basis, cr.recorded_at,
+  cr.guardian_evidence_status, cr.guardian_evidence_ref, cr.guardian_evidence_file, cr.guardian_evidence_mime,
+  cr.guardian_evidence_size, cr.guardian_evidence_uploaded_at, cr.guardian_evidence_reviewed_by,
+  cr.guardian_evidence_reviewed_at, cr.guardian_evidence_review_note`;
+
+/** Lingkup selalu lewat surveys.organization_id milik sesi; ID lain tidak pernah dijangkau. */
+async function evidenceForOrg(organizationId: string, consentId: string): Promise<GuardianEvidenceRow | undefined> {
+  return get<GuardianEvidenceRow>(
+    `SELECT ${EVIDENCE_COLUMNS}
+       FROM consent_records cr JOIN surveys s ON s.id = cr.survey_id
+      WHERE cr.id = ? AND s.organization_id = ?`,
+    consentId,
+    organizationId,
+  );
+}
+
+function withFileFlag(row: GuardianEvidenceRow): GuardianEvidenceRow & { has_file: boolean } {
+  return { ...row, has_file: row.guardian_evidence_file !== null };
+}
+
+/** Header unduhan aman: nama asli di-encode RFC 5987, fallback ASCII tanpa tanda kutip atau kontrol. */
+function attachmentDisposition(name: string): string {
+  const fallback = name.replace(/[^\x20-\x7e]/gu, '_').replace(/["\\]/gu, '_').slice(0, 100) || 'bukti-wali';
+  const encoded = encodeURIComponent(name).replace(/[!'()*]/gu, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+orgRouter.get('/org/guardian-evidence', async (req: AuthedRequest, res: Response) => {
+  try {
+    const organizationId = requireOrgScope(req, 'org_admin');
+    const requested = typeof req.query.status === 'string' && req.query.status.trim() ? req.query.status.trim() : 'self_attested';
+    if (!EVIDENCE_STATUS.includes(requested as (typeof EVIDENCE_STATUS)[number])) {
+      fail(422, 'validation_error', 'status harus self_attested, verified, rejected, atau all.');
+    }
+    const rows = requested === 'all'
+      ? await all<GuardianEvidenceRow>(
+        `SELECT ${EVIDENCE_COLUMNS}
+           FROM consent_records cr JOIN surveys s ON s.id = cr.survey_id
+          WHERE s.organization_id = ?
+          ORDER BY cr.recorded_at DESC, cr.id DESC LIMIT ${EVIDENCE_LIST_LIMIT}`,
+        organizationId,
+      )
+      : await all<GuardianEvidenceRow>(
+        `SELECT ${EVIDENCE_COLUMNS}
+           FROM consent_records cr JOIN surveys s ON s.id = cr.survey_id
+          WHERE s.organization_id = ? AND cr.guardian_evidence_status = ?
+          ORDER BY cr.recorded_at DESC, cr.id DESC LIMIT ${EVIDENCE_LIST_LIMIT}`,
+        organizationId,
+        requested,
+      );
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { evidence: rows.map(withFileFlag) } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Berkas hanya disajikan untuk sesi org_admin pemilik organisasi; tidak ada URL publik yang bisa ditebak. */
+orgRouter.get('/org/guardian-evidence/:consentId/file', async (req: AuthedRequest, res: Response) => {
+  try {
+    const organizationId = requireOrgScope(req, 'org_admin');
+    const consentId = pathParam(req, 'consentId');
+    const row = await evidenceForOrg(organizationId, consentId);
+    if (!row || !row.guardian_evidence_file) fail(404, 'evidence_not_found', 'Bukti wali tidak ditemukan.');
+    const buffer = await readGuardianEvidence(consentId);
+    if (!buffer) fail(404, 'evidence_not_found', 'Berkas bukti wali tidak ditemukan.');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', row.guardian_evidence_mime ?? 'application/octet-stream');
+    res.setHeader('Content-Disposition', attachmentDisposition(row.guardian_evidence_file));
+    res.setHeader('Content-Length', String(buffer.length));
+    res.end(buffer);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+orgRouter.patch('/org/guardian-evidence/:consentId', async (req: AuthedRequest, res: Response) => {
+  try {
+    const organizationId = requireOrgScope(req, 'org_admin');
+    const consentId = pathParam(req, 'consentId');
+    const row = await evidenceForOrg(organizationId, consentId);
+    // 404 untuk organisasi lain: keberadaan bukti organisasi lain tidak dibocorkan.
+    if (!row) fail(404, 'evidence_not_found', 'Bukti wali tidak ditemukan.');
+    const decision = req.body?.decision;
+    if (decision !== 'verified' && decision !== 'rejected') {
+      fail(422, 'validation_error', 'decision harus verified atau rejected.');
+    }
+    const rawNote = req.body?.note;
+    const note = rawNote === undefined || rawNote === null ? null : asString(rawNote, 'note', 500) || null;
+    const reviewedAt = nowIso();
+    const outcome = decision === 'verified' ? 'berhasil' : 'ditolak';
+    await withTx(async () => {
+      await run(
+        `UPDATE consent_records
+            SET guardian_evidence_status = ?, guardian_evidence_reviewed_by = ?,
+                guardian_evidence_reviewed_at = ?, guardian_evidence_review_note = ?
+          WHERE id = ?`,
+        decision,
+        req.account!.id,
+        reviewedAt,
+        note,
+        consentId,
+      );
+      await audit(req, 'Verifikasi bukti wali', consentId, outcome, { decision });
+    });
+    const updated = await evidenceForOrg(organizationId, consentId);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { evidence: updated ? withFileFlag(updated) : null } });
   } catch (error) {
     sendError(res, error);
   }

@@ -32,6 +32,19 @@ export const INVITATION_STATUS_LABEL: Record<InvitationStatus, string> = {
   closed: 'Ditutup',
 };
 
+/** Status bukti wali pada layar moderasi; tiga status ini yang dapat diputuskan operator. */
+export const GUARDIAN_EVIDENCE_STATUS_LABEL: Record<string, string> = {
+  self_attested: 'Menunggu tinjauan',
+  verified: 'Terverifikasi',
+  rejected: 'Ditolak',
+};
+
+export const GUARDIAN_EVIDENCE_STATUS_TONE: Record<string, 'success' | 'danger' | 'neutral'> = {
+  self_attested: 'neutral',
+  verified: 'success',
+  rejected: 'danger',
+};
+
 export const INVITATION_STATUS_TONE: Record<InvitationStatus, 'success' | 'info' | 'danger' | 'warning' | 'neutral'> = {
   active: 'success',
   used: 'info',

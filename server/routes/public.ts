@@ -15,6 +15,12 @@ import {
   sha256Hex,
 } from '../http.ts';
 import type { SurveyRow, VersionRow } from '../http.ts';
+import {
+  decodeGuardianEvidence,
+  removeGuardianEvidence,
+  writeGuardianEvidence,
+  type GuardianEvidenceUpload,
+} from '../guardian-evidence.ts';
 
 type QuestionType = 'likert' | 'short_text' | 'single_choice';
 
@@ -144,6 +150,7 @@ interface ConsentRow {
   recorded_at: string;
   guardian_evidence_status: string;
   guardian_evidence_ref: string | null;
+  guardian_evidence_file: string | null;
   response_id: string | null;
 }
 
@@ -513,7 +520,8 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
 
 function consentForSession(context: PublicContext, versionId: string, id: string, session: string, lock = false) {
   return get<ConsentRow>(
-    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref,
+            guardian_evidence_file, response_id
        FROM consent_records
       WHERE id = ? AND survey_id = ? AND version_id = ? AND status = 'granted'
         AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
@@ -533,7 +541,8 @@ function consentForSession(context: PublicContext, versionId: string, id: string
  */
 function sessionConsent(context: PublicContext, id: string, session: string) {
   return get<ConsentRow>(
-    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref, response_id
+    `SELECT id, version_id, notice_version, basis, recorded_at, guardian_evidence_status, guardian_evidence_ref,
+            guardian_evidence_file, response_id
        FROM consent_records
       WHERE id = ? AND survey_id = ? AND status = 'granted'
         AND invitation_id IS NOT DISTINCT FROM ? AND public_link_id IS NOT DISTINCT FROM ?
@@ -567,7 +576,8 @@ function requireUnusedConsent(context: PublicContext, consent: ConsentRow): void
     fail(409, 'consent_expired', 'Persetujuan kedaluwarsa. Buka kembali pengantar untuk mencatat persetujuan baru.');
   }
   if (context.guardianRequired && (
-    !['self_attested', 'verified'].includes(consent.guardian_evidence_status) || !consent.guardian_evidence_ref?.trim()
+    !['self_attested', 'verified'].includes(consent.guardian_evidence_status)
+    || !(consent.guardian_evidence_file || consent.guardian_evidence_ref?.trim())
   )) {
     fail(409, 'guardian_evidence_required', 'Buka kembali pengantar dan lengkapi bukti wali.');
   }
@@ -608,6 +618,7 @@ publicRouter.get('/public/surveys/:token', async (req: AuthedRequest, res: Respo
 });
 
 publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, res: Response) => {
+  let storedEvidenceId: string | null = null;
   try {
     if (!rateLimit({ key: `consent:${clientIp(req)}:${pathParam(req, 'token')}`, limit: 30, windowMs: 60 * 1000 })) {
       fail(429, 'rate_limited', 'Terlalu banyak permintaan. Coba lagi sebentar.');
@@ -619,12 +630,21 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     const click = req.body?.respondent_click === true;
     const eligibility = req.body?.eligibility === true;
     const evidenceRef = typeof req.body?.guardian_evidence_ref === 'string' ? req.body.guardian_evidence_ref.trim() : '';
+    const hasEvidenceFile = req.body?.guardian_evidence_file !== undefined;
     if (!click || !eligibility) {
       fail(422, 'consent_incomplete', 'Konfirmasi kelayakan dan persetujuan wajib dicentang.');
     }
-    if (context.guardianRequired && !evidenceRef) {
+    // Berkas hanya bermakna pada survei bermode wali; jangan menerimanya diam-diam sebagai data yatim.
+    if (hasEvidenceFile && !context.guardianRequired) {
+      fail(422, 'invalid_evidence', 'Berkas bukti wali hanya diterima untuk survei yang mewajibkan wali.');
+    }
+    if (context.guardianRequired && !evidenceRef && !hasEvidenceFile) {
       fail(422, 'guardian_evidence_required', 'Bukti verifikasi wali wajib tersedia sebelum pengisian.');
     }
+    // Batas ukuran, MIME, dan isi diperiksa seluruhnya di memori sebelum satu byte pun ditulis.
+    const upload: GuardianEvidenceUpload | null = hasEvidenceFile
+      ? decodeGuardianEvidence(req.body.guardian_evidence_file, req.body?.guardian_evidence_mime, req.body?.guardian_evidence_name)
+      : null;
     // SEC-02: persetujuan hanya sah untuk versi+notice yang benar-benar dirender pada intro. Klien mengirim
     // consent_version dari konteks yang tampil; remap tautan lama tidak boleh diam-diam mengganti notice yang disetujui.
     const shownToken = typeof req.body?.version_id === 'string' ? req.body.version_id.trim() : '';
@@ -635,10 +655,14 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     const existingSession = respondentSession(req);
     const session = existingSession ?? randomBytes(32).toString('base64url');
     const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
-    // SEC-04/BF-03: referensi dari form adalah pernyataan responden, bukan hasil verifikasi.
-    // Tidak ada jalur yang menandai evidence_ref sebagai sah, jadi statusnya self_attested.
+    // SEC-04/BF-03: bukti dari wali adalah pernyataan yang belum dimoderasi; status baru berubah lewat
+    // keputusan operator organisasi pada PATCH /org/guardian-evidence/:consentId.
     const guardianStatus = context.guardianRequired ? 'self_attested' : 'not_required';
     const recordedAt = nowIso();
+    if (upload) {
+      await writeGuardianEvidence(consentId, upload);
+      storedEvidenceId = consentId;
+    }
     await withTx(async () => {
       // Versi diperiksa di dalam transaksi agar publish yang terjadi setelah resolve tidak lolos.
       const shownVersionId = Buffer.from(shownToken, 'base64url').toString('utf8');
@@ -647,9 +671,10 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
       }
       await run(
         `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
-          respondent_click, guardian_evidence_status, guardian_evidence_ref, invitation_id, public_link_id,
-          respondent_session_hash, response_id)
-         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, ?, ?, NULL)`,
+          respondent_click, guardian_evidence_status, guardian_evidence_ref, guardian_evidence_file,
+          guardian_evidence_mime, guardian_evidence_size, guardian_evidence_uploaded_at,
+          invitation_id, public_link_id, respondent_session_hash, response_id)
+         VALUES (?, ?, ?, ?, ?, 'granted', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         consentId,
         context.survey.id,
         context.version.id,
@@ -658,6 +683,10 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
         recordedAt,
         guardianStatus,
         context.guardianRequired ? evidenceRef : null,
+        upload?.fileName ?? null,
+        upload?.mime ?? null,
+        upload?.size ?? null,
+        upload ? recordedAt : null,
         context.invitation?.id ?? null,
         context.link?.id ?? null,
         consentSessionHash(consentId, session),
@@ -696,6 +725,8 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
       },
     });
   } catch (error) {
+    // Setiap kegagalan setelah berkas ditulis (mis. notice berubah) tidak boleh meninggalkan berkas yatim.
+    if (storedEvidenceId) await removeGuardianEvidence(storedEvidenceId).catch(() => undefined);
     sendError(res, error);
   }
 });

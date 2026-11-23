@@ -46,6 +46,10 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      GUARDIAN_EVIDENCE_DIR: /app/var/guardian-evidence
+    # Bukti wali harus bertahan saat image dibangun ulang; tanpa volume, berkas hilang bersama container.
+    volumes:
+      - svara_guardian_evidence:/app/var/guardian-evidence
     healthcheck:
       test:
         [
@@ -95,3 +99,4 @@ services:
 
 volumes:
   svara_pgdata:
+  svara_guardian_evidence:

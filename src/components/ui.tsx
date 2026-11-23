@@ -377,6 +377,7 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
   onClose,
+  children,
 }: {
   open: boolean;
   title: string;
@@ -387,6 +388,8 @@ export function ConfirmDialog({
   busy?: boolean;
   onConfirm: () => void;
   onClose: () => void;
+  /** Isian tambahan di dalam dialog, mis. catatan keputusan. */
+  children?: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -416,6 +419,7 @@ export function ConfirmDialog({
       <div className="p-5">
         <h2 id={titleId} className="text-h3 font-bold text-ink">{title}</h2>
         <p id={detailId} className="mt-2 text-body-sm text-muted">{detail}</p>
+        {children && <div className="mt-4">{children}</div>}
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={busy}>{cancelLabel}</Button>
           <Button variant={tone} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>

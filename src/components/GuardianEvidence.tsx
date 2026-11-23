@@ -14,6 +14,9 @@ export function guardianEvidencePresentation(status: string): { text: string; ba
       return { text: 'Dinyatakan oleh wali, belum diverifikasi.', badge: 'Dinyatakan wali (belum diverifikasi)' };
     case 'pending':
       return { text: 'Bukti wali menunggu verifikasi.', badge: 'Menunggu verifikasi' };
+    case 'rejected':
+      // Keputusan operator tercatat, tetapi gelombang ini tidak memblokir respons yang sudah disetujui.
+      return { text: 'Bukti wali ditolak pengelola organisasi.', badge: 'Ditolak pengelola' };
     case 'revoked':
       return { text: 'Bukti wali dicabut.', badge: 'Dicabut' };
     case 'not_required':
