@@ -99,6 +99,7 @@ Aturan:
 | --- | --- | --- |
 | **Super admin** | Kelola akun dan peran, pantau jumlah survei dan respons, baca log operasional sesuai tugas | Role tidak otomatis memberikan akses ke jawaban individual |
 | **Creator** | Buat/salin survei, kelola versi, publikasi, tutup, arsip, lihat agregat milik sendiri | Periksa kepemilikan objek pada setiap permintaan |
+| **Admin organisasi** | Kelola profil organisasinya, anggota dan suspend, kode undangan creator, log audit organisasi; mengelola survei ber-`organization_id` organisasinya dan membaca jawaban individualnya | Hanya `org_admin` yang terikat organisasi; survei tanpa organisasi (NULL) tidak pernah jatuh kepadanya (keputusan produk 2026-11-23) |
 | **Petugas berizin** | Akses atau ekspor jawaban individual sesuai penugasan | Pisahkan izin baca individual, izin ekspor, dan izin teks bebas; periksa cakupan survei |
 | **Responden mandiri** | Buka tautan atau undangan, baca pemberitahuan, jawab, tinjau, kirim, dan terima bukti | Token/versi harus aktif untuk pengiriman baru. Jalur umum menjamin idempotensi kiriman, bukan identitas unik manusia |
 | **Layanan Modul 13** | Berikan identitas dan penugasan terverifikasi; terima status pengiriman | Autentikasi layanan, cakupan minimum, ID stabil |
