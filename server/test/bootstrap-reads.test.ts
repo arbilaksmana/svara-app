@@ -4,6 +4,7 @@ import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import { closeTestDatabase, resetTestDatabase } from './test-db.ts';
 import type { AccountRow } from '../security.ts';
+import type { SurveyProfile } from '../http.ts';
 import { answerQueries, recordQueries } from './query-log.ts';
 
 const { app } = await import('../app.ts');
@@ -119,12 +120,13 @@ test('PERF-10: jumlah query bootstrap tidak bertambah per survei', async () => {
       small.queries.filter((query) => /FROM organizations\b/i.test(query.sql)).length,
     );
     assert.equal(grown.result.surveys.length, small.result.surveys.length + 19);
-    assert.deepEqual(Object.keys(grown.result.surveyProfiles).sort(), (grown.result.surveys as Array<{ id: string }>).map((survey) => survey.id).sort());
-    const sample = grown.result.surveyProfiles[added[0]!] as unknown as Record<string, unknown> | undefined;
-    assert.equal(sample?.source, 'platform');
+    const surveyIds = grown.result.surveys.map((survey) => (survey as { id: string }).id).sort();
+    assert.deepEqual(Object.keys(grown.result.surveyProfiles).sort(), surveyIds);
+    const sample: SurveyProfile = grown.result.surveyProfiles[added[0]!]!;
+    assert.equal(sample.source, 'platform');
     assert.equal(
-      sample?.organization_name,
-      (grown.result.surveyProfiles[added[1]!] as unknown as Record<string, unknown>).organization_name,
+      sample.organization_name,
+      grown.result.surveyProfiles[added[1]!]!.organization_name,
       'survei platform berbagi profil yang sama tanpa query per survei',
     );
   } finally {
