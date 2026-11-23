@@ -263,17 +263,6 @@ export async function requireVersion(versionId: string): Promise<VersionRow> {
   return version;
 }
 
-export async function requirePublishedVersion(surveyId: string): Promise<VersionRow> {
-  const version = await get<VersionRow>(
-    `SELECT * FROM survey_versions
-      WHERE survey_id = ? AND status = 'published'
-      ORDER BY number DESC LIMIT 1`,
-    surveyId,
-  );
-  if (!version) fail(409, 'no_published_version', 'Belum ada versi terbit untuk survei ini.');
-  return version;
-}
-
 export function actorFor(req: AuthedRequest): string {
   return req.account?.id ?? 'publik';
 }

@@ -39,6 +39,7 @@ import {
   clearFlowEntry,
   completeSubmission,
   discardAttempt,
+  hasDraft,
   hasUnsentAttempt,
   markFlowEntry,
   readConsent,
