@@ -19,8 +19,10 @@ const { anonymizeExpiredDataRequests } = await import('../data-request-retention
 const DEMO_PASSWORD = 'SvaraDemo123!';
 const ACTIVE_ACCOUNTS = ['admin@svara.local', 'creator.a@svara.local', 'creator.b@svara.local', 'officer@svara.local', 'orgadmin@svara.local'];
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-/** Batas terdokumentasi di README: kegagalan login per alamat klien per 15 menit. */
-const LOGIN_FAILURES_PER_IP = 30;
+/** Batas terdokumentasi di README: pengaman kasar kegagalan login per alamat klien per 15 menit. */
+const LOGIN_FAILURES_PER_IP = 200;
+/** Batas terdokumentasi di README: kegagalan login per alamat klien + email per 15 menit. */
+const LOGIN_FAILURES_PER_EMAIL = 8;
 /** Batas terdokumentasi di README: kunci aktif per jenis limiter (awalan kunci). */
 const KEYS_PER_KIND = 50_000;
 const DAY_MS = 86_400_000;
@@ -371,7 +373,7 @@ test('NR-07: survei diarsipkan memakai versi terbit terakhir, bukan draf yang ik
 
 /* ---------------- SEC-05 (sisa): batas login per alamat klien ---------------- */
 
-test('SEC-05: login dibatasi per alamat klien; login berhasil dan percobaan yang sudah ditolak per email tidak menghabiskan kuota', async () => {
+test('SEC-05: login dibatasi per alamat + akun; login berhasil dan percobaan yang sudah ditolak per email tidak menghabiskan kuota', async () => {
   const trustProxy = app.get('trust proxy');
   // Ingress tepercaya di host yang sama (TRUST_PROXY=loopback) memberi tiap klien alamatnya sendiri.
   app.set('trust proxy', trustProxySetting('loopback'));
@@ -384,30 +386,35 @@ test('SEC-05: login dibatasi per alamat klien; login berhasil dan percobaan yang
     assert.deepEqual(successes, Array(35).fill(200), '35 login berhasil dari satu kantor');
 
     const auditBefore = await failedLoginAudits();
-    const failures: number[] = [];
-    for (let i = 0; i <= LOGIN_FAILURES_PER_IP; i += 1) {
-      failures.push((await login(`staf.${i}@sekolah.contoh`, 'Salah-Sekali-2026!', office)).status);
+    // 24 email berbeda, masing-masing di bawah batas 8 per alamat+email; kegagalan ke-25 kena pengaman kasar per alamat.
+    const statuses: number[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      for (let round = 0; round < LOGIN_FAILURES_PER_EMAIL; round += 1) {
+        statuses.push((await login(`staf.${i}@sekolah.contoh`, 'Salah-Sekali-2026!', office)).status);
+      }
     }
-    assert.deepEqual(failures, [...Array(LOGIN_FAILURES_PER_IP).fill(401), 429]);
-    assert.equal(await failedLoginAudits(), auditBefore + LOGIN_FAILURES_PER_IP, 'percobaan yang ditolak 429 tidak menulis audit');
+    assert.deepEqual(statuses, Array(24 * LOGIN_FAILURES_PER_EMAIL).fill(401), 'kegagalan email berbeda tidak saling mengunci');
+    assert.equal(await failedLoginAudits(), auditBefore + 24 * LOGIN_FAILURES_PER_EMAIL);
     const correct = await login('creator.a@svara.local', DEMO_PASSWORD, office);
-    assert.equal(correct.status, 429, 'kuota per alamat habis: sandi benar pun ditolak sebelum diverifikasi');
+    assert.equal(correct.status, 200, 'akun lain dari alamat yang sama tidak ikut terkunci oleh kegagalan email lain');
 
     const lab = { 'X-Forwarded-For': '198.51.100.41' };
     const target: number[] = [];
     for (let i = 0; i < 20; i += 1) target.push((await login('kepala.lab@sekolah.contoh', 'Tebak-Sandi-2026!', lab)).status);
-    assert.deepEqual(target, [...Array(8).fill(401), ...Array(12).fill(429)], 'batas per email tetap 8');
+    assert.deepEqual(target, [...Array(LOGIN_FAILURES_PER_EMAIL).fill(401), ...Array(20 - LOGIN_FAILURES_PER_EMAIL).fill(429)], 'batas per email 8');
     const perEmail = await login('kepala.lab@sekolah.contoh', 'Tebak-Sandi-2026!', lab);
+    assert.deepEqual([perEmail.status, perEmail.json.code], [429, 'rate_limited']);
+
     const rest: number[] = [];
-    for (let i = 0; i <= LOGIN_FAILURES_PER_IP - 8; i += 1) {
+    for (let i = 0; i <= LOGIN_FAILURES_PER_IP - LOGIN_FAILURES_PER_EMAIL; i += 1) {
       rest.push((await login(`guru.${i}@sekolah.contoh`, 'Tebak-Sandi-2026!', lab)).status);
     }
-    assert.deepEqual(rest, [...Array(LOGIN_FAILURES_PER_IP - 8).fill(401), 429], 'hanya kegagalan kredensial yang dihitung per alamat');
+    assert.deepEqual(rest, [...Array(LOGIN_FAILURES_PER_IP - LOGIN_FAILURES_PER_EMAIL).fill(401), 429], 'hanya kegagalan kredensial yang dihitung per alamat');
     const perIp = await login('guru.baru@sekolah.contoh', 'Tebak-Sandi-2026!', lab);
     assert.deepEqual(
       { status: perIp.status, error: perIp.json.error, code: perIp.json.code },
       { status: 429, error: perEmail.json.error, code: perEmail.json.code },
-      'respons batas per alamat sama dengan batas per email',
+      'respons batas kasar per alamat sama dengan batas per email',
     );
 
     assert.equal((await login('orgadmin@svara.local', DEMO_PASSWORD, { 'X-Forwarded-For': '198.51.100.42' })).status, 200, 'klien lain tidak terdampak');
@@ -416,7 +423,7 @@ test('SEC-05: login dibatasi per alamat klien; login berhasil dan percobaan yang
   }
 });
 
-test('SEC-05: 300 email unik dari satu koneksi langsung berhenti di batas per alamat; audit dan kunci limiter terbatas', async () => {
+test('SEC-05: 300 email unik dari satu koneksi langsung berhenti di pengaman kasar per alamat; audit dan kunci limiter terbatas', async () => {
   const auditBefore = await failedLoginAudits();
   const keysBefore = rateLimitBucketCount();
   const statuses: Record<number, number> = {};
