@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import { all, get, nowIso, run } from './db.ts';
-import { productionWithoutHttpsWarning as httpsWarningFor, secureCookieEnabled } from '../src/lib/security-headers.ts';
+import { productionWithoutHttpsWarning as httpsWarningFor, secureCookieEnabled } from './security-headers.ts';
 
 export const SESSION_COOKIE = 'svara_session';
 const SESSION_HOURS = (() => {

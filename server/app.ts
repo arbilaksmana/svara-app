@@ -10,7 +10,7 @@ import { integrationRouter } from './routes/integration.ts';
 import { orgRouter } from './routes/org.ts';
 import { get } from './db.ts';
 import { sendError } from './http.ts';
-import { HSTS_VALUE, hstsEnabled } from '../src/lib/security-headers.ts';
+import { HSTS_VALUE, hstsEnabled } from './security-headers.ts';
 
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",

@@ -1,6 +1,29 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { HSTS_VALUE, hstsEnabled } from './lib/security-headers';
+
+/**
+ * HSTS: hanya untuk permintaan HTTPS. `ENABLE_HSTS=1/0` menimpa default produksi
+ * (NODE_ENV=production dan seluruh APP_ORIGIN https). Aturan yang sama dengan
+ * `server/security-headers.ts`; disalin karena `tsconfig.json` mengecualikan `server/`
+ * dari kompilasi Next, sehingga `src/` tidak boleh mengimpornya.
+ */
+const HSTS_VALUE = 'max-age=15552000; includeSubDomains';
+
+function hstsEnabled(env: Record<string, string | undefined>, requestIsHttps: boolean): boolean {
+  const flag = env.ENABLE_HSTS?.trim();
+  if (flag === '0') return false;
+  if (flag === '1') return requestIsHttps;
+  if (!requestIsHttps || env.NODE_ENV !== 'production') return false;
+  const origins = (env.APP_ORIGIN ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  if (origins.length === 0) return false;
+  return origins.every((origin) => {
+    try {
+      return new URL(origin).protocol === 'https:';
+    } catch {
+      return false;
+    }
+  });
+}
 
 /**
  * Next.js 16 renamed the `middleware` file convention to `proxy`.
