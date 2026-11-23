@@ -1,6 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createElement, isValidElement, type ComponentType, type ReactNode } from 'react';
+import { createElement, isValidElement, type ElementType, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime.js';
 import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime.js';
@@ -78,7 +78,7 @@ function findClickable(node: ReactNode, label: string): { onClick: () => void } 
   return findClickable(node.props.children, label);
 }
 
-function findByType<P>(node: ReactNode, type: ComponentType<any>): { props: P } | undefined {
+function findByType<P>(node: ReactNode, type: ElementType): { props: P } | undefined {
   if (Array.isArray(node)) {
     for (const child of node) {
       const found = findByType<P>(child, type);
