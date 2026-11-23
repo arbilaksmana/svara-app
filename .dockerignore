@@ -2,6 +2,7 @@ node_modules
 .git
 .github
 data
+var
 dist
 .next
 out
