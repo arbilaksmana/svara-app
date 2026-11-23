@@ -191,7 +191,8 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
     const set = await call('/admin/grants/u_petugas', {
       method: 'PUT',
       cookie: admin,
-      body: { grants: [{ survey_id: 's_demo1', can_read_individual: true, can_export, can_read_free_text: true }] },
+      // BR-06: tujuan wajib diisi; masa berlaku tanpa batas.
+      body: { grants: [{ survey_id: 's_demo1', can_read_individual: true, can_export, can_read_free_text: true, purpose: 'Uji izin ekspor' }] },
     });
     assert.equal(set.status, 200, set.text);
   };

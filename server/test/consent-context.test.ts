@@ -12,9 +12,11 @@ const { all, get, run } = await import('../db.ts');
 const { sha256Hex } = await import('../http.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
-const PUBLIC_LINK = 'link-umum-demo';
-const INVITATION = 'undangan-demo';
-const OTHER_INVITATION = 'undangan-konteks-lain';
+const PUBLIC_LINK = 'pl_demoTautanUmum1A';
+const INVITATION = 'undanganDemo01AAAAAAAAAA';
+const OTHER_INVITATION = 'undanganKonteks01AAAAAAAA';
+/** ID undangan konteks lain: referensi yang dapat dibuka pembaca publik (SEC-09), bukan token. */
+const OTHER_INVITATION_ID = 'inv_0a1b2c3d4e5f6071';
 let server: Server | undefined;
 let base: string;
 
@@ -24,16 +26,22 @@ before(async () => {
   await resetTestDatabase();
   await seedDemoIfEmpty();
   const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
-  await run('UPDATE invitations SET expires_at = ? WHERE token = ?', expiresAt, INVITATION);
+  // SEC-10: token hanya tersimpan sebagai hash; baris uji disisipkan lewat hash-nya.
+  await run('UPDATE invitations SET expires_at = ? WHERE token_hash = ?', expiresAt, sha256Hex(INVITATION));
   await run(
     `INSERT INTO assignments (id, survey_id, version_id, label, participant_ref)
-     SELECT 'a_sec08', survey_id, version_id, 'Uji konteks', 'sec08' FROM invitations WHERE token = ?`,
-    INVITATION,
+     SELECT 'a_sec08', survey_id, version_id, 'Uji konteks', 'sec08' FROM invitations WHERE token_hash = ?`,
+    sha256Hex(INVITATION),
   );
+  // SEC-09: token yang benar-benar dapat dibuka adalah ID undangan berbentuk `newId`; baris ini yang
+  // dipakai sebagai konteks "lain" pada uji pemisahan konteks.
   await run(
-    `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token, token_hash, status, expires_at, created_at)
-     SELECT 'inv_sec08', id, survey_id, version_id, 'UND-SEC08', ?, ?, 'active', ?, ? FROM assignments WHERE id = 'a_sec08'`,
-    OTHER_INVITATION, sha256Hex(OTHER_INVITATION), expiresAt, new Date().toISOString(),
+    `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token_hash, status, expires_at, created_at)
+     SELECT ?, id, survey_id, version_id, 'UND-SEC08', ?, 'active', ?, ? FROM assignments WHERE id = 'a_sec08'`,
+    OTHER_INVITATION_ID,
+    sha256Hex(OTHER_INVITATION),
+    expiresAt,
+    new Date().toISOString(),
   );
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -62,7 +70,10 @@ async function call<T>(path: string, headers: Record<string, string> = {}, body?
 }
 
 async function issueGuardianConsent(token: string, existingCookie?: string) {
+  // SEC-01/SEC-02: metadata publik tidak membawa `consent_version` sebelum consent; nilai yang
+  // disetujui adalah token versi dari konteks formulir.
   const context = await call<{ consent_version: string }>(token);
+  assert.equal(context.status, 200, JSON.stringify(context));
   const result = await call<{ consent_id: string }>(`${token}/consent`, existingCookie ? { Cookie: existingCookie } : {}, {
     version_id: context.data!.consent_version,
     respondent_click: true,
@@ -102,12 +113,12 @@ test('SEC-08/BF-02: consent baru menerbitkan cookie responden HttpOnly', async (
 test('SEC-08/BF-02: consent hanya membuka formulir dan pengiriman pada konteks penerbitannya', async () => {
   const consent = await issueGuardianConsent(PUBLIC_LINK);
   const invitationConsent = await issueGuardianConsent(INVITATION, consent.cookie);
-  const otherSession = await issueGuardianConsent(PUBLIC_LINK);
+  const otherSession = await issueGuardianConsent(INVITATION);
   const otherContexts = [
     { token: INVITATION, id: consent.id, cookie: consent.cookie },
     { token: PUBLIC_LINK, id: invitationConsent.id, cookie: consent.cookie },
-    { token: OTHER_INVITATION, id: invitationConsent.id, cookie: consent.cookie },
-    { token: PUBLIC_LINK, id: consent.id, cookie: otherSession.cookie },
+    { token: OTHER_INVITATION_ID, id: invitationConsent.id, cookie: consent.cookie },
+    { token: INVITATION, id: consent.id, cookie: otherSession.cookie },
   ];
   for (const [index, { token, id, cookie }] of otherContexts.entries()) {
     const form = await call(`${token}/form?consent_id=${id}`, { Cookie: cookie });

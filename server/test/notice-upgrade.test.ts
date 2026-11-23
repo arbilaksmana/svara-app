@@ -97,9 +97,9 @@ const MAIN = {
   orgArsip: 'org_3e1f0a9b7c6d5524',
   orgBelum: 'org_9d4a6f2b1c8e7730',
   tokens: {
-    org: 'pl_q9VtR2mXk4LwZ8sNe1Yc',
-    platform: 'pl_H3uJ7fPa0bTzD5gKs6Wm',
-    arsip: 'pl_c2Lx9Qn4EoR8vYt1MwSb',
+    org: 'pl_mOrgPilotXXXXXXX',
+    platform: 'pl_mPlatformXXXXXXX',
+    arsip: 'pl_mArsipXXXXXXXXXX',
   },
 };
 
@@ -180,6 +180,7 @@ async function seedMainDeployment(): Promise<void> {
         [`o_${id}_1`, `o_${id}_2`, `q_${id}`],
       );
       await client.query(
+        // Penyiapan main (export helper, bukan uji upgrade) menulis kolom `token` yang masih ada di 009.
         `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
          VALUES ($1, $2, $3, $4, $5, 'Tautan umum · Survei pilot', 'active', NULL, '2026-11-07T01:00:00.000Z')`,
         [`pl_${id}`, id, version, token, createHash('sha256').update(token).digest('hex')],

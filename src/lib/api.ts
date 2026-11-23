@@ -88,8 +88,10 @@ export interface BootstrapData {
   versions: SurveyVersion[];
   questions: Array<Question & { ord?: number }>;
   options: QuestionOption[];
-  invitations: Array<Invitation & { token?: string }>;
-  publicLinks: PublicLink[];
+  /** SEC-10: undangan tidak membawa token; token hanya ada pada respons penerbitan. */
+  invitations: Array<Invitation & { token?: string | null; token_hash?: string }>;
+  /** SEC-10: `token`/`url` kosong dan `token_hash` tidak dikirim; token hanya dari respons penerbitan. */
+  publicLinks: Array<PublicLink & { token?: string | null; url?: string | null; token_hash?: string }>;
   assignments: Array<{ id: string; survey_id: string; version_id: string; label: string; participant_ref: string }>;
   settings: Record<string, { allowResults: boolean; allowIndividual: boolean }>;
   grants: AccessGrant[];
@@ -191,9 +193,13 @@ export async function saveSurvey(id: string, payload: SurveyPayload): Promise<Su
   return call<SurveySaveResult>(`/surveys/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
 }
 
+/**
+ * `tokenPending: true` berarti tautan umum sudah ada dan tokennya tidak dapat dibaca balik (SEC-10);
+ * UI meminta `printPublicLinkToken` untuk menerbitkan token baru.
+ */
 export interface PublishResult {
   version: SurveyVersion;
-  publicLink: { token: string; url: string };
+  publicLink: { token: string | null; url: string | null; tokenPending: boolean };
   detail: SurveyDetail;
 }
 
@@ -222,6 +228,13 @@ export async function createInvitation(
     `/surveys/${encodeURIComponent(id)}/invitations`,
     { method: 'POST', body: { label, expires_at: expiresAt } },
   );
+}
+
+/** SEC-10: cetak ulang token tautan umum satu survei; token hanya keluar pada respons ini. */
+export async function printPublicLinkToken(id: string): Promise<{ id: string; token: string; url: string }> {
+  return call<{ id: string; token: string; url: string }>(`/surveys/${encodeURIComponent(id)}/public-link/token`, {
+    method: 'POST',
+  });
 }
 
 export async function revokeInvitation(id: string): Promise<void> {
@@ -261,7 +274,10 @@ export interface VersionSummary {
   survey_id: string;
   number: number;
   status: string;
-  total: number;
+  /** NULL bila jumlah respons di bawah ambang k-anonim (SEC-16). */
+  total: number | null;
+  /** Ambang yang berlaku saat `total` NULL; menjelaskan jumlah yang ditahan. */
+  fewer_than: number | null;
   items: SummaryItem[];
 }
 
@@ -515,8 +531,12 @@ export async function getReceipt(token: string, responseId: string, idempotencyK
   );
 }
 
-export async function resolveInvitationCode(code: string): Promise<{ token: string; url: string }> {
-  return call<{ token: string; url: string }>('/public/invitations/resolve', {
+/**
+ * SEC-09: penukaran kode mengembalikan URL formulir berisi ID undangan, bukan token undangan. Token
+ * hanya ada sebagai hash di server.
+ */
+export async function resolveInvitationCode(code: string): Promise<{ url: string }> {
+  return call<{ url: string }>('/public/invitations/resolve', {
     method: 'POST',
     body: { code },
   });

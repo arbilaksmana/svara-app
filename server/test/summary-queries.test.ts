@@ -4,7 +4,7 @@ import { closeTestDatabase, resetTestDatabase } from './test-db.ts';
 import { recordQueries } from './query-log.ts';
 
 const { all, get, run } = await import('../db.ts');
-const { summaryFor } = await import('../summary.ts');
+const { SUMMARY_MIN_RESPONSES, summaryFor } = await import('../summary.ts');
 const { seedDemoIfEmpty } = await import('../seed-data.ts');
 
 before(async () => {
@@ -69,6 +69,18 @@ async function expectedSummary(versionId: string) {
     versionId,
   );
   const total = responseIds.size;
+  // SEC-16: pembanding mengikuti ambang k-anonim yang sama — total NULL dan items kosong bila di bawahnya.
+  if (total < SUMMARY_MIN_RESPONSES) {
+    return {
+      version_id: version.id,
+      survey_id: version.survey_id,
+      number: version.number,
+      status: version.status,
+      total: null,
+      fewer_than: SUMMARY_MIN_RESPONSES,
+      items: [],
+    };
+  }
   const items = [];
   for (const question of questions) {
     const options = await all<{ id: string; label: string; value: number | null }>(
@@ -99,7 +111,15 @@ async function expectedSummary(versionId: string) {
       free_text_count: question.type === 'short_text' ? answered : 0,
     });
   }
-  return { version_id: version.id, survey_id: version.survey_id, number: version.number, status: version.status, total, items };
+  return {
+    version_id: version.id,
+    survey_id: version.survey_id,
+    number: version.number,
+    status: version.status,
+    total,
+    fewer_than: null,
+    items,
+  };
 }
 
 test('PERF-02: ringkasan setiap versi sama dengan hitungan langsung dari baris jawaban', async () => {

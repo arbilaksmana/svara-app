@@ -1,5 +1,6 @@
 import { get, all } from './db.ts';
-import { sha256 } from './security.ts';
+import { grantActive } from './http.ts';
+import { publicTokenShape, sha256 } from './security.ts';
 
 export interface SurveyRow {
   id: string;
@@ -32,6 +33,9 @@ export interface GrantRow {
   can_read_individual: number;
   can_export: number;
   can_read_free_text: number;
+  purpose: string | null;
+  expires_at: string | null;
+  granted_by: string | null;
 }
 
 export interface PublicProfileRow {
@@ -75,8 +79,14 @@ export async function versionsFor(surveyId: string): Promise<VersionRow[]> {
   return all<VersionRow>('SELECT * FROM survey_versions WHERE survey_id = ? ORDER BY number', surveyId);
 }
 
+/** Grant kedaluwarsa (BR-06) tidak memberi izin apa pun. */
 export async function grantFor(accountId: string, surveyId: string): Promise<GrantRow | undefined> {
-  return get<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? AND survey_id = ?', accountId, surveyId);
+  const grant = await get<GrantRow>(
+    'SELECT * FROM access_grants WHERE account_id = ? AND survey_id = ?',
+    accountId,
+    surveyId,
+  );
+  return grant && grantActive(grant) ? grant : undefined;
 }
 
 export async function permissionsFor(accountId: string, role: string, survey: SurveyRow): Promise<Permissions> {
@@ -119,19 +129,19 @@ export interface ResolvedToken {
   assignmentId: string | null;
 }
 
+/** SEC-10: hanya hash yang dibandingkan; bentuk token menentukan tabel yang dicari. */
 export async function resolvePublicToken(token: string): Promise<ResolvedToken | null> {
-  const link = await get<{
-    id: string;
-    survey_id: string;
-    version_id: string;
-    status: string;
-    expires_at: string | null;
-  }>(
-    'SELECT id, survey_id, version_id, status, expires_at FROM public_links WHERE token_hash = ? OR token = ?',
-    hashToken(token),
-    token,
-  );
-  if (link) {
+  const shape = publicTokenShape(token);
+  const hash = hashToken(token);
+  if (shape === 'link') {
+    const link = await get<{
+      id: string;
+      survey_id: string;
+      version_id: string;
+      status: string;
+      expires_at: string | null;
+    }>('SELECT id, survey_id, version_id, status, expires_at FROM public_links WHERE token_hash = ?', hash);
+    if (!link) return null;
     const survey = await surveyById(link.survey_id);
     const version = await versionById(link.version_id);
     if (!survey || !version) return null;
@@ -145,13 +155,20 @@ export async function resolvePublicToken(token: string): Promise<ResolvedToken |
       assignmentId: null,
     };
   }
+  // SEC-09: `/s/<invitationId>` hasil penukaran kode undangan tidak membawa kredensial di URL; pembaca
+  // undangan tetap wajib lolos gerbang status/kedaluwarsa di `publicAccessState`.
   const invitation = await get<{
     id: string;
     survey_id: string;
     version_id: string;
-    assignment_id: string;
+    assignment_id: string | null;
     code: string;
-  }>('SELECT id, survey_id, version_id, assignment_id, code FROM invitations WHERE token_hash = ? OR token = ?', hashToken(token), token);
+  }>(
+    shape === 'invitation_id'
+      ? 'SELECT id, survey_id, version_id, assignment_id, code FROM invitations WHERE id = ?'
+      : 'SELECT id, survey_id, version_id, assignment_id, code FROM invitations WHERE token_hash = ?',
+    shape === 'invitation_id' ? token : hash,
+  );
   if (!invitation) return null;
   const survey = await surveyById(invitation.survey_id);
   const version = await versionById(invitation.version_id);

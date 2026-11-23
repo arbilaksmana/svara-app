@@ -12,6 +12,8 @@ process.env.NODE_ENV = 'test';
 
 const MIGRATION_019 = '019_close_superseded_published_versions.sql';
 const MIGRATION_020 = '020_guardian_evidence_moderation.sql';
+const MIGRATION_021 = '021_access_grant_provenance.sql';
+const MIGRATION_022 = '022_drop_plaintext_link_tokens.sql';
 
 let server: Server;
 let origin: string;
@@ -69,17 +71,17 @@ interface PublicIntro {
  */
 const ORG = 'org_7c1e4b9a20d35f86';
 const TOKENS = {
-  layananV1: 'pl_Lk2mW8qNz4Rv0Tj6Ab1C',
-  layananV2: 'pl_Pz7xQ3nVb9Mc5Kd2Ef8G',
-  mandiriV1: 'pl_Ha4sD8fGj2Kl6Zx0Cv3B',
-  mandiriV2: 'pl_Nm5bV1cX7zL3kJ9hG4fD',
-  mandiriV3: 'pl_Qw8eR2tY6uI0oP4aS7dF',
-  tunggal: 'pl_Gh3jK7lZ1xC5vB9nM2qW',
-  ditutupV1: 'pl_Er6tY0uI4oP8aS2dF5gH',
-  ditutupV2: 'pl_Jk9lZ3xC7vB1nM5qW8eR',
-  ditutupV3: 'pl_Ty2uI6oP0aS4dF8gH1jK',
+  layananV1: 'pl_layananV1XXXXXXX',
+  layananV2: 'pl_layananV2XXXXXXX',
+  mandiriV1: 'pl_mandiriV1XXXXXXX',
+  mandiriV2: 'pl_mandiriV2XXXXXXX',
+  mandiriV3: 'pl_mandiriV3XXXXXXX',
+  tunggal: 'pl_tunggalXXXXXXXXX',
+  ditutupV1: 'pl_ditutupV1XXXXXXX',
+  ditutupV2: 'pl_ditutupV2XXXXXXX',
+  ditutupV3: 'pl_ditutupV3XXXXXXX',
 };
-const INVITATION_TOKEN = 'inv_Zx4cV8bN2mQ6wE0rT3yU';
+const INVITATION_TOKEN = 'mainInvitationYYYYYYYYYY';
 
 interface VersionSpec {
   number: number;
@@ -273,6 +275,8 @@ async function seedMainDeployment(): Promise<void> {
         }
         if (version.link) {
           await client.query(
+            // Penyiapan main (export helper, bukan uji upgrade) berjalan sebelum 022, jadi kolom `token`
+            // mentah yang masih ada di skema tujuannya ikut diisi.
             `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [`pl_${id}`, survey.id, id, version.link.token, hash(version.link.token), `Tautan umum · ${survey.title}`,
@@ -327,17 +331,39 @@ async function historical() {
     respondents: await sql('SELECT * FROM respondents ORDER BY id'),
     attempts: await sql('SELECT * FROM submission_attempts ORDER BY id'),
     assignments: await sql('SELECT * FROM assignments ORDER BY id'),
-    invitations: await sql('SELECT * FROM invitations ORDER BY id'),
+    // SEC-10: kolom `token` mentah dihapus 022; sisanya harus utuh.
+    invitations: await sql(
+      `SELECT id, assignment_id, survey_id, version_id, code, status, expires_at, used_at, revoked_at, created_at
+         FROM invitations ORDER BY id`,
+    ),
     questions: await sql('SELECT * FROM questions ORDER BY id'),
     options: await sql('SELECT * FROM question_options ORDER BY id'),
     surveys: await sql('SELECT * FROM surveys ORDER BY id'),
   };
 }
 
-async function lifecycle() {
+interface LifecycleLink extends Record<string, unknown> {
+  id: string;
+  survey_id: string;
+  version_id: string;
+  label: string;
+  status: string;
+  expires_at: string | null;
+  created_at: string;
+  closed_reason: string | null;
+}
+
+/**
+ * SEC-10: kolom `token` mentah dihapus migrasi 022, jadi baris tautan dibandingkan pada kolom yang
+ * memang harus tetap utuh setelah migrasi.
+ */
+async function lifecycle(): Promise<{ versions: Array<Record<string, unknown>>; links: LifecycleLink[] }> {
   return {
     versions: await sql('SELECT * FROM survey_versions ORDER BY id'),
-    links: await sql('SELECT * FROM public_links ORDER BY id'),
+    links: await sql<LifecycleLink>(
+      `SELECT id, survey_id, version_id, label, status, expires_at, created_at, closed_reason
+         FROM public_links ORDER BY id`,
+    ),
   };
 }
 
@@ -479,9 +505,13 @@ test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', asyn
   await seedMainDeployment();
   await migrate({ to: '018' });
   // Data yang pernah diedit manual: tautan survei lain dan tautan versi yang akan ditutup memuat tanggal tak terurai.
-  await sql("UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token = $1", [TOKENS.tunggal]);
-  await sql("UPDATE public_links SET expires_at = '' WHERE token = $1", [TOKENS.layananV1]);
-  assert.deepEqual(await migrate(), [MIGRATION_019, MIGRATION_020], 'migrasi 019 dan 020 tetap berjalan');
+  await sql('UPDATE public_links SET expires_at = $1 WHERE token_hash = $2', ['bukan-tanggal', hash(TOKENS.tunggal)]);
+  await sql('UPDATE public_links SET expires_at = $1 WHERE token_hash = $2', ['', hash(TOKENS.layananV1)]);
+  assert.deepEqual(
+    await migrate(),
+    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022],
+    'migrasi 019-022 tetap berjalan',
+  );
   assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
   // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.
   assert.deepEqual(await linkState(LAYANAN, 1), { status: 'closed', closed_reason: 'superseded' });

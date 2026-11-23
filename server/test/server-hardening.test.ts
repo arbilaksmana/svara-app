@@ -14,7 +14,7 @@ const { seedDemoIfEmpty } = await import('../seed-data.ts');
 const { trustProxySetting } = await import('../security.ts');
 
 const DEMO_PASSWORD = 'SvaraDemo123!';
-const PUBLIC_LINK = 'link-umum-demo';
+const PUBLIC_LINK = 'pl_demoTautanUmum1A';
 const SECURE_ATTR = /;\s*Secure(?:;|$)/i;
 
 let server: Server | undefined;
@@ -314,7 +314,17 @@ test('BR-12: mencabut undangan yang sudah dipakai → 409 dan status tetap used'
   assert.equal(revoked.status, 409, revoked.text.slice(0, 200));
   assert.equal(revoked.json?.code, 'invitation_used');
   assert.deepEqual(await select(), before, 'baris undangan tidak berubah');
-  assert.equal(data<{ state: string }>(await call('/public/surveys/undangan-terpakai')).state, 'used');
+  // SEC-09/10: ID undangan (`/s/<invitation id>`) adalah referensi, bukan kredensial, dan statusnya
+  // tegak di konteks undangan. ID seed (`inv_02`) bukan bentuk `newId` sehingga diuji lewat ID asli.
+  const usedInvitation = await createInvitation(cookie, 'Uji BR-12 terpakai');
+  await run(
+    "UPDATE invitations SET status = 'used', used_at = ? WHERE id = ?",
+    new Date().toISOString(),
+    usedInvitation.id,
+  );
+  assert.equal(data<{ state: string }>(await call(`/public/surveys/${usedInvitation.id}`)).state, 'used');
+  assert.equal(data<{ state: string }>(await call(`/public/surveys/${usedInvitation.token}`)).state, 'used');
+  assert.equal((await call('/public/surveys/undangan-demo')).status, 404, 'bentuk token lama tidak dicari');
   const audited = await get<{ count: number }>(
     "SELECT COUNT(*)::int AS count FROM audit_logs WHERE action = 'Cabut undangan' AND object LIKE '%inv_02%'",
   );
