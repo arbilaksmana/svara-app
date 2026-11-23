@@ -21,4 +21,4 @@ Tiga responden sintetis mengisi tautan umum `s_demo1` versi `v_demo1_1` dengan p
 - Tidak menguji jaringan, perangkat lapangan, atau kerahasiaan statistik.
 - Hasil hanya untuk demonstrasi alur dan rekonsiliasi CSV.
 
-Bukti terstruktur: `C:\Users\arbil\orca\workspaces\svara-app\migrate-postgres\docs\test-evidence\ac16-walkthrough.json`.
+Bukti terstruktur: `docs/test-evidence/ac16-walkthrough.json` (commit `bb8612c0b1f8392a0439bf5319505c089b1ba161`, working tree dirty).
