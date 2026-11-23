@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import { all, get, nowIso, run } from './db.ts';
+import { productionWithoutHttpsWarning as httpsWarningFor, secureCookieEnabled } from '../src/lib/security-headers.ts';
 
 export const SESSION_COOKIE = 'svara_session';
 const SESSION_HOURS = (() => {
@@ -110,12 +111,18 @@ export async function revokeSessionsOnStatusChange(accountId: string, previous: 
 }
 
 /**
- * `COOKIE_SECURE=1` selalu memberi `Secure`. Tanpanya hanya HTTPS terpercaya: `req.secure`
- * membaca X-Forwarded-Proto hanya dari proxy yang dipercaya lewat TRUST_PROXY.
+ * `COOKIE_SECURE=1` selalu memberi `Secure`. Tanpanya: HTTPS terpercaya (`req.secure`, membaca
+ * X-Forwarded-Proto hanya dari proxy yang dipercaya lewat TRUST_PROXY) atau produksi yang seluruh
+ * APP_ORIGIN-nya https. `COOKIE_SECURE=0` mematikan paksaan default produksi itu.
  * Dipakai cookie sesi dan cookie responden.
  */
 export function secureCookie(req: Request): boolean {
-  return process.env.COOKIE_SECURE === '1' || req.secure;
+  return secureCookieEnabled(process.env, req.secure);
+}
+
+/** Peringatan satu baris saat produksi berjalan tanpa HTTPS; dibaca sekali saat start. */
+export function productionWithoutHttpsWarning(): string | null {
+  return httpsWarningFor(process.env);
 }
 
 export function sessionCookie(token: string, secure: boolean): string {

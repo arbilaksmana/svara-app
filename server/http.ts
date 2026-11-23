@@ -225,22 +225,44 @@ export interface SurveyProfile {
   source: 'organization' | 'platform';
 }
 
+/**
+ * Profil kebijakan untuk sekumpulan survei dengan jumlah query tetap: satu query untuk seluruh organisasi
+ * yang terlibat, satu query untuk platform bila ada survei individual. Pemanggilan per survei (N+1) membuat
+ * bootstrap mengirim satu query untuk setiap survei.
+ */
+export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<string, SurveyProfile>> {
+  const organizationIds = [...new Set(surveys.flatMap((survey) => (survey.organization_id ? [survey.organization_id] : [])))];
+  const rows = new Map<string, Omit<SurveyProfile, 'source'>>();
+  if (organizationIds.length > 0) {
+    const organizations = await all<Omit<SurveyProfile, 'source'>>(
+      `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+              policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer
+         FROM organizations WHERE id IN (${organizationIds.map(() => '?').join(',')})`,
+      ...organizationIds,
+    );
+    for (const row of organizations) rows.set(row.id, row);
+  }
+  if (surveys.some((survey) => !survey.organization_id)) {
+    const platform = await get<Omit<SurveyProfile, 'source'>>(
+      `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
+              NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
+              cross_border_transfer
+         FROM platform_profile WHERE id = 'platform'`,
+    );
+    if (platform) rows.set(platform.id, platform);
+  }
+
+  const profiles: Record<string, SurveyProfile> = {};
+  for (const survey of surveys) {
+    const row = rows.get(survey.organization_id ?? 'platform');
+    if (!row) fail(409, 'profile_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+    profiles[survey.id] = { ...row, source: survey.organization_id ? 'organization' : 'platform' };
+  }
+  return profiles;
+}
+
 export async function surveyProfileFor(survey: SurveyRow): Promise<SurveyProfile> {
-  const row = survey.organization_id
-    ? await get<Omit<SurveyProfile, 'source'>>(
-        `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
-                policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer
-           FROM organizations WHERE id = ?`,
-        survey.organization_id,
-      )
-    : await get<Omit<SurveyProfile, 'source'>>(
-        `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
-                NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
-                cross_border_transfer
-           FROM platform_profile WHERE id = 'platform'`,
-      );
-  if (!row) fail(409, 'profile_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
-  return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
+  return (await surveyProfilesFor([survey]))[survey.id]!;
 }
 
 export async function requireSurvey(id: string): Promise<SurveyRow> {

@@ -1,6 +1,6 @@
 import { all, get, nowIso } from './db.ts';
 import { redactAuditRow, type AccountRow } from './security.ts';
-import { accessibleSurveys, surveyProfileFor, type SurveyProfile } from './http.ts';
+import { accessibleSurveys, surveyProfilesFor, type SurveyProfile } from './http.ts';
 
 interface ProfileRow {
   id: string;
@@ -352,8 +352,8 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
   );
 
   // UI tidak menyusun profil dari fixture: payload membawa profil kebijakan tiap survei.
-  const surveyProfiles: Record<string, SurveyProfile> = {};
-  for (const survey of surveys) surveyProfiles[survey.id] = await surveyProfileFor(survey);
+  // Satu query per lingkup (organisasi/platform), bukan satu query per survei.
+  const surveyProfiles: Record<string, SurveyProfile> = await surveyProfilesFor(surveys);
 
   return {
     account: { ...account, email: account.email },

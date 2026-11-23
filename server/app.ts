@@ -10,6 +10,7 @@ import { integrationRouter } from './routes/integration.ts';
 import { orgRouter } from './routes/org.ts';
 import { get } from './db.ts';
 import { sendError } from './http.ts';
+import { HSTS_VALUE, hstsEnabled } from '../src/lib/security-headers.ts';
 
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -27,14 +28,14 @@ const CONTENT_SECURITY_POLICY = [
 export const app = express();
 app.set('trust proxy', trustProxySetting(process.env.TRUST_PROXY));
 app.disable('x-powered-by');
-app.use((_req: Request, res: Response, next: NextFunction) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  if (process.env.ENABLE_HSTS === '1') {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  if (hstsEnabled(process.env, req.secure)) {
+    res.setHeader('Strict-Transport-Security', HSTS_VALUE);
   }
   next();
 });
