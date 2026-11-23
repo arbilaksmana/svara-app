@@ -35,9 +35,12 @@ import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
 import { RECEIPT_STATUS_LABEL } from '../lib/labels';
 import {
+  attemptGateNeeded,
+  clearFlowEntry,
   completeSubmission,
   discardAttempt,
   hasUnsentAttempt,
+  markFlowEntry,
   readConsent,
   readReceipt,
   saveReceipt,
@@ -517,6 +520,7 @@ export function IntroView({
                           guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
                           guardian_evidence_ref: guardianRequired ? guardianRef.trim() : null,
                         }, { resume: attempt === 'resumed' });
+                        markFlowEntry(token);
                         router.push(ROUTES.respondentForm(token));
                       })
                       .catch((error: unknown) => {
@@ -670,10 +674,17 @@ export function FormPage({ token }: { token: string }) {
   const summaryRef = useRef<HTMLDivElement>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
   const [consentReady, setConsentReady] = useState(false);
+  // Dibaca sekali saat mount; kedatangan berikutnya (reload/deep link) kembali digerbangi karena tanda alur
+  // sekali pakai dihapus di effect di bawah. Render awal tetap memuat sampai persetujuan terbaca.
+  const [attemptGate, setAttemptGate] = useState(() => attemptGateNeeded(token));
 
   useEffect(() => {
     setConsent(readConsent(token));
     setConsentReady(true);
+  }, [token]);
+
+  useEffect(() => {
+    clearFlowEntry(token);
   }, [token]);
 
   useEffect(() => {
@@ -700,6 +711,25 @@ export function FormPage({ token }: { token: string }) {
   const effectiveState = state === 'default' ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(effectiveState) || usedInvite || !consent;
+
+  if (attemptGate && consent && effectiveState === 'default') {
+    return (
+      <Shell kind="respondent" title={`Formulir · ${survey.title}`} subtitle="Isian sebelumnya belum diselesaikan.">
+        <div className="mx-auto w-full max-w-[720px]">
+          <UnsentAttemptChoice
+            token={token}
+            onChoose={(choice) => {
+              if (choice === 'restart') {
+                router.replace(ROUTES.respondentIntro(token));
+                return;
+              }
+              setAttemptGate(false);
+            }}
+          />
+        </div>
+      </Shell>
+    );
+  }
 
   if (!consent && effectiveState === 'default') {
     return <PublicLoading />;
@@ -776,6 +806,7 @@ export function FormPage({ token }: { token: string }) {
               to={ROUTES.respondentReview(token)}
               block
               disabled={blocked || emptyRequired.length > 0}
+              onClick={() => markFlowEntry(token)}
             >
               Tinjau jawaban
             </ActionLink>
@@ -809,10 +840,16 @@ export function ReviewPage({ token }: { token: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
   const [consentReady, setConsentReady] = useState(false);
+  // Sama dengan formulir: gerbang hanya untuk kedatangan langsung dengan isian tertinggal.
+  const [attemptGate, setAttemptGate] = useState(() => attemptGateNeeded(token));
 
   useEffect(() => {
     setConsent(readConsent(token));
     setConsentReady(true);
+  }, [token]);
+
+  useEffect(() => {
+    clearFlowEntry(token);
   }, [token]);
 
   useEffect(() => {
@@ -838,6 +875,25 @@ export function ReviewPage({ token }: { token: string }) {
   const effectiveState = state === 'default' && !retryOnly ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading', 'conflict'].includes(effectiveState) || !consent || (usedInvite && !retryOnly);
+
+  if (attemptGate && consent && effectiveState === 'default') {
+    return (
+      <Shell kind="respondent" title="Tinjau jawaban" subtitle="Isian sebelumnya belum diselesaikan.">
+        <div className="mx-auto w-full max-w-[720px]">
+          <UnsentAttemptChoice
+            token={token}
+            onChoose={(choice) => {
+              if (choice === 'restart') {
+                router.replace(ROUTES.respondentIntro(token));
+                return;
+              }
+              setAttemptGate(false);
+            }}
+          />
+        </div>
+      </Shell>
+    );
+  }
 
   if (!consent && effectiveState === 'default') {
     return <PublicLoading />;
@@ -974,7 +1030,7 @@ export function ReviewPage({ token }: { token: string }) {
               >
                 {retryOnly ? 'Kirim ulang jawaban' : 'Kirim jawaban'}
               </Button>
-              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked || retryOnly}>Perbaiki jawaban</ActionLink>
+              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked || retryOnly} onClick={() => markFlowEntry(token)}>Perbaiki jawaban</ActionLink>
             </div>
             {(blocked || emptyCount > 0) && (
               <p role="status" className="text-caption font-bold text-danger">
