@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Shell } from '../components/Shell';
 import {
   ActionLink,
@@ -27,13 +27,12 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
-import { accounts, accessGrants, auditLogs, integrationEvents, organizations } from '../lib/fixtures/records';
-import { surveys } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
 import {
   cancelAdminStatsLoad,
   cancelDataRequestsLoad,
+  currentAdminData,
   loadAdminStats,
   loadBootstrap,
   loadDataRequests,
@@ -42,6 +41,7 @@ import {
   saveGrants,
   setIntegrationNote,
   useStore,
+  type AdminData,
 } from '../lib/store';
 import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
 import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
@@ -153,13 +153,54 @@ export function AdminSummaryPage() {
   );
 }
 
+/* ---------------- Data admin dari bootstrap ---------------- */
+
+/**
+ * Akun, grant, organisasi, log audit, dan event integrasi hanya berasal dari bootstrap server. Sebelum
+ * bootstrap berhasil layar menampilkan keadaan memuat; bila gagal, galat dengan "Coba lagi". Fixture klien
+ * tidak pernah dirender, dan kontrol aksi baru ada setelah data server tersedia.
+ */
+function AdminDataGate({ subject, children }: { subject: string; children: (data: AdminData) => ReactNode }) {
+  const { admin, error } = useStore();
+  if (admin) return <>{children(admin)}</>;
+  if (error) {
+    return (
+      <ErrorState
+        title={`${subject} gagal dimuat`}
+        detail={`${error} Tidak ada data yang ditampilkan sampai data berhasil dimuat.`}
+        action={<Button variant="secondary" onClick={() => void loadBootstrap()}>Coba lagi</Button>}
+      />
+    );
+  }
+  return <LoadingState label={`Memuat ${subject.toLowerCase()}…`} rows={4} />;
+}
+
+/**
+ * Aktor audit: nama akun bila dikenal, dengan ID di bawahnya. Aktor tanpa akun yang dikenal
+ * (publik, sistem, akun terhapus, atau di luar organisasi) tampil sebagai ID apa adanya.
+ */
+export function AuditActor({ actor, names }: { actor: string; names: ReadonlyMap<string, string> }) {
+  const name = names.get(actor);
+  if (!name) return <Code>{actor}</Code>;
+  return <>{name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{actor}</Code></span></>;
+}
+
 /* ---------------- Akun dan izin ---------------- */
 
 export function AdminAccountsPage() {
+  return (
+    <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
+      <AdminDataGate subject="Akun dan izin">{(data) => <AdminAccountsContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+/** Dipasang setelah data server tersedia, sehingga state awal formulir tidak pernah diisi dari fixture. */
+function AdminAccountsContent({ data }: { data: AdminData }) {
+  const { accounts, accessGrants, organizations, surveys } = data;
   const { state } = useScreenState('admin-accounts');
   const notify = useToast();
-  const { grants: storedGrants, revision, session } = useStore();
-  void revision;
+  const { grants: storedGrants, session } = useStore();
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
   const [grants, setGrants] = useState(() =>
     Object.fromEntries(accessGrants.map((g) => [g.id, {
@@ -193,7 +234,7 @@ export function AdminAccountsPage() {
       export: storedGrants[grant.id]?.export ?? grant.can_export,
       text: storedGrants[grant.id]?.text ?? grant.can_read_free_text,
     }])));
-  }, [revision, storedGrants]);
+  }, [accessGrants, storedGrants]);
 
   const changeRole = (accountId: string, displayName: string, chosen: string) => {
     const role = chosen === 'admin' ? 'super_admin' : chosen;
@@ -257,7 +298,7 @@ export function AdminAccountsPage() {
   };
 
   return (
-    <Shell kind="admin" title="Akun dan izin" subtitle="Atur siapa yang boleh membaca jawaban, mengunduh data, dan melihat teks bebas.">
+    <>
       <StateView
         routeId="admin-accounts"
         state={state}
@@ -575,7 +616,7 @@ export function AdminAccountsPage() {
                   void adminSaveGrants(accountId, rows)
                     .then(async () => {
                       await refreshBootstrap();
-                      const created = accessGrants.find((grant) => grant.account_id === accountId && grant.survey_id === surveyId);
+                      const created = currentAdminData()?.accessGrants.find((grant) => grant.account_id === accountId && grant.survey_id === surveyId);
                       if (created) {
                         setGrants((prev) => ({
                           ...prev,
@@ -615,8 +656,7 @@ export function AdminAccountsPage() {
           </Panel>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 
@@ -630,12 +670,22 @@ const AUDIT_OUTCOME_TONE: Record<AuditOutcome, 'success' | 'danger' | 'warning' 
 };
 
 export function AdminAuditPage() {
-  const { state } = useScreenState('admin-audit');
   useEffect(() => {
     void refreshBootstrap();
   }, []);
   return (
     <Shell kind="admin" title="Log audit" subtitle="Catatan aktivitas memuat aktor, aksi, objek, hasil, dan waktu tanpa isi jawaban.">
+      <AdminDataGate subject="Log audit">{(data) => <AdminAuditContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+function AdminAuditContent({ data }: { data: AdminData }) {
+  const { auditLogs, accounts } = data;
+  const { state } = useScreenState('admin-audit');
+  const names = new Map(accounts.map((account) => [account.id, account.display_name]));
+  return (
+    <>
       <StateView
         routeId="admin-audit"
         state={state}
@@ -654,7 +704,7 @@ export function AdminAuditPage() {
               {auditLogs.map((log) => (
                 <tr key={log.id}>
                   <Td>{formatWIB(log.at)}</Td>
-                  <Td className="font-bold">{log.actor}</Td>
+                  <Td className="font-bold"><AuditActor actor={log.actor} names={names} /></Td>
                   <Td>{log.action}</Td>
                   <Td><Code>{log.object}</Code></Td>
                   <Td>
@@ -681,25 +731,32 @@ export function AdminAuditPage() {
           </div>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 
 /* ---------------- Integrasi ---------------- */
 
 export function AdminIntegrationPage() {
+  return (
+    <Shell kind="admin" title="Status integrasi" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
+      <AdminDataGate subject="Event integrasi">{(data) => <AdminIntegrationContent data={data} />}</AdminDataGate>
+    </Shell>
+  );
+}
+
+function AdminIntegrationContent({ data }: { data: AdminData }) {
+  const { integrationEvents } = data;
   const { state } = useScreenState('admin-integration');
   const notify = useToast();
-  const { revision, integrationNote } = useStore();
-  void revision;
+  const { integrationNote } = useStore();
   const [replayed, setReplayed] = useState<string | null>(null);
   const [busyEvent, setBusyEvent] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const down = state === 'error';
 
   return (
-    <Shell kind="admin" title="Status integrasi" subtitle="Pantau status pertukaran data dengan layanan identitas dan konsumen analitik.">
+    <>
       <StateView
         routeId="admin-integration"
         state={state}
@@ -819,8 +876,7 @@ export function AdminIntegrationPage() {
           </Panel>
         </div>
       </StateView>
-      
-    </Shell>
+    </>
   );
 }
 

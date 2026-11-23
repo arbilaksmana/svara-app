@@ -35,6 +35,7 @@ import type {
   OrgInvitation,
   OrgMember,
   OrgProfile,
+  OrganizationSummary,
   PublicLink,
   Question,
   QuestionOption,
@@ -80,6 +81,19 @@ export interface OrgWorkspace {
   audit: OrgAuditRow[];
 }
 
+/**
+ * Data layar super admin, disalin dari bootstrap server. `null` sampai bootstrap berhasil: array modul
+ * masih berisi fixture klien sebelum itu, dan ID fixture bisa sama dengan ID seed nyata.
+ */
+export interface AdminData {
+  accounts: Account[];
+  organizations: OrganizationSummary[];
+  accessGrants: AccessGrant[];
+  auditLogs: AuditLog[];
+  integrationEvents: IntegrationEvent[];
+  surveys: Survey[];
+}
+
 export interface Snapshot {
   revision: number;
   ready: boolean;
@@ -96,6 +110,7 @@ export interface Snapshot {
   orgError: string | null;
   dataRequests: DataRequest[] | null;
   dataRequestsError: string | null;
+  admin: AdminData | null;
 }
 
 let session: Session | null = null;
@@ -111,6 +126,7 @@ let orgRequest = 0;
 let dataRequestList: DataRequest[] | null = null;
 let dataRequestsError: string | null = null;
 let dataRequestsRequest = 0;
+let adminData: AdminData | null = null;
 let settings: Record<string, SettingsState> = {};
 let grants: Record<string, GrantState> = {};
 let drafts: Record<string, DraftState> = {};
@@ -146,6 +162,7 @@ function buildSnapshot(): Snapshot {
     orgError,
     dataRequests: dataRequestList,
     dataRequestsError,
+    admin: adminData,
   };
 }
 
@@ -234,6 +251,14 @@ function hydrate(data: api.BootstrapData): void {
       status: event.status as EventStatus,
     })),
   );
+  adminData = {
+    accounts: [...accounts],
+    organizations: [...organizations],
+    accessGrants: [...accessGrants],
+    auditLogs: [...auditLogs],
+    integrationEvents: [...integrationEvents],
+    surveys: [...surveys],
+  };
 
   settings = Object.fromEntries(
     Object.entries(data.settings).map(([surveyId, value]) => [
@@ -308,6 +333,7 @@ export async function signOut(): Promise<void> {
     stats = null;
     statsError = null;
     statsRequest += 1;
+    adminData = null;
     emit();
   }
 }
@@ -379,13 +405,14 @@ export async function saveSettings(
 }
 
 export async function saveGrants(next: Record<string, GrantState>): Promise<void> {
+  if (!adminData) throw new Error('Data akun belum dimuat dari server. Muat ulang halaman, lalu coba lagi.');
   const byAccount = new Map<string, Array<{
     survey_id: string | null;
     can_read_individual: boolean;
     can_export: boolean;
     can_read_free_text: boolean;
   }>>();
-  for (const grant of accessGrants) {
+  for (const grant of adminData.accessGrants) {
     const state = next[grant.id] ?? {
       read: grant.can_read_individual,
       export: grant.can_export,
@@ -522,16 +549,21 @@ export function ensureAccount(account: Account | undefined): Account | undefined
   return account;
 }
 
+/** Data admin terbaru dari server di luar render (mis. setelah `await refreshBootstrap()`); `null` sebelum bootstrap berhasil. */
+export function currentAdminData(): AdminData | null {
+  return adminData;
+}
+
 export function allAccounts(): Account[] {
-  return accounts;
+  return adminData?.accounts ?? [];
 }
 
 export function allAuditLogs(): AuditLog[] {
-  return auditLogs;
+  return adminData?.auditLogs ?? [];
 }
 
 export function allIntegrationEvents(): IntegrationEvent[] {
-  return integrationEvents;
+  return adminData?.integrationEvents ?? [];
 }
 
 /** Profil kebijakan survei dari server. Tidak ada fallback ke profil lain. */
