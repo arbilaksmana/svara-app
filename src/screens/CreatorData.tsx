@@ -28,7 +28,6 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
-import { accessGrants } from '../lib/fixtures/records';
 import { formatWIB } from '../lib/summary';
 import { getSummary, getResponses, downloadExport, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
 import { useToast } from '../components/Toast';
@@ -39,6 +38,7 @@ import {
   archiveSurvey,
   closeVersion,
   createInvitation,
+  localGrantsFor,
   revokeInvitation,
   saveSettings,
   surveyProfileOf,
@@ -287,10 +287,11 @@ export function SharePage({ id }: { id: string }) {
 
 export function ResultsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { revision, session, grants, settings } = useStore();
+  const { revision, session, grants, settings, admin } = useStore();
   void revision;
   const { state } = useScreenState('creator-results');
-  const survey = findSurvey(id);
+  // Daftar survei dari bootstrap server; sebelum itu tidak ada data nyata yang boleh dirender (NEW-UX-A).
+  const survey = admin?.surveys.find((entry) => entry.id === id);
   const versionList = versionsFor(id);
   const selectableVersions = versionList.filter((version) => version.status !== 'draft');
   const fallbackVersion = publishedVersionFor(id)?.id ?? selectableVersions[0]?.id ?? '';
@@ -334,9 +335,7 @@ export function ResultsPage({ id }: { id: string }) {
 
   const denied = loadError instanceof ApiError && loadError.status === 403;
   const responsesDenied = responsesError instanceof ApiError && responsesError.status === 403;
-  const myGrants = accessGrants.filter(
-    (grant) => grant.account_id === session?.id && grant.survey_id === id,
-  );
+  const myGrants = localGrantsFor(session?.id ?? '').filter((grant) => grant.survey_id === id);
   const isOwner = Boolean(survey && session && survey.owner_id === session.id);
   const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
   const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
