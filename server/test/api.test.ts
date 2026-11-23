@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
@@ -11,6 +14,13 @@ import { closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts'
 const PORT = 3191;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
 const INTEGRATION_TOKEN = 'token-uji-integrasi';
+/** Berkas bukti wali ditulis server uji ke direktori sementara yang dibersihkan setelah suite. */
+const EVIDENCE_DIR = fileURLToPath(new URL('.tmp-guardian-evidence', import.meta.url));
+const EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
+const PNG_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/Q842iQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 let server: ChildProcess | undefined;
 let stopping = false;
@@ -106,6 +116,65 @@ async function storedGuardianEvidence(consentId: string): Promise<{ status: stri
   }
 }
 
+interface StoredEvidenceRow {
+  guardian_evidence_status: string;
+  guardian_evidence_file: string | null;
+  guardian_evidence_mime: string | null;
+  guardian_evidence_size: number | null;
+  guardian_evidence_uploaded_at: string | null;
+  guardian_evidence_reviewed_by: string | null;
+  guardian_evidence_reviewed_at: string | null;
+  guardian_evidence_review_note: string | null;
+}
+
+async function storedEvidenceRow(consentId: string): Promise<StoredEvidenceRow | undefined> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query<StoredEvidenceRow>(
+      `SELECT guardian_evidence_status, guardian_evidence_file, guardian_evidence_mime, guardian_evidence_size,
+              guardian_evidence_uploaded_at, guardian_evidence_reviewed_by, guardian_evidence_reviewed_at,
+              guardian_evidence_review_note
+         FROM consent_records WHERE id = $1`,
+      [consentId],
+    );
+    return result.rows[0];
+  } finally {
+    await client.end();
+  }
+}
+
+/** Nama berkas di disk adalah ID acak; direktori hanya berisi berkas bukti wali. */
+function evidenceFiles(): string[] {
+  try {
+    return readdirSync(EVIDENCE_DIR).sort();
+  } catch {
+    return [];
+  }
+}
+
+async function freshGuardianToken(label: string): Promise<string> {
+  const creator = await session('creator.a@svara.local');
+  const created = await call('/surveys/s_demo1/invitations', {
+    method: 'POST',
+    cookie: creator,
+    body: { label, expires_at: '2027-01-01' },
+  });
+  return data<{ token: string }>(created).token;
+}
+
+async function consentVersionFor(token: string): Promise<string> {
+  return data<{ consent_version: string }>(await call(`/public/surveys/${token}`)).consent_version;
+}
+
+/** Kode galat server untuk asersi; `json` sudah diurai oleh `call`. */
+function errorCode(result: Result): string {
+  const body = result.json;
+  const code = body && typeof body.code === 'string' ? body.code : undefined;
+  assert.ok(code, `respons tanpa kode galat: ${result.text}`);
+  return code;
+}
+
 async function waitForServer(child: ChildProcess): Promise<void> {
   let ready!: () => void;
   const signal = new Promise<void>((resolveSignal) => {
@@ -126,6 +195,8 @@ async function waitForServer(child: ChildProcess): Promise<void> {
 
 before(async () => {
   await resetTestDatabase();
+  rmSync(EVIDENCE_DIR, { recursive: true, force: true });
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
   server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     env: {
       ...process.env,
@@ -133,6 +204,7 @@ before(async () => {
       DATABASE_URL: databaseUrl,
       INTEGRATION_ORGANIZATION_ID: 'org_smk',
       INTEGRATION_TOKEN,
+      GUARDIAN_EVIDENCE_DIR: EVIDENCE_DIR,
       COOKIE_SECURE: '0',
       ENABLE_HSTS: '0',
       NODE_ENV: 'test',
@@ -148,6 +220,7 @@ after(async () => {
   stopping = true;
   server?.kill();
   await closeTestDatabase();
+  rmSync(EVIDENCE_DIR, { recursive: true, force: true });
 });
 
 test('AC01/AC10: peran, kepemilikan, dan isolasi data creator', async () => {
@@ -646,6 +719,249 @@ test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified'
   });
   assert.equal(missing.status, 422);
   assert.equal((missing.json as { code: string }).code, 'guardian_evidence_required');
+});
+
+test('SEC-04 (a): MIME bukti wali di luar daftar ditolak tanpa menulis berkas', async () => {
+  const token = await freshGuardianToken('Bukti wali MIME');
+  const version = await consentVersionFor(token);
+  const send = (file: string, mime: string, name: string) => call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_file: file,
+      guardian_evidence_mime: mime,
+      guardian_evidence_name: name,
+    },
+  });
+  const before = evidenceFiles();
+
+  const declared = await send(PNG_BYTES.toString('base64'), 'text/plain', 'surat.txt');
+  assert.equal(declared.status, 422, declared.text);
+  assert.equal(errorCode(declared), 'invalid_evidence');
+  assert.deepEqual(evidenceFiles(), before, 'MIME ditolak tidak boleh menulis berkas');
+
+  // Isi bukan gambar meski klaim MIME sah: penanda berkas diperiksa setelah dekode.
+  const disguised = await send(Buffer.from('bukan berkas gambar').toString('base64'), 'image/png', 'surat.png');
+  assert.equal(disguised.status, 422, disguised.text);
+  assert.equal(errorCode(disguised), 'invalid_evidence');
+  assert.deepEqual(evidenceFiles(), before, 'isi yang tidak cocok tidak boleh menulis berkas');
+
+  const accepted = await send(PNG_BYTES.toString('base64'), 'image/png', 'surat-wali.png');
+  assert.equal(accepted.status, 201, accepted.text);
+  const consentId = data<{ consent_id: string; guardian_evidence_status: string }>(accepted).consent_id;
+  assert.equal(data<{ guardian_evidence_status: string }>(accepted).guardian_evidence_status, 'self_attested');
+
+  const stored = await storedEvidenceRow(consentId);
+  assert.ok(stored);
+  assert.equal(stored.guardian_evidence_status, 'self_attested', 'unggahan belum diverifikasi operator');
+  assert.equal(stored.guardian_evidence_file, 'surat-wali.png');
+  assert.equal(stored.guardian_evidence_mime, 'image/png');
+  assert.equal(stored.guardian_evidence_size, PNG_BYTES.length);
+  assert.ok(stored.guardian_evidence_uploaded_at);
+
+  const diskPath = join(EVIDENCE_DIR, `${consentId}.bin`);
+  console.log(`[bukti wali] ${diskPath} (${statSync(diskPath).size} byte)`);
+  assert.equal(statSync(diskPath).size, PNG_BYTES.length, 'berkas ditulis dengan ukuran asli');
+  assert.deepEqual(evidenceFiles(), [...before, `${consentId}.bin`].sort());
+
+  // Unduhan hanya lewat route ber-sesi dan ber-lingkup organisasi pemilik survei.
+  const orgAdmin = await session('orgadmin@svara.local');
+  const download = await call(`/org/guardian-evidence/${consentId}/file`, { cookie: orgAdmin });
+  assert.equal(download.status, 200, download.text);
+  assert.equal(download.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.compare(Buffer.from(download.bytes), PNG_BYTES), 0, 'isi unduhan identik dengan unggahan');
+});
+
+test('SEC-04 (b): bukti wali lebih dari 5 MB ditolak sebelum dekode dan tanpa berkas', async () => {
+  const token = await freshGuardianToken('Bukti wali besar');
+  const version = await consentVersionFor(token);
+  const before = evidenceFiles();
+  const oversized = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_file: Buffer.alloc(EVIDENCE_MAX_BYTES + 1).toString('base64'),
+      guardian_evidence_mime: 'application/pdf',
+      guardian_evidence_name: 'surat-besar.pdf',
+    },
+  });
+  assert.equal(oversized.status, 422, oversized.text);
+  assert.equal(errorCode(oversized), 'invalid_evidence');
+  assert.deepEqual(evidenceFiles(), before, 'kiriman terlalu besar tidak boleh menulis berkas');
+});
+
+test('SEC-04 (c): org_admin tidak membaca atau memutus bukti organisasi lain', async () => {
+  const foreignConsent = 'c_eviden_org_y';
+  const stamp = '2026-11-12T01:00:00Z';
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  writeFileSync(join(EVIDENCE_DIR, `${foreignConsent}.bin`), Buffer.from('PK\x03\x04 bukti org lain'));
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    // Prasyarat: survei terbit milik org_perpus (organisasi B) dengan bukti wali yang menunggu moderasi.
+    await client.query(
+      `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status,
+         created_at, updated_at, current_version_id, organization_id)
+       VALUES ('s_eviden_org_y', 'u_creator_b', 'p_perpus', 'Survei bukti org lain', 'Uji silang organisasi.',
+         'Peserta', '', 'published', $1, $1, 'v_eviden_org_y', 'org_perpus')`,
+      [stamp],
+    );
+    await client.query(
+      `INSERT INTO survey_versions (id, survey_id, number, status, notice_version, published_at, closed_at)
+       VALUES ('v_eviden_org_y', 's_eviden_org_y', 1, 'published', '1.0', $1, NULL)`,
+      [stamp],
+    );
+    await client.query(
+      `INSERT INTO consent_records (id, survey_id, version_id, notice_version, basis, status, recorded_at,
+         respondent_click, guardian_evidence_status, guardian_evidence_ref, guardian_evidence_file,
+         guardian_evidence_mime, guardian_evidence_size, guardian_evidence_uploaded_at)
+       VALUES ($1, 's_eviden_org_y', 'v_eviden_org_y', '1.0', 'Persetujuan wali', 'granted', $2,
+         1, 'self_attested', 'catatan org lain', 'surat-org-y.pdf',
+         'application/pdf', 17, $2)`,
+      [foreignConsent, stamp],
+    );
+
+    const orgAdmin = await session('orgadmin@svara.local');
+    const listed = data<{ evidence: Array<{ consent_id: string }> }>(
+      await call('/org/guardian-evidence?status=self_attested', { cookie: orgAdmin }),
+    );
+    assert.ok(!listed.evidence.some((row) => row.consent_id === foreignConsent), 'daftar hanya organisasi sesi');
+
+    const file = await call(`/org/guardian-evidence/${foreignConsent}/file`, { cookie: orgAdmin });
+    assert.equal(file.status, 404, file.text);
+    assert.equal(errorCode(file), 'evidence_not_found');
+
+    const patch = await call(`/org/guardian-evidence/${foreignConsent}`, {
+      method: 'PATCH',
+      cookie: orgAdmin,
+      body: { decision: 'verified' },
+    });
+    assert.equal(patch.status, 404, patch.text);
+    assert.equal((await storedEvidenceRow(foreignConsent))?.guardian_evidence_status, 'self_attested');
+
+    const creator = await session('creator.a@svara.local');
+    const forbidden = await call('/org/guardian-evidence', { cookie: creator });
+    assert.equal(forbidden.status, 403);
+    assert.equal(errorCode(forbidden), 'forbidden_role');
+    assert.equal((await call('/org/guardian-evidence')).status, 401);
+  } finally {
+    await client.query('DELETE FROM consent_records WHERE id = $1', [foreignConsent]);
+    await client.query("DELETE FROM survey_versions WHERE id = 'v_eviden_org_y'");
+    await client.query("DELETE FROM surveys WHERE id = 's_eviden_org_y'");
+    rmSync(join(EVIDENCE_DIR, `${foreignConsent}.bin`), { force: true });
+    await client.end();
+  }
+});
+
+test('SEC-04 (d): PATCH verified mengubah status, mencatat peninjau, dan menulis audit', async () => {
+  const orgAdmin = await session('orgadmin@svara.local');
+  const patched = await call('/org/guardian-evidence/c_demo01', {
+    method: 'PATCH',
+    cookie: orgAdmin,
+    body: { decision: 'verified', note: 'Surat izin wali sesuai.' },
+  });
+  assert.equal(patched.status, 200, patched.text);
+  const evidence = data<{ evidence: Record<string, unknown> }>(patched).evidence;
+  assert.equal(evidence.guardian_evidence_status, 'verified');
+  assert.equal(evidence.guardian_evidence_reviewed_by, 'u_orgadmin');
+  assert.equal(evidence.guardian_evidence_review_note, 'Surat izin wali sesuai.');
+
+  const stored = await storedEvidenceRow('c_demo01');
+  assert.equal(stored?.guardian_evidence_status, 'verified');
+  assert.equal(stored?.guardian_evidence_reviewed_by, 'u_orgadmin');
+  assert.ok(stored?.guardian_evidence_reviewed_at);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const auditRow = await client.query<{ action: string; outcome: string; account_id: string | null; organization_id: string | null }>(
+      `SELECT action, outcome, account_id, organization_id FROM audit_logs
+        WHERE object = 'c_demo01' AND action = 'Verifikasi bukti wali'
+        ORDER BY at DESC, id DESC LIMIT 1`,
+    );
+    assert.equal(auditRow.rows[0]?.outcome, 'berhasil');
+    assert.equal(auditRow.rows[0]?.account_id, 'u_orgadmin');
+    assert.equal(auditRow.rows[0]?.organization_id, 'org_smk');
+  } finally {
+    await client.end();
+  }
+
+  const verifiedList = data<{ evidence: Array<{ consent_id: string }> }>(
+    await call('/org/guardian-evidence?status=verified', { cookie: orgAdmin }),
+  );
+  assert.ok(verifiedList.evidence.some((row) => row.consent_id === 'c_demo01'));
+  const pendingList = data<{ evidence: Array<{ consent_id: string }> }>(
+    await call('/org/guardian-evidence?status=self_attested', { cookie: orgAdmin }),
+  );
+  assert.ok(!pendingList.evidence.some((row) => row.consent_id === 'c_demo01'));
+
+  const rejected = await call('/org/guardian-evidence/c_demo01', {
+    method: 'PATCH',
+    cookie: orgAdmin,
+    body: { decision: 'rejected', note: 'Nama di surat tidak cocok.' },
+  });
+  assert.equal(rejected.status, 200, rejected.text);
+  assert.equal(data<{ evidence: { guardian_evidence_status: string } }>(rejected).evidence.guardian_evidence_status, 'rejected');
+
+  const invalid = await call('/org/guardian-evidence/c_demo01', {
+    method: 'PATCH',
+    cookie: orgAdmin,
+    body: { decision: 'approved' },
+  });
+  assert.equal(invalid.status, 422);
+});
+
+test('SEC-04 (e): konsen tanpa guardianRequired tidak menerima berkas', async () => {
+  // org_perpus memakai consent_mode self; survei baru miliknya menjadi tautan tanpa wali.
+  const owner = await session('creator.b@svara.local');
+  const created = data<{ survey: { id: string } }>(await call('/surveys', {
+    method: 'POST', cookie: owner, body: { title: 'Survei tanpa wali', owner_scope: 'organization' },
+  }));
+  const saved = await call(`/surveys/${created.survey.id}`, {
+    method: 'PUT', cookie: owner, body: {
+      title: 'Survei tanpa wali',
+      purpose: 'Menguji bahwa berkas bukti wali tidak diterima tanpa mode wali.',
+      object_label: 'Peserta',
+      instructions: '',
+      questions: [{ code: 'Q1', type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }],
+    },
+  });
+  assert.equal(saved.status, 200, saved.text);
+  const published = await call(`/surveys/${created.survey.id}/publish`, { method: 'POST', cookie: owner });
+  assert.equal(published.status, 200, published.text);
+  const token = data<{ publicLink: { token: string } }>(published).publicLink.token;
+  const context = await call(`/public/surveys/${token}`);
+  assert.equal(data<{ guardianRequired: boolean }>(context).guardianRequired, false);
+  const version = data<{ consent_version: string }>(context).consent_version;
+  const before = evidenceFiles();
+
+  const withFile = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_file: PNG_BYTES.toString('base64'),
+      guardian_evidence_mime: 'image/png',
+      guardian_evidence_name: 'bukti-tak-diminta.png',
+    },
+  });
+  assert.equal(withFile.status, 422, withFile.text);
+  assert.equal(errorCode(withFile), 'invalid_evidence');
+  assert.deepEqual(evidenceFiles(), before);
+
+  const accepted = await call(`/public/surveys/${token}/consent`, {
+    method: 'POST',
+    body: { version_id: version, respondent_click: true, eligibility: true },
+  });
+  assert.equal(accepted.status, 201, accepted.text);
+  const consentId = data<{ consent_id: string }>(accepted).consent_id;
+  assert.equal((await storedEvidenceRow(consentId))?.guardian_evidence_file, null);
+  assert.deepEqual(evidenceFiles(), before, 'konsen tanpa wali tidak boleh menulis berkas');
 });
 
 test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () => {

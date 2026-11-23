@@ -424,8 +424,9 @@ Uji fleksibilitas memakai survei kedua dengan topik berbeda, skala empat opsi, d
 | ID/daftar peserta, autentikasi, dan endpoint Modul 13 | Tim Modul 13 dan 14 | Gunakan ID lokal, kode individual, dan adapter simulasi |
 | Format skema nyata serta penerima terotorisasi Modul 15 | Tim Modul 14/15 dan pengendali | Penuhi kontrak CSV/fixture per versi; dokumentasikan pemetaan yang perlu disepakati |
 | Penanggung jawab, bukti wali, akses individual, retensi, hosting, dan prosedur insiden | Sekolah dan pengendali yang ditetapkan | Pisahkan lingkungan sintetis; siapkan konfigurasi dan bukti uji sebelum data nyata |
+| Alur bukti wali: unggahan responden dan moderasi `org_admin` | Pengendali dan sekolah | Wali mengunggah berkas (maks. 5 MB; JPG, PNG, WebP, PDF); status awal `self_attested`, lalu `verified`/`rejected` oleh `org_admin` dengan audit. `rejected` tidak memblokir respons tersetujui karena `responses` tidak merujuk `consent_records`; retensi berkas belum ditetapkan |
 
-Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, tata cara verifikasi wali, penerima individual, masa simpan per jenis data, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
+Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, siapa di sekolah yang berwenang memutuskan status bukti wali (alur unggah–moderasi sudah tersedia), penerima individual, masa simpan per jenis data dan retensi berkas bukti, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
 
 Pengesahan tertulis perubahan matriks topik belum tersedia; bukti arahan pembimbing berupa transkrip. Instrumen studi kasus masih menunggu penetapan.
 

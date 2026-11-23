@@ -271,6 +271,25 @@ export interface OrgAuditRow {
   outcome: string;
 }
 
+/** Bukti wali yang diunggah responden; diputuskan operator lewat PATCH /org/guardian-evidence/:id. */
+export interface OrgGuardianEvidence {
+  consent_id: string;
+  survey_id: string;
+  survey_title: string;
+  basis: string;
+  recorded_at: string;
+  guardian_evidence_status: 'self_attested' | 'verified' | 'rejected';
+  guardian_evidence_ref: string | null;
+  guardian_evidence_file: string | null;
+  guardian_evidence_mime: string | null;
+  guardian_evidence_size: number | null;
+  guardian_evidence_uploaded_at: string | null;
+  guardian_evidence_reviewed_by: string | null;
+  guardian_evidence_reviewed_at: string | null;
+  guardian_evidence_review_note: string | null;
+  has_file: boolean;
+}
+
 export interface AccessGrant {
   id: string;
   account_id: string;

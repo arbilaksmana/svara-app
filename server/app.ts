@@ -43,6 +43,8 @@ app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
+// SEC-04: unggahan bukti wali (base64, maksimal 5 MB) hanya pada rute konsen publik; rute lain tetap 512 KB.
+app.post('/api/v1/public/surveys/:token/consent', express.json({ limit: '8mb' }));
 app.use(express.json({ limit: '512kb' }));
 app.use((req, res, next) => {
   attachSession(req as AuthedRequest, res, next).catch(next);

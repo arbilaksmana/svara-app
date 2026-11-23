@@ -394,15 +394,23 @@ test('UIX-04/NR-06: salinan wali di pengantar tidak menyiratkan verifikasi atau 
   assert.deepEqual(offending, [], 'Salinan pengantar wali tidak boleh menyebut verifikasi, kode verifikasi, bukti sah, atau pencabutan');
 });
 
-test('UIX-04/NR-06: pengantar mode wali menyatakan bukti dicatat sebagai pernyataan dan tidak diverifikasi aplikasi', () => {
+test('UIX-04/NR-06: pengantar mode wali meminta unggahan dan tidak mengklaim verifikasi', () => {
   const ctx: PublicContextData = { ...PUBLIC_CTX, guardianRequired: true };
   const html = render(createElement(respondent.IntroView, { token: TOKEN, ctx, attempt: 'none', onChoose: () => {}, reload: () => {} }), `/s/${TOKEN}`);
   const text = visibleText(html);
   assert.doesNotMatch(text, GUARDIAN_CLAIMS);
   assert.doesNotMatch(text, /dicabut/i, 'Tidak ada jalur pencabutan bukti wali');
   assert.match(text, /tidak memeriksa keasliannya/, 'Salinan menyatakan aplikasi tidak memverifikasi bukti wali');
+  assert.match(text, /meninjau berkas setelah persetujuan dicatat/, 'Peninjauan pengelola dinyatakan sesudah pencatatan');
+  assert.match(text, /maksimal 5 MB/i, 'Batas ukuran terlihat sebelum mengunggah');
+  const file = tagById(html, 'guardian-file');
+  const accept = attr(file, 'accept') ?? '';
+  for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']) {
+    assert.ok(accept.includes(mime), `accept harus memuat ${mime}`);
+  }
   const placeholder = attr(tagById(html, 'guardian-ref'), 'placeholder') ?? '';
   assert.doesNotMatch(placeholder, /verifikasi|pengelola/i, `Placeholder tidak menyebut kode verifikasi: ${placeholder}`);
+  assert.match(text, /Catatan tambahan \(opsional\)/, 'Teks bebas disebut catatan tambahan, bukan bukti');
 });
 
 test('UIX-04/NR-06: kebijakan privasi tidak mewajibkan "bukti verifikasi" wali yang tidak ada', () => {

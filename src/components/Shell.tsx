@@ -25,6 +25,7 @@ const GUEST_NAV: NavEntry[] = [
 /* Ruang organisasi: hanya org_admin yang melihat entri ini. */
 const ORG_NAV: NavEntry[] = [
   { to: ROUTES.adminOrg, label: 'Organisasi' },
+  { to: ROUTES.adminOrgEvidence, label: 'Bukti wali' },
 ];
 
 const NAV: Record<ShellKind, NavEntry[]> = {

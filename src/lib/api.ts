@@ -3,6 +3,7 @@ import type {
   Account,
   AccountStatus,
   OrgAuditRow,
+  OrgGuardianEvidence,
   OrgInvitation,
   OrgMember,
   OrgProfile,
@@ -445,20 +446,38 @@ export interface ConsentRecord {
   recorded_at: string;
 }
 
+/**
+ * Konversi berkas ke base64 untuk unggahan bukti wali. Server membatasi 5 MB dan
+ * memeriksa isi berkas; fungsi ini hanya mengubah bentuk, bukan memvalidasi.
+ */
+export async function fileToBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunk = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return btoa(binary);
+}
+
 export async function createConsent(
   token: string,
   versionId: string,
   guardianEvidenceRef: string | null,
+  guardianEvidenceFile: File | null = null,
 ): Promise<ConsentRecord> {
-  return call<ConsentRecord>(`/public/surveys/${encodeURIComponent(token)}/consent`, {
-    method: 'POST',
-    body: {
-      version_id: versionId,
-      respondent_click: true,
-      eligibility: true,
-      guardian_evidence_ref: guardianEvidenceRef ?? undefined,
-    },
-  });
+  const body: Record<string, unknown> = {
+    version_id: versionId,
+    respondent_click: true,
+    eligibility: true,
+    guardian_evidence_ref: guardianEvidenceRef ?? undefined,
+  };
+  if (guardianEvidenceFile) {
+    body.guardian_evidence_file = await fileToBase64(guardianEvidenceFile);
+    body.guardian_evidence_name = guardianEvidenceFile.name;
+    if (guardianEvidenceFile.type) body.guardian_evidence_mime = guardianEvidenceFile.type;
+  }
+  return call<ConsentRecord>(`/public/surveys/${encodeURIComponent(token)}/consent`, { method: 'POST', body });
 }
 
 export interface AnswerPayload {
@@ -591,4 +610,28 @@ export async function revokeOrgInvitation(id: string): Promise<OrgInvitation> {
 
 export async function getOrgAudit(limit = 100): Promise<OrgAuditRow[]> {
   return (await call<{ rows: OrgAuditRow[] }>(`/org/audit?limit=${limit}`)).rows;
+}
+
+/* ---------- Moderasi bukti wali (org_admin) ---------- */
+
+export async function listOrgGuardianEvidence(status = 'self_attested'): Promise<OrgGuardianEvidence[]> {
+  return (await call<{ evidence: OrgGuardianEvidence[] }>(
+    `/org/guardian-evidence?status=${encodeURIComponent(status)}`,
+  )).evidence;
+}
+
+export async function reviewOrgGuardianEvidence(
+  consentId: string,
+  decision: 'verified' | 'rejected',
+  note?: string,
+): Promise<OrgGuardianEvidence> {
+  return (await call<{ evidence: OrgGuardianEvidence }>(
+    `/org/guardian-evidence/${encodeURIComponent(consentId)}`,
+    { method: 'PATCH', body: { decision, note: note?.trim() || undefined } },
+  )).evidence;
+}
+
+/** Unduhan ber-sesi: route memeriksa org_admin dan lingkup organisasi sebelum menyajikan berkas. */
+export function guardianEvidenceFileUrl(consentId: string): string {
+  return `/api/v1/org/guardian-evidence/${encodeURIComponent(consentId)}/file`;
 }

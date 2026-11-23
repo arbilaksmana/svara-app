@@ -32,7 +32,7 @@ import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { useToast } from '../components/Toast';
 import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
-import { formatWIB } from '../lib/summary';
+import { formatBytes, formatWIB } from '../lib/summary';
 import { RECEIPT_STATUS_LABEL } from '../lib/labels';
 import {
   attemptGateNeeded,
@@ -65,6 +65,17 @@ import {
 const INVITE_LABEL_ID: Record<string, string> = {
   active: 'Aktif', used: 'Terpakai', revoked: 'Dicabut', expired: 'Kedaluwarsa',
 };
+
+/** Batas unggahan bukti wali sama dengan server: 5 MB dan empat jenis berkas. */
+const GUARDIAN_FILE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+const GUARDIAN_FILE_MAX_BYTES = 5 * 1024 * 1024;
+
+function guardianFileProblem(file: File): string | null {
+  if (file.type && !GUARDIAN_FILE_MIME.has(file.type)) return 'Pilih berkas JPG, PNG, WebP, atau PDF.';
+  if (file.size > GUARDIAN_FILE_MAX_BYTES) return 'Berkas melebihi 5 MB. Pilih berkas yang lebih kecil.';
+  if (file.size === 0) return 'Berkas kosong. Pilih berkas lain.';
+  return null;
+}
 
 interface PublicPage {
   token: string;
@@ -372,6 +383,8 @@ export function IntroView({
   const [consent, setConsent] = useState(false);
   const [guardianEvidence, setGuardianEvidence] = useState(false);
   const [guardianRef, setGuardianRef] = useState('');
+  const [guardianFile, setGuardianFile] = useState<File | null>(null);
+  const [guardianFileError, setGuardianFileError] = useState<string | null>(null);
   const [eligibility, setEligibility] = useState(false);
   const [busy, setBusy] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
@@ -380,7 +393,9 @@ export function IntroView({
   const effectiveState = state === 'default' ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(effectiveState) || usedInvite;
-  const consentComplete = state === 'success' || (consent && eligibility && (!guardianRequired || (guardianEvidence && guardianRef.trim().length > 0)));
+  const consentComplete = state === 'success' || (consent && eligibility && (
+    !guardianRequired || (guardianEvidence && guardianFile !== null && guardianFileError === null)
+  ));
   // Persetujuan baru tidak dapat dicatat sebelum responden memilih nasib isian yang tertinggal di tab ini.
   const choosing = attempt === 'unsent' && !blocked;
   const wasChoosing = useRef(choosing);
@@ -469,23 +484,56 @@ export function IntroView({
                   <div className="rounded-md border border-warning-soft bg-n50 p-3">
                     <p className="text-body-sm font-bold text-ink">Bukti wali wajib</p>
                     <p className="mt-1 text-body-sm text-muted">
-                      Survei ini ditujukan untuk responden anak. Kiriman baru ditolak bila pernyataan wali belum dicentang atau
-                      referensi bukti persetujuan belum diisi. Aplikasi mencatat referensi itu apa adanya dan tidak memeriksa keasliannya.
+                      Survei ini ditujukan untuk responden anak. Unggah surat izin orang tua atau wali. Penyelenggara menyimpan
+                      berkas apa adanya dan tidak memeriksa keasliannya; pengelola organisasi meninjau berkas setelah persetujuan dicatat.
                     </p>
                     <div className="mt-2 flex flex-col gap-2">
                       <Checkbox
                         id="consent-wali"
-                        label="Saya menyatakan memiliki bukti persetujuan wali. Statusnya dicatat sebagai pernyataan, belum diverifikasi pengelola."
+                        label="Saya menyatakan memiliki berkas persetujuan wali. Statusnya dinyatakan wali dan belum diverifikasi pengelola."
                         checked={guardianEvidence}
                         onChange={setGuardianEvidence}
                       />
-                      <Field id="guardian-ref" label="Referensi bukti persetujuan wali" required>
+                      <Field
+                        id="guardian-file"
+                        label="Berkas bukti persetujuan wali"
+                        hint="JPG, PNG, WebP, atau PDF, maksimal 5 MB."
+                        error={guardianFileError ?? undefined}
+                        required
+                      >
+                        {(aria) => (
+                          <>
+                            <input
+                              {...aria}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,application/pdf"
+                              onChange={(event) => {
+                                const next = event.target.files?.[0] ?? null;
+                                const problem = next ? guardianFileProblem(next) : null;
+                                setGuardianFile(problem ? null : next);
+                                setGuardianFileError(problem);
+                              }}
+                              className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 py-2 text-body-sm text-ink file:me-3 file:rounded-sm file:border-0 file:bg-action-soft file:px-3 file:py-2 file:text-body-sm file:font-bold file:text-action focus:border-action aria-invalid:border-2 aria-invalid:border-danger"
+                            />
+                            {guardianFile && (
+                              <p className="mt-1 text-caption text-muted">
+                                Terpilih: {guardianFile.name} · {formatBytes(guardianFile.size)}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </Field>
+                      <Field
+                        id="guardian-ref"
+                        label="Catatan tambahan (opsional)"
+                        hint="Misalnya nama wali atau nomor surat untuk memudahkan peninjauan."
+                      >
                         {(aria) => (
                           <TextInput
                             {...aria}
                             value={guardianRef}
                             onChange={(e) => setGuardianRef(e.target.value)}
-                            placeholder="Contoh: surat izin orang tua/wali 12/XI/2026"
+                            placeholder="Contoh: surat izin 12/XI/2026 dari Ibu Sari"
                           />
                         )}
                       </Field>
@@ -511,7 +559,12 @@ export function IntroView({
                   onClick={() => {
                     setBusy(true);
                     setConsentError(null);
-                    void createConsent(token, ctx.consent_version, guardianRequired ? guardianRef.trim() : null)
+                    void createConsent(
+                      token,
+                      ctx.consent_version,
+                      guardianRequired ? guardianRef.trim() || null : null,
+                      guardianRequired ? guardianFile : null,
+                    )
                       .then((record) => {
                         writeConsent(token, {
                           consent_id: record.consent_id,
@@ -530,6 +583,11 @@ export function IntroView({
                           reload();
                           return;
                         }
+                        if (error instanceof ApiError && error.code === 'invalid_evidence') {
+                          setGuardianFile(null);
+                          setGuardianFileError(error.message);
+                          return;
+                        }
                         setConsentError(
                           error instanceof ApiError ? error.message : 'Koneksi gagal. Coba lagi sebelum mengisi formulir.',
                         );
@@ -541,7 +599,7 @@ export function IntroView({
                 </Button>
                 {!consentComplete && !blocked && (
                   <p role="status" className="text-caption font-bold text-danger">
-                    Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ', pernyataan wali dicentang, dan referensi bukti diisi' : ''}.
+                    Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ', pernyataan wali dicentang, dan berkas bukti dipilih' : ''}.
                   </p>
                 )}
                 <PolicyLinks className="mt-2" />
