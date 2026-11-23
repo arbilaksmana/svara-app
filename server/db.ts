@@ -6,6 +6,23 @@ import type { PoolClient } from 'pg';
  * Satu pool Postgres untuk seluruh proses. Konfigurasi runtime hanya DATABASE_URL;
  * tidak ada fallback SQLite. Semua helper di bawah async — tidak ada akses sinkron palsu.
  */
+
+// `.env` lokal dibaca agar `pnpm db:*` berperilaku sama dengan `pnpm dev` (scripts/dev.mjs).
+// Urutan prioritas: TEST_DATABASE_URL, lalu nilai yang sudah diekspor shell, lalu `.env`.
+// `loadEnvFile` menimpa variabel yang sudah ada, jadi nilai sebelumnya dipasang kembali; tanpa
+// itu DATABASE_URL test tertimpa nilai dev dan test bisa me-reset schema basis data dev.
+const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+if (testDatabaseUrl) process.env.DATABASE_URL = testDatabaseUrl;
+const sebelumEnvFile = { ...process.env };
+try {
+  process.loadEnvFile('.env');
+  for (const [key, value] of Object.entries(sebelumEnvFile)) {
+    if (value !== undefined) process.env[key] = value;
+  }
+} catch {
+  // Tanpa .env, DATABASE_URL wajib datang dari shell atau TEST_DATABASE_URL.
+}
+
 const connectionString = process.env.DATABASE_URL?.trim();
 if (!connectionString) {
   throw new Error('DATABASE_URL wajib diisi (contoh: postgres://user:pass@host:5432/svara).');
