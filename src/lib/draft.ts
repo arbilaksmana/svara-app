@@ -39,8 +39,8 @@ function removeKey(key: string): void {
   }
 }
 
-/** Hapus semua kunci `prefix + token + '.' + nomor versi` milik satu token tanpa menyentuh token lain. */
-function removeVersions(prefix: string, token: string): void {
+/** Semua kunci `prefix + token + '.' + nomor versi` milik satu token, tanpa kunci token lain. */
+function versionKeys(prefix: string, token: string): string[] {
   const base = `${prefix}${token}.`;
   try {
     const keys: string[] = [];
@@ -48,10 +48,15 @@ function removeVersions(prefix: string, token: string): void {
       const key = sessionStorage.key(i);
       if (key?.startsWith(base) && /^\d+$/.test(key.slice(base.length))) keys.push(key);
     }
-    for (const key of keys) sessionStorage.removeItem(key);
+    return keys;
   } catch {
     // Tanpa akses penyimpanan tidak ada data token yang tertinggal di perangkat.
+    return [];
   }
+}
+
+function removeVersions(prefix: string, token: string): void {
+  for (const key of versionKeys(prefix, token)) removeKey(key);
 }
 
 export function readConsent(token: string): ConsentPayload | null {
@@ -60,11 +65,32 @@ export function readConsent(token: string): ConsentPayload | null {
 }
 
 /**
- * Persetujuan baru menandai pengisian baru pada token ini, jadi bukti pengisian sebelumnya tidak ikut tampil.
- * Persetujuan tetap divalidasi server saat pengiriman.
+ * Pengisian dimulai di tab ini tetapi belum menghasilkan bukti: persetujuan, draft, atau kunci kirim token ini
+ * masih tersimpan. Pengantar memakai ini untuk menawarkan "lanjutkan" atau "responden baru" alih-alih meneruskan
+ * isian orang sebelumnya diam-diam.
  */
-export function writeConsent(token: string, consent: ConsentPayload): void {
+export function hasUnsentAttempt(token: string): boolean {
+  return readConsent(token) !== null
+    || versionKeys(DRAFT_PREFIX, token).length > 0
+    || versionKeys(IDEMPOTENCY_PREFIX, token).length > 0;
+}
+
+/** Hapus persetujuan, draft, dan kunci kirim satu token tanpa menyentuh token lain. */
+export function discardAttempt(token: string): void {
+  removeKey(CONSENT_PREFIX + token);
+  removeVersions(DRAFT_PREFIX, token);
+  removeVersions(IDEMPOTENCY_PREFIX, token);
+}
+
+/**
+ * Persetujuan dari pengantar memulai pengisian baru pada token ini: bukti, draft, dan kunci kirim sebelumnya
+ * tidak ikut terbawa ke orang berikutnya di tab yang sama. `resume` dipakai hanya setelah responden memilih
+ * melanjutkan isiannya sendiri; draft dan kunci kirimnya dipertahankan agar retry identik sebelum bukti tetap
+ * memakai kunci yang sama. Persetujuan tetap divalidasi server saat pengiriman.
+ */
+export function writeConsent(token: string, consent: ConsentPayload, { resume = false }: { resume?: boolean } = {}): void {
   removeKey(RECEIPT_PREFIX + token);
+  if (!resume) discardAttempt(token);
   writeJson(CONSENT_PREFIX + token, consent);
 }
 
@@ -98,9 +124,7 @@ export function saveReceipt(token: string, receipt: ReceiptData, key: string): v
  */
 export function completeSubmission(token: string, receipt: ReceiptData, key: string): void {
   saveReceipt(token, receipt, key);
-  removeKey(CONSENT_PREFIX + token);
-  removeVersions(DRAFT_PREFIX, token);
-  removeVersions(IDEMPOTENCY_PREFIX, token);
+  discardAttempt(token);
 }
 
 function readDraft(key: string | null): Record<string, DraftValue> {

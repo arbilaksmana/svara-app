@@ -59,3 +59,8 @@ export const DATA_REQUEST_TYPE_LABEL: Partial<Record<string, string>> = {
   withdrawal: 'Penarikan persetujuan',
   deletion: 'Penghapusan data',
 };
+
+/** Status pada bukti pengiriman responden; status lain dari server ditampilkan apa adanya. */
+export const RECEIPT_STATUS_LABEL: Partial<Record<string, string>> = {
+  submitted: 'Terkirim',
+};

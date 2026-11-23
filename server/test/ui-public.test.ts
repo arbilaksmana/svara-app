@@ -143,9 +143,10 @@ test('UIX-24: semua CTA halaman 404 menuju rute publik', () => {
 });
 
 test('UIX-09: landing tidak merender tabel contoh kosong berlabel "Terbit" untuk tamu', async (t) => {
-  const withDemo = render(createElement(HomePage));
-  assert.match(withDemo, /<table\b/, 'Data contoh yang tersedia tetap ditampilkan');
-  assert.match(withDemo, />Terbit</);
+  // NEW-UX-C: sebelum bootstrap (HTML SSR) modul survei masih berisi fixture klien, jadi panel contoh tidak dirender.
+  const beforeBootstrap = render(createElement(HomePage));
+  assert.equal(count(beforeBootstrap, /<table\b/g), 0, 'Tabel contoh fixture tidak boleh dirender sebelum bootstrap');
+  assert.doesNotMatch(beforeBootstrap, />Terbit</, 'Lencana "Terbit" fixture tidak boleh tampil sebelum bootstrap');
 
   const data: BootstrapData = {
     account: null, surveys: [], versions: [], profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [],

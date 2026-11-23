@@ -20,7 +20,7 @@ import { StateView } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { useStore } from '../lib/store';
-import { versionsFor, questionsFor, optionsFor } from '../lib/fixtures/surveys';
+import { versionsFor, questionsFor } from '../lib/fixtures/surveys';
 
 const CAPABILITIES = [
   {
@@ -56,6 +56,10 @@ const FLOW = [
   { step: 'Baca hasil', detail: 'Ringkasan per versi, lalu unduh CSV sesuai izin.', to: () => ROUTES.creatorResults('s_demo1') },
 ];
 
+/** Contoh label skala yang statis: bagian ini tidak bergantung pada data survei yang diganti bootstrap. */
+const SCALE_5 = ['Sangat tidak setuju', 'Tidak setuju', 'Netral', 'Setuju', 'Sangat setuju'];
+const SCALE_4 = ['Tidak sesuai', 'Kurang sesuai', 'Sesuai', 'Sangat sesuai'];
+
 const FAQ = [
   {
     q: 'Apa bedanya draf dan versi terbit?',
@@ -77,12 +81,11 @@ const FAQ = [
 
 export function HomePage() {
   const { state } = useScreenState('home');
-  const { session } = useStore();
+  const { session, ready, error } = useStore();
   const demoVersions = versionsFor('s_demo1');
-  // Tamu menerima bootstrap tanpa survei; panel contoh hanya tampil bila ada versi terbit untuk dibaca.
-  const activeDemo = demoVersions.find((v) => v.status === 'published');
-  const scale5 = optionsFor('q_ad01');
-  const scale4 = optionsFor('q_p01');
+  // NEW-UX-C: sebelum bootstrap berhasil modul survei masih berisi fixture klien, jadi panel tidak dirender di SSR,
+  // saat bootstrap gagal, maupun untuk tamu (bootstrap tamu tanpa survei). Panel hanya membaca versi terbit dari server.
+  const activeDemo = ready && !error && session ? demoVersions.find((v) => v.status === 'published') : undefined;
 
   // Tautan navbar tamu memakai hash; gulir manual saat hash berubah.
   useEffect(() => {
@@ -208,7 +211,8 @@ export function HomePage() {
               <Panel className="flex flex-col gap-2">
                 <p className="text-body font-bold text-ink">Persetujuan sesuai kebijakan organisasi</p>
                 <p className="text-body-sm text-muted">
-                  Bila organisasi mewajibkan persetujuan pihak berwenang, kiriman ditolak sampai bukti yang sah dilampirkan.
+                  Bila organisasi mewajibkan persetujuan orang tua atau wali, kiriman ditolak sampai pernyataan wali dan referensi
+                  buktinya diisi. Referensi dicatat apa adanya, tidak diverifikasi aplikasi.
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
@@ -254,12 +258,12 @@ export function HomePage() {
                 <div className="self-start"><Badge tone="neutral">Skala 5 titik</Badge></div>
                 <p className="text-body font-bold text-ink">Dengan titik tengah</p>
                 <ul className="flex flex-col gap-1.5">
-                  {scale5.map((o) => (
+                  {SCALE_5.map((label) => (
                     <li
-                      key={o.id}
+                      key={label}
                       className="inline-flex min-h-[36px] items-center rounded-sm border border-n200 px-3 text-body-sm text-n600"
                     >
-                      {o.label}
+                      {label}
                     </li>
                   ))}
                 </ul>
@@ -269,12 +273,12 @@ export function HomePage() {
                 <div className="self-start"><Badge tone="neutral">Skala 4 titik</Badge></div>
                 <p className="text-body font-bold text-ink">Tanpa titik tengah</p>
                 <ul className="flex flex-col gap-1.5">
-                  {scale4.map((o) => (
+                  {SCALE_4.map((label) => (
                     <li
-                      key={o.id}
+                      key={label}
                       className="inline-flex min-h-[36px] items-center rounded-sm border border-n200 px-3 text-body-sm text-n600"
                     >
-                      {o.label}
+                      {label}
                     </li>
                   ))}
                 </ul>
