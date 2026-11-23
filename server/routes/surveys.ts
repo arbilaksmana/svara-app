@@ -23,12 +23,12 @@ import {
   noticeVersionFor,
   parseLimit,
   requireManageSurvey,
-  requirePublishedVersion,
   requireSurvey,
   requireVersion,
   sendError,
   sha256Hex,
   surveyProfileFor,
+  type VersionRow,
 } from '../http.ts';
 import { summaryFor } from '../summary.ts';
 import { CONTINUABLE_CLOSE_REASONS, requirePublishableNotice } from './public.ts';
@@ -793,6 +793,21 @@ surveysRouter.put('/surveys/:id/settings', async (req: AuthedRequest, res: Respo
   }
 });
 
+/**
+ * Versi ringkasan, jawaban, dan ekspor bila `?version` tidak dikirim: versi terbit, atau setelah survei ditutup atau
+ * diarsipkan, versi terakhir yang pernah terbit. Draf yang ikut ditutup arsip tidak punya published_at.
+ */
+async function defaultResultVersion(surveyId: string): Promise<VersionRow> {
+  const version = await get<VersionRow>(
+    `SELECT * FROM survey_versions
+      WHERE survey_id = ? AND (status = 'published' OR (status = 'closed' AND published_at IS NOT NULL))
+      ORDER BY status = 'published' DESC, number DESC LIMIT 1`,
+    surveyId,
+  );
+  if (!version) fail(409, 'no_published_version', 'Belum ada versi terbit untuk survei ini.');
+  return version;
+}
+
 surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
@@ -801,7 +816,7 @@ surveysRouter.get('/surveys/:id/summary', async (req: AuthedRequest, res: Respon
       fail(403, 'forbidden_summary', 'Ringkasan tidak tersedia untuk akun ini.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     res.json({ data: await summaryFor(version.id) });
   } catch (error) {
@@ -895,7 +910,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       );
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     const questions = await questionRows(version.id);
     const includeText = await canReadFreeText(req.account, survey);
@@ -1029,7 +1044,7 @@ surveysRouter.get('/surveys/:id/responses', async (req: AuthedRequest, res: Resp
       fail(403, 'forbidden_individual', 'Akun ini tidak memiliki izin membaca jawaban individual.');
     }
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
-    const version = requested ? await requireVersion(requested) : await requirePublishedVersion(survey.id);
+    const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
     const includeText = await canReadFreeText(req.account, survey);
     const rows = await all<ResponseDbRow>(

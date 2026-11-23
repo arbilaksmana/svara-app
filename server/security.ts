@@ -227,16 +227,44 @@ export function csrfGuard(req: AuthedRequest, res: Response, next: NextFunction)
 
 interface Bucket {
   count: number;
+  limit: number;
   resetAt: number;
 }
 
-const buckets = new Map<string, Bucket>();
+/**
+ * Bucket dikelompokkan per jenis kunci (awalan sebelum ':' pertama: `login`, `login-ip`, `consent`, ...), masing-masing
+ * dengan batas jumlah kunci sendiri. Banjir kunci pilihan klien pada satu jenis (mis. token consent dari path URL)
+ * tidak pernah menggeser bucket jenis lain.
+ */
+const spaces = new Map<string, Map<string, Bucket>>();
 const RATE_LIMIT_SWEEP_MS = 60_000;
+/** Entri yang diperiksa per panggilan saat menyapu atau mencari ruang; tidak bergantung pada jumlah kunci aktif. */
+const RATE_LIMIT_STEP = 64;
+/** Kunci aktif paling banyak per jenis kunci. */
+const RATE_LIMIT_MAX_KEYS = 50_000;
+/** Kunci lebih panjang (email, token path) disimpan sebagai hash agar memori per entri tetap kecil. */
+const RATE_LIMIT_KEY_MAX_LENGTH = 128;
 let lastSweep = 0;
+let sweep: Iterator<[Map<string, Bucket>, string, Bucket]> | undefined;
+
+function* allBuckets(): Generator<[Map<string, Bucket>, string, Bucket]> {
+  for (const space of spaces.values()) {
+    for (const [key, bucket] of space) yield [space, key, bucket];
+  }
+}
 
 /** Hanya untuk uji. */
 export function rateLimitBucketCount(): number {
-  return buckets.size;
+  let count = 0;
+  for (const space of spaces.values()) count += space.size;
+  return count;
+}
+
+/** Hanya untuk uji: kosongkan limiter seperti proses yang baru start. */
+export function resetRateLimits(): void {
+  spaces.clear();
+  sweep = undefined;
+  lastSweep = 0;
 }
 
 /**
@@ -255,25 +283,79 @@ export function clientIp(req: Request): string {
   return ip && isIP(ip) ? ip : socket;
 }
 
+function bucketSlot(key: string): [Map<string, Bucket>, string] {
+  const colon = key.indexOf(':');
+  const kind = colon < 0 ? key : key.slice(0, colon);
+  let space = spaces.get(kind);
+  if (!space) spaces.set(kind, (space = new Map()));
+  return [space, key.length > RATE_LIMIT_KEY_MAX_LENGTH ? sha256(key) : key];
+}
+
+/**
+ * Sapu entri kedaluwarsa paling sering sekali per menit, bertahap: tiap panggilan memeriksa paling banyak
+ * RATE_LIMIT_STEP entri dan panggilan berikutnya melanjutkan dari posisi itu.
+ */
+function sweepStep(now: number): void {
+  if (!sweep) {
+    if (now - lastSweep < RATE_LIMIT_SWEEP_MS) return;
+    lastSweep = now;
+    sweep = allBuckets();
+  }
+  for (let i = 0; i < RATE_LIMIT_STEP; i += 1) {
+    const next = sweep.next();
+    if (next.done) {
+      sweep = undefined;
+      return;
+    }
+    const [space, key, bucket] = next.value;
+    if (bucket.resetAt < now) space.delete(key);
+  }
+}
+
+/**
+ * Jenis kunci penuh: lepas entri kedaluwarsa, atau entri tertua yang belum mencapai batasnya, di antara
+ * RATE_LIMIT_STEP entri tertua. Bucket yang sudah menolak tidak pernah dilepas, sehingga membanjiri kunci baru
+ * tidak membuka ulang percobaan yang sudah diblokir; bila semua entri itu menolak, kunci baru ikut ditolak.
+ */
+function makeRoom(space: Map<string, Bucket>, now: number): boolean {
+  let candidate: string | undefined;
+  let scanned = 0;
+  for (const [key, bucket] of space) {
+    if (bucket.resetAt < now) {
+      space.delete(key);
+      return true;
+    }
+    if (candidate === undefined && bucket.count < bucket.limit) candidate = key;
+    if ((scanned += 1) >= RATE_LIMIT_STEP) break;
+  }
+  if (candidate === undefined) return false;
+  space.delete(candidate);
+  return true;
+}
+
 /** Pembatas percobaan di memori proses; cukup untuk satu instans lokal. */
 export function rateLimit(options: { key: string; limit: number; windowMs: number }): boolean {
   const now = Date.now();
-  // Sapu entri kedaluwarsa paling sering sekali per menit atau saat peta tumbuh cepat,
-  // agar kunci per-email/per-token tidak menumpuk tanpa batas.
-  if (now - lastSweep >= RATE_LIMIT_SWEEP_MS || buckets.size > 10_000) {
-    lastSweep = now;
-    for (const [key, bucket] of buckets) {
-      if (bucket.resetAt < now) buckets.delete(key);
-    }
-  }
-  const bucket = buckets.get(options.key);
-  if (!bucket || bucket.resetAt < now) {
-    buckets.set(options.key, { count: 1, resetAt: now + options.windowMs });
+  sweepStep(now);
+  const [space, id] = bucketSlot(options.key);
+  const bucket = space.get(id);
+  if (bucket && bucket.resetAt >= now) {
+    if (bucket.count >= options.limit) return false;
+    bucket.count += 1;
     return true;
   }
-  if (bucket.count >= options.limit) return false;
-  bucket.count += 1;
+  // Jendela baru ditaruh di ujung peta agar urutan peta tetap urutan pembuatan bucket (dipakai makeRoom).
+  if (bucket) space.delete(id);
+  else if (space.size >= RATE_LIMIT_MAX_KEYS && !makeRoom(space, now)) return false;
+  space.set(id, { count: 1, limit: options.limit, resetAt: now + options.windowMs });
   return true;
+}
+
+/** Kembalikan satu hitungan pada bucket yang masih berlaku, mis. percobaan yang ternyata tidak perlu dihitung. */
+export function rateLimitRefund(key: string): void {
+  const [space, id] = bucketSlot(key);
+  const bucket = space.get(id);
+  if (bucket && bucket.resetAt >= Date.now() && bucket.count > 0) bucket.count -= 1;
 }
 
 /**

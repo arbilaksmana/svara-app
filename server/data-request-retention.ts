@@ -22,27 +22,45 @@ export function anonymizedContact(id: string): string {
   return `anon:${createHash('sha256').update(id).digest('hex').slice(0, 16)}`;
 }
 
+/** Pengganti kanal balasan teks bebas, yang bisa memuat kontak pemohon; jejak bahwa pemohon sudah dibalas tetap ada. */
+const ANONYMIZED_CHANNEL = 'dianonimkan';
+
+/** Kode kanal balasan dari UI admin (`src/screens/Admin.tsx`) tidak memuat kontak sehingga dipertahankan. */
+const KEPT_CHANNELS = `'email', 'phone', 'messaging', 'letter', 'in_person', '${ANONYMIZED_CHANNEL}'`;
+
+/**
+ * Baris lewat masa simpan yang belum dianonimkan, ditambah baris yang ditandai versi job sebelumnya tanpa
+ * mengosongkan `outcome_note` dan kanal balasan teks bebas.
+ */
+const NEEDS_ANONYMIZATION = `(anonymized_at IS NULL AND created_at < ?)
+   OR (anonymized_at IS NOT NULL AND (note IS NOT NULL OR outcome_note IS NOT NULL
+       OR (response_channel IS NOT NULL AND response_channel NOT IN (${KEPT_CHANNELS}))))`;
+
 export async function anonymizeExpiredDataRequests(
   options: { days?: number; now?: Date } = {},
 ): Promise<{ days: number; anonymized: number }> {
   const days = options.days ?? retentionDays();
-  const cutoff = new Date((options.now ?? new Date()).getTime() - days * MS_PER_DAY).toISOString();
-  const rows = await all<{ id: string }>(
-    'SELECT id FROM data_requests WHERE anonymized_at IS NULL AND created_at < ?',
-    cutoff,
-  );
+  const ranAt = options.now ?? new Date();
+  const cutoff = new Date(ranAt.getTime() - days * MS_PER_DAY).toISOString();
+  const rows = await all<{ id: string }>(`SELECT id FROM data_requests WHERE ${NEEDS_ANONYMIZATION}`, cutoff);
+  let anonymized = 0;
   for (const row of rows) {
-    await run(
+    anonymized += await run(
       `UPDATE data_requests
-          SET contact = ?, note = NULL, anonymized_at = ?, updated_at = ?
-        WHERE id = ? AND anonymized_at IS NULL`,
+          SET contact = ?, note = NULL, outcome_note = NULL,
+              response_channel = CASE WHEN response_channel IS NULL OR response_channel IN (${KEPT_CHANNELS})
+                                      THEN response_channel ELSE ? END,
+              anonymized_at = ?, updated_at = ?
+        WHERE id = ? AND (${NEEDS_ANONYMIZATION})`,
       anonymizedContact(row.id),
-      cutoff,
-      cutoff,
+      ANONYMIZED_CHANNEL,
+      ranAt.toISOString(),
+      ranAt.toISOString(),
       row.id,
+      cutoff,
     );
   }
-  return { days, anonymized: rows.length };
+  return { days, anonymized };
 }
 
 if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('/data-request-retention.ts')) {

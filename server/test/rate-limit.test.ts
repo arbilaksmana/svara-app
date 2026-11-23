@@ -5,7 +5,7 @@ import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import express, { type Request } from 'express';
 import { app } from '../app.ts';
-import { clientIp, rateLimit, rateLimitBucketCount, trustProxySetting } from '../security.ts';
+import { clientIp, rateLimit, rateLimitBucketCount, resetRateLimits, trustProxySetting } from '../security.ts';
 
 /**
  * Kirim permintaan HTTP mentah ke server Express yang sedang berjalan agar
@@ -125,6 +125,24 @@ test('PERF-06 limiter: 429 pada limit+1 dan entri kedaluwarsa dibersihkan', () =
     assert.equal(rateLimitBucketCount(), 1, 'semua 21 entri kedaluwarsa tersapu, hanya kunci baru tersisa');
   } finally {
     Date.now = dateNow;
+  }
+});
+
+test('NEW-PO-01 sapuan bertahap: satu panggilan menyapu sebagian, panggilan berikutnya menuntaskan semua entri kedaluwarsa', () => {
+  resetRateLimits();
+  for (let i = 0; i < 1_000; i += 1) rateLimit({ key: `consent:198.51.100.${i % 250}:pl_kedaluwarsa_${i}`, limit: 30, windowMs: 1_000 });
+  assert.equal(rateLimitBucketCount(), 1_000);
+  const dateNow = Date.now;
+  try {
+    Date.now = () => dateNow() + 120_000;
+    rateLimit({ key: 'consent:198.51.100.1:pl_baru', limit: 30, windowMs: 60_000 });
+    const afterOne = rateLimitBucketCount();
+    assert.ok(afterOne > 900, `satu panggilan tidak menyapu seluruh peta: tersisa ${afterOne}`);
+    for (let i = 0; i < 50; i += 1) rateLimit({ key: 'consent:198.51.100.1:pl_baru', limit: 30, windowMs: 60_000 });
+    assert.equal(rateLimitBucketCount(), 1, 'semua entri kedaluwarsa tersapu oleh panggilan-panggilan berikutnya');
+  } finally {
+    Date.now = dateNow;
+    resetRateLimits();
   }
 });
 
@@ -259,6 +277,9 @@ test(
     const values = ['1', '2', '1,2', '', '0', 'loopback'];
     const results: Record<string, number[]> = {};
     for (const value of values) {
+      // Tiap nilai TRUST_PROXY adalah start proses tersendiri; tanpa reset, kuota login per alamat (30 kegagalan
+      // per 15 menit) dari alamat langsung yang sama habis oleh nilai-nilai sebelumnya.
+      resetRateLimits();
       await withTrustProxy(
         value,
         async (port) => {
@@ -287,6 +308,54 @@ test(
     );
   },
 );
+
+test('SEC-05 kuota login per alamat memakai identitas TRUST_PROXY yang sama untuk setiap nilai yang didokumentasikan', async () => {
+  // Klien loopback mengganti X-Forwarded-For dan email di setiap percobaan (batas per email tidak pernah tercapai).
+  // 'header': loopback dipercaya sebagai proxy sehingga tiap alamat header jadi klien sendiri (risiko yang
+  // didokumentasikan untuk TRUST_PROXY=loopback tanpa ingress); 'socket': header diabaikan, kuota habis di percobaan ke-31.
+  const identity: Record<string, 'socket' | 'header'> = {
+    '': 'socket',
+    '0': 'socket',
+    false: 'socket',
+    loopback: 'header',
+    linklocal: 'socket',
+    uniquelocal: 'socket',
+    'loopback, uniquelocal': 'header',
+    '1': 'socket',
+    '2': 'socket',
+    true: 'socket',
+    '10.0.0.0/8': 'socket',
+  };
+  const warn = mock.method(console, 'warn', () => {});
+  const results: Record<string, number[]> = {};
+  try {
+    for (const value of Object.keys(identity)) {
+      resetRateLimits();
+      await withTrustProxy(value, async (port) => {
+        const statuses: number[] = [];
+        for (let i = 1; i <= 31; i += 1) {
+          const res = await send(
+            port,
+            '/api/v1/auth/login',
+            { 'X-Forwarded-For': `203.0.113.${i}` },
+            { method: 'POST', body: { email: `staf.${i}@kuota-ip.test`, password: 'Coba-Sandi-2026!' } },
+          );
+          statuses.push(res.status);
+        }
+        results[value] = statuses;
+      });
+    }
+  } finally {
+    warn.mock.restore();
+    resetRateLimits();
+  }
+  assert.deepEqual(
+    results,
+    Object.fromEntries(
+      Object.entries(identity).map(([value, kind]) => [value, kind === 'socket' ? [...Array(30).fill(401), 429] : Array(31).fill(401)]),
+    ),
+  );
+});
 
 /** Permintaan Express dengan alamat socket tertentu, untuk alamat proxy/klien yang tidak bisa dibuat dari mesin uji. */
 function requestFrom(target: ReturnType<typeof express>, remoteAddress: string, forwardedFor: string): Request {
