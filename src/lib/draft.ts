@@ -12,6 +12,7 @@ const DRAFT_PREFIX = 'svara.draft.';
 const CONSENT_PREFIX = 'svara.consent.';
 const IDEMPOTENCY_PREFIX = 'svara.idempotency.';
 const RECEIPT_PREFIX = 'svara.receipt.';
+const FLOW_PREFIX = 'svara.flow.';
 
 function readJson(key: string): unknown {
   try {
@@ -75,11 +76,36 @@ export function hasUnsentAttempt(token: string): boolean {
     || versionKeys(IDEMPOTENCY_PREFIX, token).length > 0;
 }
 
+/** Draft token ini berisi setidaknya satu jawaban; persetujuan atau kunci kirim saja tidak dihitung. */
+export function hasDraft(token: string): boolean {
+  return versionKeys(DRAFT_PREFIX, token).some((key) =>
+    Object.values(readDraft(key)).some((value) => value?.optionId != null || (value?.text ?? '').trim() !== ''),
+  );
+}
+
+/** Tandai perpindahan dari alur pengantar atau formulir sendiri; tanda sekali pakai untuk satu kedatangan. */
+export function markFlowEntry(token: string): void {
+  writeJson(FLOW_PREFIX + token, true);
+}
+
+export function clearFlowEntry(token: string): void {
+  removeKey(FLOW_PREFIX + token);
+}
+
+/**
+ * Masuk langsung (deep link, reload, atau tab yang sama oleh orang lain) ke /form atau /review tidak boleh
+ * mewarisi persetujuan dan draf responden sebelumnya diam-diam: pengguna harus memilih lanjut atau mulai baru.
+ */
+export function attemptGateNeeded(token: string): boolean {
+  return hasUnsentAttempt(token) && readJson(FLOW_PREFIX + token) !== true;
+}
+
 /** Hapus persetujuan, draft, dan kunci kirim satu token tanpa menyentuh token lain. */
 export function discardAttempt(token: string): void {
   removeKey(CONSENT_PREFIX + token);
   removeVersions(DRAFT_PREFIX, token);
   removeVersions(IDEMPOTENCY_PREFIX, token);
+  removeKey(FLOW_PREFIX + token);
 }
 
 /**

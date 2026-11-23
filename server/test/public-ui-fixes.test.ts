@@ -1,11 +1,12 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createElement, isValidElement, type ReactNode } from 'react';
+import { createElement, isValidElement, type ElementType, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime.js';
 import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime.js';
 import { ToastProvider } from '../../src/components/Toast.tsx';
+import { ConfirmDialog } from '../../src/components/ui.tsx';
 import { HomePage } from '../../src/screens/Landing.tsx';
 import * as respondent from '../../src/screens/Respondent.tsx';
 import { ResultsPage } from '../../src/screens/CreatorData.tsx';
@@ -309,14 +310,39 @@ function findClickable(node: ReactNode, label: string): { onClick: () => void } 
   return findClickable(node.props.children, label);
 }
 
-test('SEC-07/BF-08: "Mulai sebagai responden baru" menghapus persetujuan, draf, dan kunci token itu saja', () => {
+function findByType<P>(node: ReactNode, type: ElementType): { props: P } | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findByType<P>(child, type);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement<{ children?: ReactNode }>(node)) return undefined;
+  if (node.type === type) return { props: node.props as P };
+  return findByType<P>(node.props.children, type);
+}
+
+test('SEC-07/BF-08: "Mulai sebagai responden baru" menghapus persetujuan, draf, dan kunci token itu saja setelah dikonfirmasi', () => {
   const keyA = abandonByA();
   storage.writeConsent('pl_lain', consent('c_lain'));
   const keyOther = storage.submissionKey('pl_lain', 1, false);
   const choices: string[] = [];
-  const tree = respondent.UnsentAttemptChoice({ token: TOKEN, onChoose: (choice) => { choices.push(choice); } });
+  const tree = respondent.UnsentAttemptChoiceView({
+    confirming: false,
+    onResume: () => { choices.push('resume'); },
+    onRequestRestart: () => {},
+    onCancelRestart: () => {},
+    onConfirmRestart: () => {
+      storage.discardAttempt(TOKEN);
+      choices.push('restart');
+    },
+  });
 
   findClickable(tree, 'Mulai sebagai responden baru')!.onClick();
+  assert.deepEqual(choices, [], 'Klik pertama hanya meminta konfirmasi, isian belum dihapus');
+  assert.equal(storage.readConsent(TOKEN)?.consent_id, 'c_responden_a');
+  findByType<{ onConfirm: () => void }>(tree, ConfirmDialog)!.props.onConfirm();
   assert.deepEqual(choices, ['restart']);
   assert.equal(storage.readConsent(TOKEN), null, 'Persetujuan A dihapus');
   assert.equal(formDraft(TOKEN), '|', 'Draf A dihapus');
@@ -330,7 +356,13 @@ test('SEC-07/BF-08: "Mulai sebagai responden baru" menghapus persetujuan, draf, 
 test('SEC-07/BF-08: "Lanjutkan isian sebelumnya" mempertahankan draf dan kunci sehingga retry identik memakai kunci yang sama', () => {
   const keyA = abandonByA();
   const choices: string[] = [];
-  const tree = respondent.UnsentAttemptChoice({ token: TOKEN, onChoose: (choice) => { choices.push(choice); } });
+  const tree = respondent.UnsentAttemptChoiceView({
+    confirming: false,
+    onResume: () => { choices.push('resume'); },
+    onRequestRestart: () => {},
+    onCancelRestart: () => {},
+    onConfirmRestart: () => {},
+  });
   findClickable(tree, 'Lanjutkan isian sebelumnya')!.onClick();
   assert.deepEqual(choices, ['resume']);
 

@@ -899,6 +899,15 @@ const RESPONSE_CHANNEL_LABELS: Record<string, string> = {
   in_person: 'Tatap muka',
 };
 
+/**
+ * Nilai kanonis yang dicatat server, bukan pilihan balasan admin: job retensi mengganti kanal teks bebas
+ * dengan `dianonimkan`. Baris lama tetap menampilkannya sebagai label manusiawi, tanpa menawarkannya
+ * sebagai pilihan kanal baru.
+ */
+const SYSTEM_CHANNEL_LABELS: Record<string, string> = {
+  dianonimkan: 'Dianonimkan',
+};
+
 const CHANNEL_REQUIRED = 'Pilih kanal yang dipakai untuk membalas pemohon. Kanal ini dicatat sebagai bukti bahwa permintaan sudah dibalas.';
 
 function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () => void }) {
@@ -914,7 +923,7 @@ function RequestRow({ request, onSaved }: { request: DataRequest; onSaved: () =>
   // Kanal tersimpan di luar daftar (mis. teks bebas lewat API) tetap dapat dipilih agar simpan ulang tidak menggantinya.
   const storedChannel = request.response_channel;
   const channelOptions = storedChannel && !Object.hasOwn(RESPONSE_CHANNEL_LABELS, storedChannel)
-    ? [[storedChannel, storedChannel], ...Object.entries(RESPONSE_CHANNEL_LABELS)]
+    ? [[storedChannel, SYSTEM_CHANNEL_LABELS[storedChannel] ?? storedChannel], ...Object.entries(RESPONSE_CHANNEL_LABELS)]
     : Object.entries(RESPONSE_CHANNEL_LABELS);
 
   const save = (event: FormEvent<HTMLFormElement>) => {

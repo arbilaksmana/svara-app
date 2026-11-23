@@ -288,6 +288,16 @@ export async function loadBootstrap(): Promise<void> {
   } catch (cause) {
     ready = true;
     error = cause instanceof Error ? cause.message : 'Data workspace tidak dapat dimuat.';
+    // Sesi tetap valid walau bootstrap gagal: `/auth/me` membaca cookie tanpa data workspace,
+    // sehingga shell masih dapat menampilkan navigasi dan tombol Keluar.
+    if (!session) {
+      try {
+        const { account } = await api.me();
+        if (account) session = mapSession(account);
+      } catch {
+        // Tanpa sesi yang terbaca, shell menampilkan jalur masuk biasa.
+      }
+    }
   }
   emit();
 }

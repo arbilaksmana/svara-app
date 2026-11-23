@@ -12,6 +12,7 @@ import {
   Card,
   Checkbox,
   Code,
+  ConfirmDialog,
   Divider,
   Field,
   Label,
@@ -34,9 +35,13 @@ import { GuardianEvidenceSummary } from '../components/GuardianEvidence';
 import { formatWIB } from '../lib/summary';
 import { RECEIPT_STATUS_LABEL } from '../lib/labels';
 import {
+  attemptGateNeeded,
+  clearFlowEntry,
   completeSubmission,
   discardAttempt,
+  hasDraft,
   hasUnsentAttempt,
+  markFlowEntry,
   readConsent,
   readReceipt,
   saveReceipt,
@@ -275,27 +280,67 @@ export function IntroPage({ token }: { token: string }) {
  * sehingga retry identik sebelum bukti tetap memakai kunci yang sama.
  */
 export function UnsentAttemptChoice({ token, onChoose }: { token: string; onChoose: (choice: 'resume' | 'restart') => void }) {
+  const [confirming, setConfirming] = useState(false);
+
+  const restart = () => {
+    setConfirming(false);
+    discardAttempt(token);
+    onChoose('restart');
+  };
+
   return (
-    <Card className="flex flex-col gap-3">
-      <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
-      <p className="text-body-sm text-muted">
-        Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
-        lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
-        responden baru agar isian itu dihapus dari tab ini.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <Button variant="secondary" onClick={() => onChoose('resume')}>Lanjutkan isian sebelumnya</Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            discardAttempt(token);
-            onChoose('restart');
-          }}
-        >
-          Mulai sebagai responden baru
-        </Button>
-      </div>
-    </Card>
+    <UnsentAttemptChoiceView
+      confirming={confirming}
+      onResume={() => onChoose('resume')}
+      onRequestRestart={() => {
+        // Persetujuan atau kunci kirim saja tidak memuat jawaban, jadi tidak perlu konfirmasi.
+        if (hasDraft(token)) setConfirming(true);
+        else restart();
+      }}
+      onCancelRestart={() => setConfirming(false)}
+      onConfirmRestart={restart}
+    />
+  );
+}
+
+export function UnsentAttemptChoiceView({
+  confirming,
+  onResume,
+  onRequestRestart,
+  onCancelRestart,
+  onConfirmRestart,
+}: {
+  confirming: boolean;
+  onResume: () => void;
+  onRequestRestart: () => void;
+  onCancelRestart: () => void;
+  onConfirmRestart: () => void;
+}) {
+  return (
+    <>
+      <Card className="flex flex-col gap-3">
+        <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
+        <p className="text-body-sm text-muted">
+          Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
+          lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
+          responden baru agar isian itu dihapus dari tab ini.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={onResume}>Lanjutkan isian sebelumnya</Button>
+          <Button variant="secondary" onClick={onRequestRestart}>
+            Mulai sebagai responden baru
+          </Button>
+        </div>
+      </Card>
+      <ConfirmDialog
+        open={confirming}
+        title="Hapus isian yang belum dikirim?"
+        detail="Persetujuan, jawaban, dan kunci kirim yang tersimpan di tab ini akan dihapus untuk survei ini. Isian yang sudah dikirim tidak terpengaruh."
+        confirmLabel="Hapus isian"
+        onClose={onCancelRestart}
+        onConfirm={onConfirmRestart}
+      />
+    </>
   );
 }
 
@@ -476,6 +521,7 @@ export function IntroView({
                           guardian_evidence_status: guardianRequired ? 'self_attested' : 'not_required',
                           guardian_evidence_ref: guardianRequired ? guardianRef.trim() : null,
                         }, { resume: attempt === 'resumed' });
+                        markFlowEntry(token);
                         router.push(ROUTES.respondentForm(token));
                       })
                       .catch((error: unknown) => {
@@ -629,10 +675,17 @@ export function FormPage({ token }: { token: string }) {
   const summaryRef = useRef<HTMLDivElement>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
   const [consentReady, setConsentReady] = useState(false);
+  // Dibaca sekali saat mount; kedatangan berikutnya (reload/deep link) kembali digerbangi karena tanda alur
+  // sekali pakai dihapus di effect di bawah. Render awal tetap memuat sampai persetujuan terbaca.
+  const [attemptGate, setAttemptGate] = useState(() => attemptGateNeeded(token));
 
   useEffect(() => {
     setConsent(readConsent(token));
     setConsentReady(true);
+  }, [token]);
+
+  useEffect(() => {
+    clearFlowEntry(token);
   }, [token]);
 
   useEffect(() => {
@@ -659,6 +712,25 @@ export function FormPage({ token }: { token: string }) {
   const effectiveState = state === 'default' ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(effectiveState) || usedInvite || !consent;
+
+  if (attemptGate && consent && effectiveState === 'default') {
+    return (
+      <Shell kind="respondent" title={`Formulir · ${survey.title}`} subtitle="Isian sebelumnya belum diselesaikan.">
+        <div className="mx-auto w-full max-w-[720px]">
+          <UnsentAttemptChoice
+            token={token}
+            onChoose={(choice) => {
+              if (choice === 'restart') {
+                router.replace(ROUTES.respondentIntro(token));
+                return;
+              }
+              setAttemptGate(false);
+            }}
+          />
+        </div>
+      </Shell>
+    );
+  }
 
   if (!consent && effectiveState === 'default') {
     return <PublicLoading />;
@@ -735,6 +807,7 @@ export function FormPage({ token }: { token: string }) {
               to={ROUTES.respondentReview(token)}
               block
               disabled={blocked || emptyRequired.length > 0}
+              onClick={() => markFlowEntry(token)}
             >
               Tinjau jawaban
             </ActionLink>
@@ -768,10 +841,16 @@ export function ReviewPage({ token }: { token: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [consent, setConsent] = useState<ConsentPayload | null>(null);
   const [consentReady, setConsentReady] = useState(false);
+  // Sama dengan formulir: gerbang hanya untuk kedatangan langsung dengan isian tertinggal.
+  const [attemptGate, setAttemptGate] = useState(() => attemptGateNeeded(token));
 
   useEffect(() => {
     setConsent(readConsent(token));
     setConsentReady(true);
+  }, [token]);
+
+  useEffect(() => {
+    clearFlowEntry(token);
   }, [token]);
 
   useEffect(() => {
@@ -797,6 +876,25 @@ export function ReviewPage({ token }: { token: string }) {
   const effectiveState = state === 'default' && !retryOnly ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading', 'conflict'].includes(effectiveState) || !consent || (usedInvite && !retryOnly);
+
+  if (attemptGate && consent && effectiveState === 'default') {
+    return (
+      <Shell kind="respondent" title="Tinjau jawaban" subtitle="Isian sebelumnya belum diselesaikan.">
+        <div className="mx-auto w-full max-w-[720px]">
+          <UnsentAttemptChoice
+            token={token}
+            onChoose={(choice) => {
+              if (choice === 'restart') {
+                router.replace(ROUTES.respondentIntro(token));
+                return;
+              }
+              setAttemptGate(false);
+            }}
+          />
+        </div>
+      </Shell>
+    );
+  }
 
   if (!consent && effectiveState === 'default') {
     return <PublicLoading />;
@@ -933,7 +1031,7 @@ export function ReviewPage({ token }: { token: string }) {
               >
                 {retryOnly ? 'Kirim ulang jawaban' : 'Kirim jawaban'}
               </Button>
-              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked || retryOnly}>Perbaiki jawaban</ActionLink>
+              <ActionLink to={ROUTES.respondentForm(token)} variant="secondary" disabled={blocked || retryOnly} onClick={() => markFlowEntry(token)}>Perbaiki jawaban</ActionLink>
             </div>
             {(blocked || emptyCount > 0) && (
               <p role="status" className="text-caption font-bold text-danger">
