@@ -12,6 +12,7 @@ import {
   Card,
   Checkbox,
   Code,
+  ConfirmDialog,
   Divider,
   Field,
   Label,
@@ -275,27 +276,67 @@ export function IntroPage({ token }: { token: string }) {
  * sehingga retry identik sebelum bukti tetap memakai kunci yang sama.
  */
 export function UnsentAttemptChoice({ token, onChoose }: { token: string; onChoose: (choice: 'resume' | 'restart') => void }) {
+  const [confirming, setConfirming] = useState(false);
+
+  const restart = () => {
+    setConfirming(false);
+    discardAttempt(token);
+    onChoose('restart');
+  };
+
   return (
-    <Card className="flex flex-col gap-3">
-      <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
-      <p className="text-body-sm text-muted">
-        Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
-        lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
-        responden baru agar isian itu dihapus dari tab ini.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <Button variant="secondary" onClick={() => onChoose('resume')}>Lanjutkan isian sebelumnya</Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            discardAttempt(token);
-            onChoose('restart');
-          }}
-        >
-          Mulai sebagai responden baru
-        </Button>
-      </div>
-    </Card>
+    <UnsentAttemptChoiceView
+      confirming={confirming}
+      onResume={() => onChoose('resume')}
+      onRequestRestart={() => {
+        // Persetujuan atau kunci kirim saja tidak memuat jawaban, jadi tidak perlu konfirmasi.
+        if (hasDraft(token)) setConfirming(true);
+        else restart();
+      }}
+      onCancelRestart={() => setConfirming(false)}
+      onConfirmRestart={restart}
+    />
+  );
+}
+
+export function UnsentAttemptChoiceView({
+  confirming,
+  onResume,
+  onRequestRestart,
+  onCancelRestart,
+  onConfirmRestart,
+}: {
+  confirming: boolean;
+  onResume: () => void;
+  onRequestRestart: () => void;
+  onCancelRestart: () => void;
+  onConfirmRestart: () => void;
+}) {
+  return (
+    <>
+      <Card className="flex flex-col gap-3">
+        <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
+        <p className="text-body-sm text-muted">
+          Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
+          lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
+          responden baru agar isian itu dihapus dari tab ini.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={onResume}>Lanjutkan isian sebelumnya</Button>
+          <Button variant="secondary" onClick={onRequestRestart}>
+            Mulai sebagai responden baru
+          </Button>
+        </div>
+      </Card>
+      <ConfirmDialog
+        open={confirming}
+        title="Hapus isian yang belum dikirim?"
+        detail="Persetujuan, jawaban, dan kunci kirim yang tersimpan di tab ini akan dihapus untuk survei ini. Isian yang sudah dikirim tidak terpengaruh."
+        confirmLabel="Hapus isian"
+        onClose={onCancelRestart}
+        onConfirm={onConfirmRestart}
+      />
+    </>
   );
 }
 

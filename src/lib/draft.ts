@@ -75,6 +75,13 @@ export function hasUnsentAttempt(token: string): boolean {
     || versionKeys(IDEMPOTENCY_PREFIX, token).length > 0;
 }
 
+/** Draft token ini berisi setidaknya satu jawaban; persetujuan atau kunci kirim saja tidak dihitung. */
+export function hasDraft(token: string): boolean {
+  return versionKeys(DRAFT_PREFIX, token).some((key) =>
+    Object.values(readDraft(key)).some((value) => value?.optionId != null || (value?.text ?? '').trim() !== ''),
+  );
+}
+
 /** Hapus persetujuan, draft, dan kunci kirim satu token tanpa menyentuh token lain. */
 export function discardAttempt(token: string): void {
   removeKey(CONSENT_PREFIX + token);
