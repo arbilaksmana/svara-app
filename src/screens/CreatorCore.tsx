@@ -36,7 +36,7 @@ import { useToast } from '../components/Toast';
 import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
 import { ShortTextAnswer } from './Respondent';
-import { allPublicLinks, createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
+import { allPublicLinks, canManageAs, createSurvey, duplicateVersion, publishVersion, saveDraft, surveyProfileOf, useStore } from '../lib/store';
 
 const STATUS_TONE = {
   draft: 'neutral',
@@ -59,7 +59,7 @@ export function SurveyNav({ id }: { id: string }) {
   const pathname = usePathname() ?? '';
   const { session } = useStore();
   const survey = findSurvey(id);
-  const canManage = Boolean(session?.serverRole === 'creator' && survey?.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const links = canManage
     ? [
         { to: ROUTES.creatorEdit(id), label: 'Editor' },
@@ -228,7 +228,7 @@ export function CreatorListPage() {
               <Table head={['Judul', 'Status', 'Versi', 'Diperbarui', 'Aksi']}>
                 {rows.map((s) => {
                   const vs = versionsFor(s.id);
-                  const canManage = canCreate && s.owner_id === session?.id;
+                  const canManage = canManageAs(session, s);
                   return (
                     <tr key={s.id}>
                       <Th className="w-[38%]">
@@ -353,7 +353,7 @@ export function EditorPage({ id }: { id: string }) {
   const profile = surveyProfileOf(id);
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state } = useScreenState('creator-edit');
   const activeVersion = editorVersionFor(id);
   const [title, setTitle] = useState(drafts[id]?.title ?? survey?.title ?? '');
@@ -410,7 +410,7 @@ export function EditorPage({ id }: { id: string }) {
   }
   const showIssues = attempted || state === 'validation';
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Editor instrumen" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -513,7 +513,7 @@ export function EditorPage({ id }: { id: string }) {
         emptyTitle="Belum ada pertanyaan"
         emptyDetail="Draf ini belum memiliki item. Tambahkan bagian dan pertanyaan sebelum diterbitkan."
         emptyAction={<ActionLink to={ROUTES.creatorPublish(id)} variant="secondary">Lihat validasi publikasi</ActionLink>}
-        permissionDetail="Hanya pemilik survei yang dapat mengubah draf ini."
+        permissionDetail="Hanya pemilik atau admin organisasi survei yang dapat mengubah draf ini."
       >
         <div className="flex flex-col gap-5">
           
@@ -828,12 +828,12 @@ export function PreviewPage({ id }: { id: string }) {
   const survey = findSurvey(id);
   const { session, revision } = useStore();
   void revision;
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state, link } = useScreenState('creator-preview');
   const version = editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Pratinjau tampilan responden" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -848,7 +848,7 @@ export function PreviewPage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada item untuk dipratinjau"
         emptyDetail="Tambahkan pertanyaan pada editor terlebih dahulu."
-        permissionDetail="Pratinjau hanya tersedia bagi pemilik survei."
+        permissionDetail="Pratinjau hanya tersedia bagi pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -909,7 +909,7 @@ export function PublishPage({ id }: { id: string }) {
   const { revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const { state, link } = useScreenState('creator-publish');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -944,7 +944,7 @@ export function PublishPage({ id }: { id: string }) {
   ];
   const blocking = !hasDraft || blockers.length > 0 || state === 'closed' || state === 'permission-denied' || state === 'error' || state === 'loading';
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Publikasi versi" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -957,7 +957,7 @@ export function PublishPage({ id }: { id: string }) {
       <StateView
         routeId="creator-publish"
         state={state}
-        permissionDetail="Publikasi hanya dapat dilakukan pemilik survei."
+        permissionDetail="Publikasi hanya dapat dilakukan pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
