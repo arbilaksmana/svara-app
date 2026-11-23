@@ -78,7 +78,7 @@ Tanpa `SEED_DEMO=1` basis data tetap kosong dan admin pertama dibuat lewat `pnpm
 1. Creator menyusun draf instrumen: judul, tujuan, petunjuk, pertanyaan, opsi, dan kode item.
 2. Draf diterbitkan menjadi versi tetap. Tautan umum versi sebelumnya membuka versi terbit terbaru, kecuali tautan survei yang pernah diarsipkan, tautan yang dicabut atau kedaluwarsa, dan tautan yang ditutup sebelum migrasi 014 tanpa alasan; undangan individual tetap terikat pada versinya dan tampil **Ditutup** setelah versinya tidak lagi terbit.
 3. Responden membuka tautan, membaca pemberitahuan, memberi persetujuan, mengisi, lalu menerima bukti kirim.
-4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah.
+4. Creator membaca hasil agregat per versi. Teks bebas, jawaban individual, dan ekspor memerlukan izin terpisah. `GET /surveys/:id/summary`, `/responses`, dan `/export` tanpa `?version` memakai versi terbit; setelah survei ditutup atau diarsipkan, versi terakhir yang pernah terbit (draf yang ikut ditutup arsip tidak dipilih). `409 no_published_version` hanya bila survei belum pernah terbit.
 5. Publikasi menutup versi terbit sebelumnya. Jika tidak ada versi terbit, tautan umum tidak menerima kiriman baru.
 
 ## Arsitektur
@@ -126,6 +126,8 @@ scripts/         Smoke test web
 - Menangguhkan akun lewat `PATCH /admin/accounts/:id` atau `PATCH /org/members/:id` menghapus semua sesinya di transaksi yang sama. Mengaktifkan kembali tidak menghidupkan cookie lama; pemilik akun harus masuk ulang.
 - Semua respons `/api` membawa `Cache-Control: no-store` dari satu middleware di `server/app.ts`, termasuk penolakan dan `404`, agar data sesi tidak tersimpan di cache browser atau proxy.
 - Login menolak email yang formatnya tidak valid atau lebih dari 254 karakter dan kata sandi lebih dari 256 karakter dengan `422 validation_error` generik, sebelum rate limit, query akun, hashing, dan audit. Audit login gagal hanya menyimpan email ternormalisasi yang lolos batas itu.
+- Login dibatasi dua lapis per 15 menit: 8 percobaan per alamat klien + email, dan 30 kredensial salah per alamat klien. Kuota per alamat dipotong sebelum verifikasi (permintaan paralel ikut terhitung) lalu dikembalikan bila login berhasil, ditolak batas per email, atau gagal karena galat server. Setelah kuota habis, semua login dari alamat itu, termasuk dengan sandi benar, mendapat `429 rate_limited` dengan pesan yang sama seperti batas per email, tanpa query akun, hashing, maupun audit. Di balik rewrite Next tanpa ingress semua pengguna berbagi satu alamat, jadi juga berbagi kuota 30 ini (lihat [Header proxy dan `TRUST_PROXY`](#header-proxy-dan-trust_proxy)).
+- Body JSON lebih dari 512 KB ditolak `413 payload_too_large` dan JSON rusak `400 invalid_json` sebelum route berjalan; galat body 4xx lain dari body-parser memakai status aslinya dengan `invalid_body`. Log hanya mencatat satu baris peringatan berisi status dan jenis galat, tanpa stack dan tanpa path.
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
 - Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
 - Persetujuan mengizinkan satu respons final dalam 24 jam. Retry identik dari sesi yang sama tetap mengembalikan bukti yang sama. Jika persetujuan lama belum dipakai saat migrasi `012`, responden harus mencatat persetujuan baru; migrasi tidak mengubah bukti kiriman lama.
@@ -329,7 +331,7 @@ Registrasi publik belum memverifikasi email dan tidak membuat grant baca jawaban
 - `SEED_DEMO=1 pnpm db:reset` menghapus schema `public`, menerapkan semua migrasi, lalu memuat data sintetis.
 - `pnpm test` memakai basis data uji terpisah (`TEST_DATABASE_URL`), me-reset schema, lalu menjalankan migrasi.
 - Migrasi yang mengubah checksum yang sudah tercatat ditolak; buat file migrasi baru, jangan edit yang sudah dirilis.
-- `pnpm retention:data-requests` menganonimkan permintaan data yang lebih tua dari `DATA_REQUEST_RETENTION_DAYS` (default 365 hari): `contact` diganti `anon:<hash>`, `note` dikosongkan, dan `anonymized_at` diisi; `id`, `type`, `status`, dan `created_at` dipertahankan. Baris yang sudah dianonimkan tidak disentuh lagi, jadi skrip aman dijalankan berulang. Skrip belum dijadwalkan otomatis; jalankan dari penjadwal deployment.
+- `pnpm retention:data-requests` menganonimkan permintaan data yang lebih tua dari `DATA_REQUEST_RETENTION_DAYS` (default 365 hari): `contact` diganti `anon:<hash>`, `note` dan `outcome_note` dikosongkan, `response_channel` teks bebas diganti `dianonimkan` (kode kanal dari UI admin seperti `email` atau `phone` dipertahankan), dan `anonymized_at` serta `updated_at` diisi waktu job berjalan; `id`, `type`, `status`, `created_at`, `handled_by`, `responded_at`, dan `responded_by` dipertahankan sebagai jejak balasan. Baris yang ditandai versi job sebelumnya tetapi masih memuat `outcome_note` atau kanal teks bebas ikut dilengkapi. Baris yang sudah lengkap dianonimkan tidak disentuh lagi, jadi skrip aman dijalankan berulang. Skrip belum dijadwalkan otomatis; jalankan dari penjadwal deployment.
 - Masa berlaku kode undangan organisasi (`organization_invitations.expires_at`) wajib terisi sejak `009_organization_invitation_expiry_backfill.sql`. Migrasi itu mengisi baris lama dengan `created_at + 14 hari` (ISO-8601 UTC) lalu memasang `NOT NULL`; tidak ada lagi kode tanpa batas.
 - Data SQLite lama tidak diimpor otomatis. Ekspor/impor data nyata harus jadi prosedur terpisah dengan verifikasi.
 
@@ -421,7 +423,7 @@ Karena itu `TRUST_PROXY` hanya aman bila semua trafik ke API melewati ingress te
 
 - Di setiap deployment HTTPS set `COOKIE_SECURE=1`, apa pun nilai `TRUST_PROXY`.
 - Ingress paling depan sebaiknya menimpa header, mis. nginx `proxy_set_header X-Forwarded-For $remote_addr;` dan `proxy_set_header X-Forwarded-Proto $scheme;`. Bila ingress hanya menambahkan (`$proxy_add_x_forwarded_for`), klien yang alamatnya juga berada di jaringan `TRUST_PROXY`, mis. klien intranet dengan `uniquelocal`, ikut dianggap proxy dan bisa memalsukan alamatnya.
-- Tanpa ingress, semua klien yang lewat rewrite Next berbagi satu alamat di limiter, mis. kiriman publik 40 per 10 menit untuk seluruh kelas. Mengisi `TRUST_PROXY` untuk memisahkannya justru membuka pemalsuan di atas; pasang ingress bila limiter perlu menghitung per klien.
+- Tanpa ingress, semua klien yang lewat rewrite Next berbagi satu alamat di limiter, mis. kiriman publik 40 per 10 menit untuk seluruh kelas dan 30 login gagal per 15 menit untuk semua pengguna. Mengisi `TRUST_PROXY` untuk memisahkannya justru membuka pemalsuan di atas; pasang ingress bila limiter perlu menghitung per klien.
 - `docker-compose.yml` tidak meneruskan `TRUST_PROXY` ke service `api`. Tambahkan sendiri hanya setelah ingress seperti di atas terpasang.
 
 ## Akun dan tautan demo
@@ -498,7 +500,7 @@ Angka dan keterbatasan tiap skrip ada di `docs/test-evidence/`.
 - Tidak ada email, SMS, atau verifikasi identitas responden.
 - Retensi, kontak pengendali, dan transfer lintas negara tetap `null` sampai pengendali menetapkannya.
 - Teks kebijakan adalah template sintetis, bukan nasihat hukum.
-- Rate limit disimpan di proses dengan pembersihan entri kedaluwarsa; deployment multi-instance memerlukan penyimpanan bersama.
+- Rate limit disimpan di proses; deployment multi-instance memerlukan penyimpanan bersama. Entri kedaluwarsa disapu bertahap paling sering sekali per menit: tiap panggilan memeriksa paling banyak 64 entri untuk sapuan dan 64 entri untuk mencari ruang, jadi biaya per permintaan tidak bergantung pada jumlah kunci. Tiap jenis kunci (awalan seperti `login`, `login-ip`, `consent`, `submit`) menyimpan paling banyak 50.000 kunci aktif, dan kunci lebih dari 128 karakter disimpan sebagai hash. Bila satu jenis penuh, kunci baru menggantikan entri kedaluwarsa atau entri tertua yang belum mencapai batasnya di antara 64 entri tertua; bucket yang sudah menolak tidak pernah dilepas, dan bila 64 entri itu semuanya menolak, kunci baru jenis itu ikut ditolak `429` sampai ada yang kedaluwarsa.
 - Backup demo memakai `VACUUM INTO` lokal; belum ada enkripsi, off-site, atau uji RPO/RTO.
 
 ## Lisensi

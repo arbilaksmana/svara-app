@@ -70,7 +70,22 @@ app.use('/api', (_req: Request, res: Response) => {
   res.status(404).json({ error: 'Endpoint tidak ditemukan.', code: 'not_found' });
 });
 
-app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+/** Galat body-parser yang punya kode sendiri; galat body 4xx lain memakai `invalid_body`. */
+const BODY_ERRORS: Record<string, { code: string; message: string }> = {
+  'entity.too.large': { code: 'payload_too_large', message: 'Isi permintaan terlalu besar (maksimal 512 KB).' },
+  'entity.parse.failed': { code: 'invalid_json', message: 'Isi permintaan bukan JSON yang valid.' },
+};
+
+app.use((error: Error & { status?: unknown; type?: unknown }, _req: Request, res: Response, _next: NextFunction) => {
+  // body-parser menolak body sebelum route berjalan (http-errors 4xx dengan `type`): kesalahan klien, bukan galat
+  // server. Dicatat sebagai peringatan satu baris tanpa stack; path tidak dicatat karena bisa memuat token.
+  if (typeof error.type === 'string' && typeof error.status === 'number' && error.status >= 400 && error.status < 500) {
+    console.warn(`[api] body permintaan ditolak: ${error.status} ${error.type}`);
+    if (res.headersSent) return;
+    const known = BODY_ERRORS[error.type];
+    res.status(error.status).json({ error: known?.message ?? 'Isi permintaan tidak dapat dibaca.', code: known?.code ?? 'invalid_body' });
+    return;
+  }
   console.error('[api] unhandled', error.message);
   if (res.headersSent) return;
   sendError(res, error);

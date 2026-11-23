@@ -13,6 +13,7 @@ import {
   parseCookies,
   passwordPolicyError,
   rateLimit,
+  rateLimitRefund,
   requireAuth,
   secureCookie,
   sessionCookie,
@@ -39,6 +40,16 @@ const EMAIL_MAX_LENGTH = 254;
 function validEmail(email: string): boolean {
   return email.length <= EMAIL_MAX_LENGTH && EMAIL_RE.test(email);
 }
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_LIMITED = 'Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.';
+
+/**
+ * Batas per alamat klien di samping batas 8 per alamat+email: 30 kredensial salah per 15 menit. Kuota dipotong
+ * sebelum verifikasi agar permintaan paralel ikut terhitung, lalu dikembalikan bila login berhasil, ditolak batas
+ * per email, atau gagal karena galat server. Klien di balik satu alamat (rewrite Next tanpa ingress) berbagi kuota ini.
+ */
+const LOGIN_FAILURES_PER_IP = 30;
 
 async function failLogin(actor: string): Promise<void> {
   await run(
@@ -80,12 +91,24 @@ authRouter.post('/auth/login', async (req: AuthedRequest, res: Response) => {
     if (!validEmail(email) || password.length > PASSWORD_MAX_LENGTH) {
       throw new ApiError(422, 'validation_error', 'Email atau kata sandi tidak valid.');
     }
-    const key = `login:${clientIp(req)}:${email}`;
-    if (!rateLimit({ key, limit: 8, windowMs: 15 * 60 * 1000 })) {
-      throw new ApiError(429, 'rate_limited', 'Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.');
+    const ip = clientIp(req);
+    // Kunci per alamat dicek lebih dulu: alamat yang kuotanya habis tidak lagi membuat kunci per email baru.
+    const ipKey = `login-ip:${ip}`;
+    if (!rateLimit({ key: ipKey, limit: LOGIN_FAILURES_PER_IP, windowMs: LOGIN_WINDOW_MS })) {
+      throw new ApiError(429, 'rate_limited', LOGIN_RATE_LIMITED);
     }
-    const row = await get<LoginRow>('SELECT * FROM accounts WHERE email = ?', email);
-    if (!row || !(await verifyPassword(password, row.password_hash)) || row.status !== 'active') {
+    // null = kredensial salah; hanya hasil ini yang tetap memakai kuota per alamat.
+    let row: LoginRow | null | undefined;
+    try {
+      if (!rateLimit({ key: `login:${ip}:${email}`, limit: 8, windowMs: LOGIN_WINDOW_MS })) {
+        throw new ApiError(429, 'rate_limited', LOGIN_RATE_LIMITED);
+      }
+      const account = await get<LoginRow>('SELECT * FROM accounts WHERE email = ?', email);
+      row = account && (await verifyPassword(password, account.password_hash)) && account.status === 'active' ? account : null;
+    } finally {
+      if (row !== null) rateLimitRefund(ipKey);
+    }
+    if (!row) {
       await failLogin(email);
       throw new ApiError(401, 'invalid_credentials', 'Email atau kata sandi tidak cocok.');
     }
