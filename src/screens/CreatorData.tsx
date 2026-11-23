@@ -37,6 +37,7 @@ import {
   allInvitations,
   allPublicLinks,
   archiveSurvey,
+  canManageAs,
   closeVersion,
   createInvitation,
   revokeInvitation,
@@ -62,7 +63,7 @@ export function SharePage({ id }: { id: string }) {
   const { revision, session } = useStore();
   void revision;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const hasPublishedVersion = Boolean(publishedVersionFor(id));
   const canInvite = hasPublishedVersion && survey?.status !== 'closed' && survey?.status !== 'archived' && state !== 'closed';
   const [label, setLabel] = useState('');
@@ -88,7 +89,7 @@ export function SharePage({ id }: { id: string }) {
     }
   }
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Bagikan survei" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -103,7 +104,7 @@ export function SharePage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada tautan atau undangan"
         emptyDetail="Buat tautan umum atau undangan individual untuk mulai menerima jawaban."
-        permissionDetail="Hanya pemilik survei yang dapat membuat dan mencabut undangan."
+        permissionDetail="Hanya pemilik atau admin organisasi survei yang dapat membuat dan mencabut undangan."
       >
         <div className="flex flex-col gap-5">
           
@@ -337,11 +338,12 @@ export function ResultsPage({ id }: { id: string }) {
   const myGrants = accessGrants.filter(
     (grant) => grant.account_id === session?.id && grant.survey_id === id,
   );
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
-  const exportAllowed = isOwner || myGrants.some((grant) => grants[grant.id]?.export);
-  const individualAllowed = myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual);
+  const canManage = canManageAs(session, survey);
+  // Server: canExport/canReadIndividual/canExportIndividual mengembalikan true untuk pengelola (pemilik atau org_admin lingkup).
+  const exportAllowed = canManage || myGrants.some((grant) => grants[grant.id]?.export);
+  const individualAllowed = canManage || (myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual));
   // CSV memuat baris per responden: server mensyaratkan izin ekspor dan izin baca individual (canExportIndividual).
-  const csvAllowed = exportAllowed && (isOwner || individualAllowed);
+  const csvAllowed = exportAllowed && individualAllowed;
   const csvBlockedReason = !exportAllowed || csvAllowed
     ? null
     : myGrants.some((grant) => grants[grant.id]?.read)
@@ -383,11 +385,11 @@ export function ResultsPage({ id }: { id: string }) {
             <SurveyNav id={id} />
             <EmptyState
               title="Belum ada versi diterbitkan"
-              action={isOwner ? <ActionLink to={ROUTES.creatorPublish(id)}>Lanjut ke publikasi</ActionLink> : undefined}
+              action={canManage ? <ActionLink to={ROUTES.creatorPublish(id)}>Lanjut ke publikasi</ActionLink> : undefined}
             >
-              {isOwner
+              {canManage
                 ? 'Hasil dan ekspor tersedia setelah versi diterbitkan. Terbitkan draf dari halaman publikasi untuk mulai menerima jawaban.'
-                : 'Hasil dan ekspor tersedia setelah pemilik survei menerbitkan versi.'}
+                : 'Hasil dan ekspor tersedia setelah pemilik atau admin organisasi menerbitkan versi.'}
             </EmptyState>
           </div>
         </StateView>
@@ -644,7 +646,7 @@ export function SettingsPage({ id }: { id: string }) {
   // Pemberitahuan dibaca dari bootstrap server, bukan fixture; tidak ada fallback ke profil lain.
   const notice = notices.find((row) => row.profile_id === profile?.id) ?? null;
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
   const [allowIndividual, setAllowIndividual] = useState(settings[id]?.allowIndividual ?? false);
   const [busy, setBusy] = useState(false);
@@ -655,7 +657,7 @@ export function SettingsPage({ id }: { id: string }) {
     setAllowIndividual(settings[id]?.allowIndividual ?? false);
   }, [id, settings]);
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Pengaturan dan pemberitahuan" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -668,7 +670,7 @@ export function SettingsPage({ id }: { id: string }) {
       <StateView
         routeId="creator-settings"
         state={state}
-        permissionDetail="Pengaturan hanya dapat diubah pemilik survei."
+        permissionDetail="Pengaturan hanya dapat diubah pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           
@@ -753,14 +755,14 @@ export function HistoryPage({ id }: { id: string }) {
   void revision;
   const { state, link } = useScreenState('creator-history');
   const survey = findSurvey(id);
-  const isOwner = Boolean(survey && session && survey.owner_id === session.id);
+  const canManage = canManageAs(session, survey);
   const versionList = versionsFor(id);
   const activeVersion = versionList.find((version) => version.status === 'published');
   const archived = survey?.status === 'archived' || state === 'closed';
   const [pending, setPending] = useState<'close' | 'archive' | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!survey || !isOwner) {
+  if (!survey || !canManage) {
     return (
       <Shell kind="creator" title="Riwayat versi" subtitle="Survei tidak ditemukan.">
         <MissingSurvey />
@@ -775,7 +777,7 @@ export function HistoryPage({ id }: { id: string }) {
         state={state}
         emptyTitle="Belum ada versi"
         emptyDetail="Versi dibuat saat publikasi pertama."
-        permissionDetail="Riwayat hanya dapat dibaca pemilik survei."
+        permissionDetail="Riwayat hanya dapat dibaca pemilik atau admin organisasi survei."
       >
         <div className="flex flex-col gap-5">
           

@@ -545,6 +545,25 @@ export function isCreator(): boolean {
   return session?.role === 'creator' && session.serverRole === 'creator';
 }
 
+/**
+ * Cermin `canManageSurvey` di server/http.ts: pemilik mengelola surveinya sendiri,
+ * org_admin mengelola survei organisasinya. Survei tanpa organisasi (NULL) tidak pernah
+ * jatuh ke org_admin.
+ */
+export function canManageAs(
+  session: Session | null,
+  survey: Pick<Survey, 'owner_id' | 'organization_id'> | null | undefined,
+): boolean {
+  if (!session || !survey) return false;
+  if (survey.owner_id === session.id) return true;
+  return (
+    session.serverRole === 'org_admin' &&
+    session.organizationId !== null &&
+    survey.organization_id != null &&
+    survey.organization_id === session.organizationId
+  );
+}
+
 export function ensureAccount(account: Account | undefined): Account | undefined {
   return account;
 }
