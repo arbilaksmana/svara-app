@@ -84,7 +84,9 @@ interface Payload {
     version?: { id?: string; number?: number };
     detail?: SurveyDetail;
     publicLink?: { token?: string };
-    total?: number;
+    /** SEC-16: NULL bila di bawah ambang k-anonim. */
+    total?: number | null;
+    fewer_than?: number | null;
     items?: Array<{ code: string }>;
   };
 }
@@ -179,13 +181,18 @@ test('Ringkasan per versi tidak memuat kiriman atau pertanyaan versi lain', asyn
     return (result.body as { data: Payload['data'] }).data;
   };
 
+  // SEC-16: ringkasan di bawah ambang k-anonim menahan total dan butir per pertanyaan, jadi pemisahan
+  // versi dibuktikan pada butir yang bertahan: versi 1 belum menyebut NEW1/NEW2, versi 2 tidak menyebut OLD1.
   const v1 = await emptyFor(first.version!.id!);
-  assert.equal(v1?.total, 1, 'versi 1 harus punya tepat satu kiriman');
-  assert.deepEqual(v1?.items?.map((item) => item.code), ['OLD1']);
-
+  assert.equal(v1?.total, null, 'versi 1 di bawah ambang: total ditahan');
+  assert.equal(v1?.fewer_than, 5);
+  assert.deepEqual(v1?.items, []);
   const v2 = await emptyFor(second.version!.id!);
-  assert.equal(v2?.total, 1, 'versi 2 harus punya tepat satu kiriman');
-  assert.deepEqual(v2?.items?.map((item) => item.code).sort(), ['NEW1', 'NEW2']);
+  assert.equal(v2?.total, null, 'versi 2 di bawah ambang: total ditahan');
+  assert.equal(v2?.fewer_than, 5);
+  assert.deepEqual(v2?.items, []);
+  const keys = JSON.stringify([v1, v2]);
+  assert.ok(!keys.includes('OLD1') && !keys.includes('NEW1'), 'butir pertanyaan tidak bocor di bawah ambang');
 
   const mismatched = await call(`/surveys/${surveyId}/summary?version=v_demo1_1`, { cookie: creator });
   assert.equal(mismatched.status, 403, mismatched.text);

@@ -47,6 +47,8 @@ const VERSIONS = [
   '018_notice_survey_profile_backfill.sql',
   '019_close_superseded_published_versions.sql',
   '020_guardian_evidence_moderation.sql',
+  '021_access_grant_provenance.sql',
+  '022_drop_plaintext_link_tokens.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -187,11 +189,11 @@ test('foreign key dan unique constraint ditegakkan Postgres', async () => {
       "INSERT INTO survey_versions (id, survey_id, number, status, notice_version) VALUES ('v_pub', 's_pub', 1, 'draft', 'v1')",
     );
     await client.query(
-      "INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at) VALUES ('pl_pub1', 's_pub', 'v_pub', 'tok1', 'hash1', 'L', 'active', NULL, 'now')",
+      "INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at) VALUES ('pl_pub1', 's_pub', 'v_pub', 'hash1', 'L', 'active', NULL, 'now')",
     );
     await assert.rejects(
       client.query(
-        "INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at) VALUES ('pl_pub2', 's_pub', 'v_pub', 'tok2', 'hash2', 'L', 'active', NULL, 'now')",
+        "INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at) VALUES ('pl_pub2', 's_pub', 'v_pub', 'hash2', 'L', 'active', NULL, 'now')",
       ),
       (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23505',
     );
@@ -236,9 +238,17 @@ async function seedUpgradedDeployment(): Promise<void> {
       VALUES ('v_real', 's_real', 1, 'published', '1.0', '2026-11-01T00:00:00Z');
       UPDATE surveys SET current_version_id = 'v_real' WHERE id = 's_real';
     `);
+    // Kolom `token` mentah (SEC-10) masih ada bila helper dipanggil sebelum 022; setelah 022 hanya
+    // `token_hash` yang diterima.
+    const legacyToken = await client.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'public_links' AND column_name = 'token'",
+    );
     await client.query(
-      `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
-       VALUES ('pl_real', 's_real', 'v_real', 'token-nyata', $1, 'Umum', 'active', NULL, '2026-11-01T00:00:00Z')`,
+      legacyToken.rowCount
+        ? `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
+           VALUES ('pl_real', 's_real', 'v_real', 'token-nyata', $1, 'Umum', 'active', NULL, '2026-11-01T00:00:00Z')`
+        : `INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at)
+           VALUES ('pl_real', 's_real', 'v_real', $1, 'Umum', 'active', NULL, '2026-11-01T00:00:00Z')`,
       [createHash('sha256').update('token-nyata').digest('hex')],
     );
   } finally {

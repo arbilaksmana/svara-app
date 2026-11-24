@@ -2,13 +2,14 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
-import { clientIp, parseCookies, rateLimit, secureCookie, type AuthedRequest } from '../security.ts';
+import { clientIp, parseCookies, publicTokenShape, rateLimit, secureCookie, type AuthedRequest } from '../security.ts';
 import {
   ApiError,
   asString,
   auditPublic,
   fail,
   newId,
+  noticeRowFor,
   pathParam,
   payloadHash,
   sendError,
@@ -172,15 +173,24 @@ async function questionRows(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
 }
 
-async function optionRows(questionId: string): Promise<OptionRow[]> {
-  return all<OptionRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
-}
-
 async function publicQuestions(versionId: string): Promise<{ questions: PublicQuestion[]; options: PublicOption[] }> {
   const questions: PublicQuestion[] = [];
   const options: PublicOption[] = [];
-  for (const question of await questionRows(versionId)) {
-    const questionOptions = await optionRows(question.id);
+  const rows = await questionRows(versionId);
+  const byQuestion = new Map<string, OptionRow[]>();
+  if (rows.length > 0) {
+    const placeholders = rows.map(() => '?').join(', ');
+    for (const option of await all<OptionRow>(
+      `SELECT * FROM question_options WHERE question_id IN (${placeholders}) ORDER BY question_id, ord`,
+      ...rows.map((row) => row.id),
+    )) {
+      const bucket = byQuestion.get(option.question_id);
+      if (bucket) bucket.push(option);
+      else byQuestion.set(option.question_id, [option]);
+    }
+  }
+  for (const question of rows) {
+    const questionOptions = byQuestion.get(question.id) ?? [];
     questions.push({
       id: question.id,
       code: question.code,
@@ -235,7 +245,7 @@ interface PolicyNotice {
 }
 
 async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
-  const row = survey.organization_id
+  let row = survey.organization_id
     ? await get<Omit<NoticeSource, 'source'>>(
         `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
                 policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
@@ -249,17 +259,21 @@ async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
            FROM platform_profile WHERE id = 'platform'`,
       );
   if (!row) fail(409, 'policy_source_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+  // UIX-08: kontak pengendali yang dapat dipakai adalah kolom organisasi survei; bila belum diisi,
+  // pengelola platform yang menjadi kanal. Notice tidak menyalin alamat platform diam-diam.
+  if (row.data_request_contact === null) {
+    const platform = await get<{ data_request_contact: string | null }>(
+      "SELECT data_request_contact FROM platform_profile WHERE id = 'platform'",
+    );
+    row = { ...row, data_request_contact: platform?.data_request_contact ?? null };
+  }
   return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
 }
 
 async function noticeRow(source: NoticeSource, version: string): Promise<PolicyNotice | undefined> {
-  return source.source === 'organization'
-    ? get<PolicyNotice>(
-        'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
-        source.id,
-        version,
-      )
-    : get<PolicyNotice>('SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1', version);
+  // Aturan pemilihan baris yang sama dipakai bootstrap (`surveyNoticesFor`), jadi layar creator dan
+  // pengantar responden tidak dapat menampilkan notice versi yang berbeda.
+  return noticeRowFor(source.source, source.id, version);
 }
 
 /**
@@ -293,11 +307,17 @@ function invitationExpired(expiresAt: string | null): boolean {
   return Number.isNaN(at) || at < Date.now();
 }
 
+// SEC-10: path token tidak pernah dibandingkan dengan kolom token; hanya hash yang dicari. ID undangan
+// hasil penukaran kode (SEC-09) adalah referensi, bukan kredensial, dan dibaca lewat kuncinya.
 async function invitationForToken(token: string): Promise<InvitationRow | undefined> {
+  const shape = publicTokenShape(token);
+  if (shape === 'invitation_id') return get<InvitationRow>('SELECT * FROM invitations WHERE id = ?', token);
+  if (shape !== 'invitation') return undefined;
   return get<InvitationRow>('SELECT * FROM invitations WHERE token_hash = ?', sha256Hex(token));
 }
 
 async function linkForToken(token: string): Promise<LinkRow | undefined> {
+  if (publicTokenShape(token) !== 'link') return undefined;
   return get<LinkRow>('SELECT * FROM public_links WHERE token_hash = ?', sha256Hex(token));
 }
 
@@ -477,6 +497,10 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
       text: typeof row.text === 'string' ? row.text : null,
     });
   }
+  // Opsi seluruh versi sudah dimuat `publicQuestions`; jangan baca ulang tabel opsi per pertanyaan.
+  const optionsByQuestion = new Map<string, OptionRow[]>();
+  for (const question of context.questions) optionsByQuestion.set(question.id, []);
+  for (const option of context.options) optionsByQuestion.get(option.question_id)?.push(option);
   const known = new Set(context.questions.map((question) => question.code));
   for (const code of byCode.keys()) {
     if (!known.has(code)) fail(422, 'unknown_question', `Pertanyaan ${code} bukan bagian dari versi ini.`, { code });
@@ -496,7 +520,7 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
       result.push({ question, option: null, text, skipped: false });
       continue;
     }
-    const options = await optionRows(question.id);
+    const options = optionsByQuestion.get(question.id) ?? [];
     let option = options.find((item) => item.id === input?.option_id) ?? null;
     if (!option && input?.option_id) {
       fail(422, 'invalid_option', `Opsi untuk ${question.code} bukan bagian dari pertanyaan ini.`, { code: question.code });
@@ -779,8 +803,8 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
     }
     const code = asString(req.body?.code ?? '', 'code', 80).toUpperCase();
     if (!code) fail(422, 'validation_error', 'Kode undangan wajib diisi.');
-    const invitation = await get<{ token: string; status: string; expires_at: string | null; survey_id: string; version_id: string }>(
-      'SELECT token, status, expires_at, survey_id, version_id FROM invitations WHERE code = ?',
+    const invitation = await get<{ id: string; status: string; expires_at: string | null; survey_id: string }>(
+      'SELECT id, status, expires_at, survey_id FROM invitations WHERE code = ?',
       code,
     );
     if (!invitation) fail(404, 'invitation_not_found', 'Kode undangan tidak dikenal.');
@@ -788,7 +812,11 @@ publicRouter.post('/public/invitations/resolve', async (req: AuthedRequest, res:
     if (invitationExpired(invitation.expires_at)) {
       fail(409, 'invitation_expired', 'Undangan ini sudah kedaluwarsa.');
     }
-    res.json({ data: { token: invitation.token, url: `/s/${invitation.token}` } });
+    // SEC-09: token hanya disimpan sebagai hash, jadi penukaran kode mengembalikan URL formulir yang
+    // menyelesaikan token di server; token undangan mentah tidak pernah menyeberang ke klien.
+    await auditPublic('Tukar kode undangan', `${invitation.survey_id} · ${invitation.id}`, 'berhasil');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ data: { url: `/s/${invitation.id}` } });
   } catch (error) {
     sendError(res, error);
   }
@@ -982,21 +1010,80 @@ publicRouter.get('/public/surveys/:token/receipt/:responseId', async (req: Authe
   }
 });
 
+/**
+ * BF-10: halaman kebijakan publik dibaca dari data kebijakan yang berlaku — organisasi dan profil
+ * platform — bukan dari tabel `profiles`/`notices` legacy yang dipertahankan hanya untuk seed dan
+ * pembacaan historis. Kontak diambil dari profil yang sama; placeholder hanya bila tidak satu pun
+ * organisasi mengisi kontak, dan ditandai `synthetic_placeholder`.
+ */
 publicRouter.get('/public/policy', async (_req: AuthedRequest, res: Response) => {
   try {
-    const profiles = await all<Record<string, unknown>>('SELECT * FROM profiles ORDER BY id');
-    const notices = await all<Record<string, unknown>>('SELECT * FROM notices ORDER BY profile_id, effective_date DESC');
-    const contact = profiles
-      .map((profile) => profile.data_request_contact)
-      .find((value): value is string => typeof value === 'string' && value.length > 0);
+    const organizations = await all<{
+      id: string;
+      name: string;
+      organization_type: string;
+      policy_url: string;
+      terms_url: string;
+      retention_days: number | null;
+      data_request_contact: string | null;
+      cross_border_transfer: number | null;
+      notice_version: string;
+    }>(
+      `SELECT id, name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
+              cross_border_transfer, notice_version
+         FROM organizations ORDER BY name, id`,
+    );
+    const platform = await get<{
+      organization_name: string;
+      organization_type: string;
+      policy_url: string;
+      terms_url: string;
+      retention_days: number | null;
+      data_request_contact: string | null;
+      cross_border_transfer: number | null;
+      notice_version: string;
+    }>(
+      `SELECT organization_name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
+              cross_border_transfer, notice_version
+         FROM platform_profile WHERE id = 'platform'`,
+    );
+    const sources = [
+      ...organizations.map((row) => ({
+        source: 'organization' as const,
+        id: row.id,
+        organization_name: row.name,
+        organization_type: row.organization_type,
+        policy_url: row.policy_url,
+        terms_url: row.terms_url,
+        retention_days: row.retention_days,
+        data_request_contact: row.data_request_contact,
+        cross_border_transfer: row.cross_border_transfer === null ? null : row.cross_border_transfer === 1,
+        notice_version: row.notice_version,
+      })),
+      ...(platform
+        ? [{
+            source: 'platform' as const,
+            id: 'platform',
+            organization_name: platform.organization_name,
+            organization_type: platform.organization_type,
+            policy_url: platform.policy_url,
+            terms_url: platform.terms_url,
+            retention_days: platform.retention_days,
+            data_request_contact: platform.data_request_contact,
+            cross_border_transfer: platform.cross_border_transfer === null ? null : platform.cross_border_transfer === 1,
+            notice_version: platform.notice_version,
+          }]
+        : []),
+    ];
+    const contact = sources
+      .map((row) => row.data_request_contact)
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       data: {
-        profiles,
-        notices,
+        sources,
         data_request_contact: contact ?? 'privasi@organisasi.contoh',
-        effective_date: '2026-11-17',
-        synthetic_placeholder: true,
+        synthetic_placeholder: contact === undefined,
       },
     });
   } catch (error) {

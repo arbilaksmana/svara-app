@@ -52,11 +52,15 @@ Prasyarat: Node.js 24 atau lebih baru, pnpm 11.5.2 (dikunci di `packageManager`,
 
 ```bash
 pnpm install --frozen-lockfile
+cp .env.example .env          # sesuaikan DATABASE_URL dan POSTGRES_PORT bila perlu
 docker compose up -d db
-export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara'
 SEED_DEMO=1 pnpm db:reset
 pnpm dev
 ```
+
+`pnpm db:*` dan `pnpm dev` sama-sama membaca `.env`. Nilai yang diekspor di shell tetap menang,
+dan `TEST_DATABASE_URL` selalu menang atas keduanya sehingga `pnpm test` tidak pernah menyentuh
+basis data dev.
 
 PowerShell:
 
@@ -108,7 +112,7 @@ scripts/         Smoke test web
 ```
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
-- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`019`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
+- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`022`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
 - `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
@@ -131,6 +135,7 @@ scripts/         Smoke test web
 - Persetujuan wajib tercatat di server sebelum metadata formulir atau pengiriman diproses. `notice_version` diambil dari sumber kebijakan survei: `organizations` untuk survei berlingkup organisasi, `platform_profile` untuk survei individual.
 - Persetujuan responden hanya berlaku pada versi, tautan atau undangan, dan sesi browser saat persetujuan dicatat. Klien API perlu meneruskan cookie HttpOnly `svara_respondent` dari penerbitan persetujuan ke permintaan formulir dan kiriman.
 - Persetujuan mengizinkan satu respons final dalam 24 jam. Retry identik dari sesi yang sama tetap mengembalikan bukti yang sama. Jika persetujuan lama belum dipakai saat migrasi `012`, responden harus mencatat persetujuan baru; migrasi tidak mengubah bukti kiriman lama.
+- Tab bersama: masuk langsung ke `/s/:token/form` atau `/s/:token/review` saat masih ada persetujuan/draf token itu menampilkan pilihan **Lanjutkan isian** atau **Mulai sebagai responden baru** (`attemptGateNeeded` di `src/lib/draft.ts`). Pilihan responden baru membuang persetujuan, draf, kunci kirim, dan bukti pengiriman token itu; bukti respons final yang baru tetap disimpan setelah pembersihan.
 - Izin baca individual, ekspor, dan teks bebas terpisah per akun dan survei. Ekspor tanpa izin ditolak `403` dan dicatat.
 - Permintaan data dari formulir publik di `/privacy` tercatat `pending`. `PATCH /admin/data-requests/:id` menolak status `handled` tanpa `response_channel` (`422 response_evidence_required`); kanal balasan, `responded_by`, dan `responded_at` menjadi jejak bahwa pemohon sudah dibalas. Di `/admin/requests`, status **Selesai** meminta kanal balasan sebelum disimpan, dan kanal yang sudah tersimpan tetap terpilih saat baris dibuka lagi.
 - Satu-satunya peran akun adalah `super_admin`, `org_admin`, dan `creator`. Responden tidak memakai akun; peran `authorized_officer` sudah tidak ada dan ditolak `422` oleh `PATCH /admin/accounts/:id`.
@@ -142,6 +147,8 @@ scripts/         Smoke test web
 - Pemulihan bukti memerlukan kunci idempotensi dan sesi responden yang mengonsumsi persetujuan. Setelah memuat ulang halaman tinjau, sesi itu dapat mengirim ulang jawaban identik dengan kunci yang sama tanpa membuat respons baru; formulir pengisian tetap terkunci.
 - Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
 - Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
+- **Token tautan dan undangan hanya disimpan sebagai hash** (SEC-09/SEC-10/BR-10, migrasi `022_drop_plaintext_link_tokens.sql`). `public_links.token_hash` dan `invitations.token_hash` adalah satu-satunya pembanding; path `/s/:token` hanya menerima bentuk yang pernah diterbitkan (tautan `pl_` + 16 karakter base64url, undangan 24 karakter) atau ID undangan `inv_…` hasil penukaran kode, dan bentuk lain ditolak `404` tanpa query. Token keluar sekali pada respons penerbitan: `POST /surveys/:id/invitations` dan `POST /surveys/:id/publish` (tautan umum baru). Tautan umum dapat dicetak ulang lewat `POST /surveys/:id/public-link/token`, yang menerbitkan token baru dan mematikan yang lama. Bootstrap tidak lagi memuat token undangan/tautan umum, dan `POST /public/invitations/resolve` mengembalikan `url` formulir berisi ID undangan, bukan token mentah. Kode undangan 32 bit (`UND-` + 8 heksadesimal) agar tidak dapat ditebak dalam hitungan jam; batas percobaan resolver tetap 20 per 10 menit per alamat, dan pertukaran kode yang berhasil diaudit.
+- `GET /public/policy` membaca kontak dan halaman kebijakan dari `organizations` dan `platform_profile` (`data.sources`), bukan tabel `profiles`/`notices` legacy; `synthetic_placeholder` hanya `true` bila tidak satu pun organisasi mengisi `data_request_contact` (BF-10).
 
 ## Organisasi dan lingkup
 
@@ -165,14 +172,20 @@ Apa artinya untuk visibilitas (`canManageSurvey` dan `accessibleSurveys` di `ser
 
 | Akun | Daftar survei | Mengelola |
 | --- | --- | --- |
-| `super_admin` | Semua survei | Semua survei |
+| `super_admin` | Semua survei | Tidak ada (lihat catatan) |
 | `org_admin` | Survei dengan `organization_id` organisasinya | Survei organisasinya saja; survei `organization_id` NULL tidak pernah jatuh ke `org_admin` |
 | `creator` | Survei miliknya dan survei yang diberi grant ke akun itu | Survei miliknya saja; grant tidak memberi hak kelola |
 | Selain itu | Survei yang diberi grant | Tidak ada, hanya grant |
 
-Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`canManageSurvey`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
+Mengelola berarti pemilik (`owner_id`) yang masih anggota organisasi survei, atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`canManageSurvey`). Pemilik survei organisasi yang keluar dari organisasi itu kehilangan hak kelola pada permintaan berikutnya tanpa perubahan baris survei (BR-11); `org_admin` organisasi tersebut tetap mengelola. Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
 
-`GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
+**SEC-16: ambang k-anonim ringkasan.** `GET /surveys/:id/summary` menahan total dan butir per pertanyaan (termasuk `free_text_count`) selama versi tersebut belum menerima 5 respons (`SUMMARY_MIN_RESPONSES` di `server/summary.ts`): `total` menjadi `null`, `items` kosong, dan `fewer_than: 5` menjelaskan jumlah yang ditahan. Ambang berlaku untuk semua peran yang boleh membaca ringkasan. Parameter kelompok kecil yang lebih rinci tetap terbuka (PRD §9.5).
+
+**BR-04:** `super_admin` melihat seluruh survei lewat `GET /surveys` dan metrik operasional, tetapi `canManageSurvey` tidak memberinya hak kelola: penyimpanan, publikasi, undangan, pengaturan, maupun ekspor memerlukan grant. Pemberian grant kepada akun `super_admin` ditolak `422 self_grant_forbidden` (SEC-15), jadi super admin tidak dapat menambah izin baca jawaban untuk dirinya sendiri lewat API.
+
+`GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Grant yang lewat `expires_at` tidak ikut menyumbang survei.
+
+**BR-06: grant bertujuan, berpemberi, dan bermasa berlaku.** `PUT /admin/grants/:accountId` dan `PUT /admin/grants` mewajibkan `purpose` (3–300 karakter) pada setiap grant, dan menerima `expires_at` ISO-8601 berzona waktu (`null` = tanpa batas; waktu di masa lalu ditolak `422` — grant dicabut dengan menghapusnya). `granted_by` diisi server dari akun super admin pemanggil, tidak dapat dipalsukan lewat payload. Grant kedaluwarsa tetap tersimpan beserta riwayatnya, tetapi `grantFor`/`accessibleSurveys` mengabaikannya, jadi izin baca, ekspor, dan daftar survei menyusut otomatis tanpa menghapus baris. Kolom ditambahkan migrasi `021_access_grant_provenance.sql` (nullable, aman untuk grant lama); detail grant untuk setiap perubahan tercatat di `audit_logs.metadata.grants` (SEC-14). Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
 
 Daftar creator memberi label "Diberikan akses" pada survei bukan miliknya. Baris tersebut hanya menawarkan "Lihat hasil"; navigasi surveinya hanya "Hasil", tanpa Editor, Pratinjau, Publikasi, Bagikan, Pengaturan, atau Riwayat. Hak baca hasil dan ekspor tetap diperiksa API sesuai grant dan pengaturan survei.
 
@@ -199,6 +212,8 @@ Batas yang belum tertutup: tabel `responses` tidak merujuk `consent_records`, se
 - Setiap survei membaca tepat satu sumber kebijakan, dipilih dari `surveys.organization_id`: baris `organizations` bila tidak NULL, baris `platform_profile` bila NULL. Tidak ada fallback diam-diam ke profil lain (`noticeVersionFor` dan `surveyProfileFor` di `server/http.ts`; `surveyProfileFor` dipakai detail survei dan bootstrap).
 - `notice_version` versi yang diterbitkan berasal dari sumber yang sama saat draf dibuat (`noticeVersionFor`, dipanggil `POST /surveys` dan `PUT /surveys/:id` saat draf dibuat).
 - Publish menolak `422 notice_version_unavailable` bila notice versi draf belum tersedia di sumbernya, sehingga tidak ada versi terbit yang tautannya langsung gagal.
+- Bootstrap membawa `surveyNotices` berkunci id survei: baris notice dari katalog sumber survei itu pada `notice_version` versi survei saat ini (draf bila ada), dibaca lewat `noticeRowFor`/`surveyNoticesFor` yang sama dengan halaman publik. Layar **Pengaturan** creator memakai peta ini, bukan daftar `notices` legacy yang berkunci `profile_id` (NR-04).
+- BF-05: `PUT /org/profile` menerima `notice_version`. Versi harus sudah ada di `organization_notices` organisasi itu, selain itu `422 notice_version_unavailable` dengan `details.available_versions`. Saat versi berubah, draf organisasi yang belum punya jawaban ikut memakai versi baru; draf yang sudah punya respons tetap pada versi notice yang disetujui responden. Respons memuat `notice_change: { from, to, drafts_followed, drafts_kept }` dan audit mencatat jumlah keduanya. Duplikat survei memakai `notice_version` sumber organisasi saat itu (bukan versi yang tersimpan pada versi sumber), dan ditolak `422 notice_version_unavailable` bila notice versi itu tidak ada.
 - Migrasi `018_notice_survey_profile_backfill.sql` mengoreksi backfill `013` untuk data hasil upgrade: notice lingkup diisi dari teks yang dulu ditampilkan per survei (`surveys.profile_id`, versi persis atau notice terbaru profil itu) di bawah label `survey_versions.notice_version`; `notice_version` organisasi/platform yang belum dipakai survei diisi dari profil default `POST /surveys`. Sumbernya tercatat di `organization_notice_sources`/`platform_notice_sources` (`survey_profile`); baris yang sudah ada tidak ditimpa, dan survei berprofil tanpa notice tetap gagal-tertutup (`500 notice_version_unavailable`).
 - Migrasi `019_close_superseded_published_versions.sql` merapikan data dari `main`, yang publish-nya tidak menutup versi terbit sebelumnya. Untuk setiap survei dengan lebih dari satu versi `published`, hanya versi bernomor terbesar yang tetap terbit; versi terbit lain menjadi `closed` (`closed_at` = waktu migrasi), dan tautan publiknya yang masih `active` dan belum kedaluwarsa menjadi `closed` dengan `closed_reason = 'superseded'` sehingga menyajikan versi terbit terbaru. Respons, persetujuan, undangan, isi instrumen, dan status survei tidak diubah; undangan pada versi yang ditutup tampil `closed`. Idempoten; survei dengan satu versi terbit tidak tersentuh.
 
@@ -210,6 +225,11 @@ Batas yang belum tertutup: tabel `responses` tidak merujuk `consent_records`, se
 - Setiap baca individual dan ekspor dicatat dengan `account_id` pelaku serta `organization_id` sesi, berhasil maupun ditolak (`audit` di `server/http.ts`, diuji di test yang sama).
 - Ekspor CSV memuat baris per responden, jadi memerlukan izin ekspor sekaligus izin baca individual yang berlaku (`canExportIndividual`). Pemegang grant `can_export` tanpa `can_read_individual`, atau dengan `allow_individual` mati, mendapat `403 forbidden_export_individual`; kodebook cukup dengan izin ekspor. Halaman hasil menonaktifkan **Unduh CSV** beserta alasannya untuk akun seperti itu, sementara **Unduh kodebook** tetap aktif.
 - Audit ekspor CSV fail-closed: baris `Mulai ekspor CSV` ditulis sebelum byte pertama dikirim (gagal ditulis → `500` tanpa data), lalu hasil akhir (selesai atau terputus) dicatat sesudahnya. Metadata mencatat nama berkas, kolom, dan header `Accept` permintaan; penerima dan tujuan berkas setelah diunduh tidak dicatat.
+
+### Kanal kontak pengendali
+
+- Pemberitahuan pada pengantar responden menampilkan kanal kontak dari `organizations.data_request_contact` organisasi survei; bila kolom itu NULL, kanal `platform_profile.data_request_contact` yang dipakai (`noticeSourceFor` di `server/routes/public.ts`). Teks `contact` pada baris notice tidak lagi dipakai sebagai kanal karena hanya salinan saat notice disediakan.
+- Email dirender sebagai `mailto:`, URL sebagai tautan; nilai lain (mis. nomor telepon) tetap teks. Halaman `/privacy` membaca kontak deployment dari `GET /public/policy` dan menampilkan kanal yang sama; bila belum ditetapkan, halaman menyatakan demikian alih-alih menampilkan alamat contoh.
 
 ### Permukaan admin organisasi
 
@@ -298,13 +318,13 @@ Semua konfigurasi dibaca dari environment. Contoh ada di `.env.example`; jangan 
 | `COOKIE_SECURE` | kosong | `1` = cookie sesi `svara_session` dan cookie responden `svara_respondent` selalu memakai `Secure`. Kosong = `Secure` dipakai bila `req.secure` benar (TLS langsung ke API, atau `X-Forwarded-Proto: https` dari ingress di jaringan `TRUST_PROXY`) **atau** `NODE_ENV=production` dengan seluruh `APP_ORIGIN` `https://`; jadi produksi HTTPS tidak perlu mengisi variabel ini. `0` mematikan paksaan default produksi tersebut, tetapi `req.secure` tetap memberi `Secure`. Jangan mengisi `TRUST_PROXY` hanya demi `X-Forwarded-Proto` bila tidak ada ingress yang menambahkan atau menimpa header proxy, karena klien lalu bisa memalsukan `X-Forwarded-For` untuk limiter. Header `X-Forwarded-Proto` dari klien tanpa `TRUST_PROXY` diabaikan |
 | `ENABLE_HSTS` | kosong | `Strict-Transport-Security: max-age=15552000; includeSubDomains` dikirim hanya untuk permintaan HTTPS. Kosong = aktif bila `NODE_ENV=production` dan seluruh `APP_ORIGIN` `https://`; `1` memaksa, `0` mematikan. API dan proxy Next memakai aturan yang sama |
 | `SESSION_TTL_HOURS` | `8` | Umur sesi (jam) |
-| `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak. Versi yang pernah terbit (termasuk yang sudah ditutup) tetap terbaca dan respons memuat `survey_version_status`; draf dan survei di luar cakupan organisasi `404` |
+| `INTEGRATION_TOKEN` | kosong | Bearer untuk `/api/v1/integration/survey-data`; tanpa nilai, endpoint selalu menolak. Nilai contoh `.env.example` (`ubah-token-integrasi-lokal`) ditolak: API berhenti saat start (L-07). Versi yang pernah terbit (termasuk yang sudah ditutup) tetap terbaca dan respons memuat `survey_version_status`; draf dan survei di luar cakupan organisasi `404` |
 | `INTEGRATION_ORGANIZATION_ID` | kosong | ID organisasi cakupan `INTEGRATION_TOKEN`. Saat startup API, hash token dicatat di `integration_token_scopes` untuk organisasi ini; token tanpa cakupan ditolak `403 forbidden_service_scope` |
 | `GUARDIAN_EVIDENCE_DIR` | `./var/guardian-evidence` | Direktori penyimpanan berkas bukti wali. Gunakan volume persisten di deployment; berkas tidak disimpan di basis data dan tidak disajikan lewat URL publik |
 | `DATA_REQUEST_RETENTION_DAYS` | `365` | Masa simpan permintaan data dalam hari (bilangan bulat >= 1) untuk `pnpm retention:data-requests`; nilai tidak valid menghentikan skrip dengan exit code 1 |
 | `EXPORT_BATCH_SIZE` | `500` | Jumlah respons per batch saat ekspor CSV di-stream; hanya dapat menurunkan dari 500 dan dipakai test untuk memaksa banyak batch. Biarkan kosong di deployment |
 | `SEED_DEMO` | `0` | Harus `1` untuk memuat data demo; ditolak saat `NODE_ENV=production` |
-| `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis; hanya dipakai bila `SEED_DEMO=1` |
+| `SEED_PASSWORD` | kata sandi seed lokal | Sandi akun sintetis; hanya dipakai bila `SEED_DEMO=1`. Nilai contoh `.env.example` (`ubah-sandi-seed-lokal`) ditolak saat API start (L-07) |
 | `AC15_ADMIN_DATABASE_URL` | `DATABASE_URL` | Koneksi berizin `CREATE DATABASE` untuk demo AC15 |
 
 ### Bootstrap admin
@@ -460,10 +480,12 @@ Organisasi sintetis (`seedDemoIfEmpty` di `server/seed-data.ts`):
 
 `platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 
-- `link-umum-demo`: survei SMK, mode wali, pemberitahuan sintetis.
-- `link-umum-perpus`: survei perpustakaan, persetujuan diri.
-- `undangan-demo`: undangan satu kali.
+- `pl_demoTautanUmum1A`: tautan umum survei SMK, mode wali, pemberitahuan sintetis.
+- `pl_demoTautanPrps01`: tautan umum survei perpustakaan, persetujuan diri.
+- `undanganDemo01AAAAAAAAAA`: undangan satu kali; kodenya `UND-01-AKTIF`.
 - Kode undangan individual juga bisa dibuka dari halaman masuk lewat "Saya memiliki kode undangan".
+
+Token di atas adalah konstanta demo di kode seed (`server/seed-data.ts`); basis data hanya menyimpan hash-nya, sama seperti token yang diterbitkan aplikasi.
 
 ## Skrip demo
 

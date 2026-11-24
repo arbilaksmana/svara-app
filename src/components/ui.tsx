@@ -533,6 +533,23 @@ export function PolicyLinks({ className = '' }: { className?: string }) {
   );
 }
 
+/**
+ * UIX-08: kanal permintaan data yang dapat dipakai. Email menjadi `mailto:`, URL menjadi tautan biasa;
+ * nilai lain (mis. nomor telepon) tetap teks supaya tidak menyesatkan pembaca layar.
+ */
+export function ContactChannel({ contact, empty = 'Belum ditetapkan pengendali.' }: { contact: string | null; empty?: string }) {
+  const value = contact?.trim() ?? '';
+  if (!value) return <span className="text-muted">{empty}</span>;
+  const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const href = email ? `mailto:${value}` : /^https?:\/\//.test(value) ? value : null;
+  if (!href) return <>{value}</>;
+  return (
+    <a href={href} className="break-words underline underline-offset-2 hover:text-ink">
+      {value}
+    </a>
+  );
+}
+
 /** Daftar kode item ditampilkan dalam mono, motif identitas produk. */
 export function Code({ children }: { children: ReactNode }) {
   return <span className="font-mono text-caption font-bold tracking-mono text-n700">{children}</span>;

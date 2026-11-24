@@ -919,10 +919,11 @@ export function PublishPage({ id }: { id: string }) {
   const draft = draftVersionFor(id);
   const hasDraft = Boolean(draft);
   const published = publishedVersionFor(id);
-  // Tautan aktif versi terbit dibaca dari bootstrap agar kontrol berbagi tetap ada setelah halaman dimuat ulang.
-  const shareToken = publishedToken
-    ?? allPublicLinks().find((item) => item.survey_id === id && item.version_id === published?.id && item.status === 'active')?.token
-    ?? null;
+  // SEC-10: token tautan umum tidak lagi ada di bootstrap. Keberadaan tautan aktif versi terbit dibaca
+  // dari baris tautannya; tokennya dicetak ulang di halaman pembagian.
+  const hasShareLink = Boolean(
+    allPublicLinks().find((item) => item.survey_id === id && item.version_id === published?.id && item.status === 'active'),
+  );
   const version = draft ?? editorVersionFor(id);
   const items = version ? questionsFor(version.id) : [];
   const duplicateCodes = items
@@ -1031,16 +1032,22 @@ export function PublishPage({ id }: { id: string }) {
                 {publishedToken ? 'Versi sudah diterbitkan' : hasDraft ? 'Terbitkan versi' : 'Tidak ada draf'}
               </Button>
               <ActionLink to={ROUTES.creatorEdit(id)} variant="secondary">Kembali ke editor</ActionLink>
-              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!shareToken && !published} disabledReason="Terbitkan satu versi terlebih dahulu">
+              <ActionLink to={link(ROUTES.creatorShare(id))} variant="secondary" disabled={!hasShareLink && !published} disabledReason="Terbitkan satu versi terlebih dahulu">
                 Kelola tautan
               </ActionLink>
             </div>
             <p className="text-caption text-muted">
               {session ? `Diterbitkan oleh ${session.name}. ` : ''}Perubahan isi setelah terbit memerlukan versi baru.
             </p>
-            {shareToken && (
-              <Banner tone={publishedToken ? 'success' : 'info'} title="Tautan responden">
-                <PlainLink to={ROUTES.respondentIntro(shareToken)}>/s/{shareToken}</PlainLink>
+            {publishedToken && (
+              <Banner tone="success" title="Tautan responden">
+                <PlainLink to={ROUTES.respondentIntro(publishedToken)}>/s/{publishedToken}</PlainLink>
+                <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Buka halaman pembagian</ActionLink></div>
+              </Banner>
+            )}
+            {!publishedToken && hasShareLink && (
+              <Banner tone="info" title="Tautan umum sudah ada">
+                Token tautan umum disimpan sebagai hash dan tidak ditampilkan lagi di sini. Tampilkan token baru dari halaman pembagian.
                 <div className="mt-2"><ActionLink to={ROUTES.creatorShare(id)} variant="secondary">Buka halaman pembagian</ActionLink></div>
               </Banner>
             )}

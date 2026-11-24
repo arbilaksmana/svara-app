@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { demoSeedEnabled } from '../seed-policy.ts';
+import { placeholderSecretsProblem } from '../placeholder-secrets.ts';
 import { accountCount, closeTestDatabase, databaseUrl, resetTestDatabase } from './test-db.ts';
 
 const ROOT = resolve('.');
@@ -54,6 +55,21 @@ test('seed demo hanya aktif dengan SEED_DEMO=1 dan ditolak di production', () =>
   assert.equal(demoSeedEnabled({ NODE_ENV: 'test', SEED_DEMO: '1' }), true);
   assert.throws(() => demoSeedEnabled({ NODE_ENV: 'test', SEED_DEMO: 'true' }), /SEED_DEMO/);
   assert.throws(() => demoSeedEnabled({ NODE_ENV: 'production', SEED_DEMO: '1' }), /production/);
+});
+
+test('L-07: nilai contoh .env.example ditolak saat API start', () => {
+  assert.match(placeholderSecretsProblem({ INTEGRATION_TOKEN: 'ubah-token-integrasi-lokal' }) ?? '', /INTEGRATION_TOKEN/);
+  assert.match(placeholderSecretsProblem({ SEED_PASSWORD: ' ubah-sandi-seed-lokal ' }) ?? '', /SEED_PASSWORD/);
+  assert.equal(placeholderSecretsProblem({ INTEGRATION_TOKEN: 'tok-acak', SEED_PASSWORD: 'sandi-acak' }), null);
+  assert.equal(placeholderSecretsProblem({ INTEGRATION_TOKEN: '', SEED_PASSWORD: undefined }), null);
+  const result = run(INDEX, {
+    NODE_ENV: 'test',
+    PORT: '3197',
+    INTEGRATION_TOKEN: 'ubah-token-integrasi-lokal',
+    SEED_PASSWORD: 'ubah-sandi-seed-lokal',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /INTEGRATION_TOKEN, SEED_PASSWORD masih berisi nilai contoh/);
 });
 
 test('CLI seed menolak berjalan tanpa SEED_DEMO=1', async () => {

@@ -5,7 +5,8 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
+import { resetDemoDatabase, sourceBaseline, stopServer, waitForServer } from './demo-db.ts';
+import { evidenceProvenance } from './evidence-provenance.ts';
 
 const PORT = 3198;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
@@ -116,6 +117,8 @@ try {
   await waitForServer(server, 'server demo AC16');
 
   const token = 'link-umum-demo';
+  // SEC-02: persetujuan hanya sah untuk versi+notice yang benar-benar dirender pengantar.
+  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const createdIds: string[] = [];
   const patterns = [
     { AD01: 4, TS01: 5, K02: 'Contoh sintetis satu' },
@@ -128,6 +131,7 @@ try {
       await call(`/public/surveys/${token}/consent`, {
         method: 'POST',
         body: {
+          version_id: intro.consent_version,
           respondent_click: true,
           eligibility: true,
           guardian_evidence_ref: `DEMO-AC16-WALI-${index + 1}`,
@@ -193,11 +197,14 @@ try {
   }
   if (!createdInCsv) throw new Error('respons sintetis tidak semuanya muncul di CSV');
 
+  const provenance = evidenceProvenance();
   const report = {
     label: 'DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.',
     generated_at: new Date().toISOString(),
+    provenance,
     environment: {
       node: process.version,
+      baseline: sourceBaseline(),
       platform: `${process.platform} ${process.arch}`,
       storage: 'PostgreSQL via pg Pool',
       postgres_server_version: database.serverVersion,
@@ -247,7 +254,7 @@ try {
       '',
       ...report.limitations.map((item) => `- ${item}`),
       '',
-      `Bukti terstruktur: \`${EVIDENCE_JSON}\`.`,
+      `Bukti terstruktur: \`docs/test-evidence/ac16-walkthrough.json\` (commit \`${provenance.commit}\`, working tree ${provenance.tree}).`,
       '',
     ].join('\n'),
     'utf8',

@@ -21,14 +21,26 @@ export interface SummaryItem {
   free_text_count: number;
 }
 
+/**
+ * SEC-16: jumlah respons di bawah ambang tidak diungkap. `total` NULL dan `items` kosong, dengan
+ * `fewer_than` memberi tahu pengelola bahwa ada data yang ditahan; `null` saat ambang tercapai.
+ */
 export interface VersionSummary {
   version_id: string;
   survey_id: string;
   number: number;
   status: string;
-  total: number;
+  total: number | null;
+  fewer_than: number | null;
   items: SummaryItem[];
 }
+
+/**
+ * Ambang k-anonim ringkasan. PRD §9.5 mewajibkan pembatasan tampilan kelompok kecil tanpa menetapkan
+ * parameternya; 5 dipilih sebagai nilai terkecil yang lazim untuk k-anonimitas sederhana dan dipakai
+ * untuk semua peran (termasuk super_admin) supaya tidak ada jalur yang lebih longgar.
+ */
+export const SUMMARY_MIN_RESPONSES = 5;
 
 interface QuestionRow {
   id: string;
@@ -67,7 +79,7 @@ export async function summaryFor(versionId: string): Promise<VersionSummary> {
     versionId,
   );
   if (!version) {
-    return { version_id: versionId, survey_id: '', number: 0, status: 'unknown', total: 0, items: [] };
+    return { version_id: versionId, survey_id: '', number: 0, status: 'unknown', total: null, fewer_than: SUMMARY_MIN_RESPONSES, items: [] };
   }
   const [totalRow, questions, options, optionCounts, answeredRows] = await Promise.all([
     get<{ count: number }>('SELECT COUNT(*) AS count FROM responses WHERE version_id = ?', versionId),
@@ -100,6 +112,17 @@ export async function summaryFor(versionId: string): Promise<VersionSummary> {
     ),
   ]);
   const total = totalRow?.count ?? 0;
+  if (total < SUMMARY_MIN_RESPONSES) {
+    return {
+      version_id: version.id,
+      survey_id: version.survey_id,
+      number: version.number,
+      status: version.status,
+      total: null,
+      fewer_than: SUMMARY_MIN_RESPONSES,
+      items: [],
+    };
+  }
   const countByOption = new Map(optionCounts.map((row) => [row.option_id, Number(row.count)]));
   const answeredByQuestion = new Map(answeredRows.map((row) => [row.question_id, row]));
   const optionsByQuestion = new Map<string, SummaryOption[]>();
@@ -131,6 +154,7 @@ export async function summaryFor(versionId: string): Promise<VersionSummary> {
     number: version.number,
     status: version.status,
     total,
+    fewer_than: null,
     items,
   };
 }

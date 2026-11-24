@@ -38,7 +38,8 @@ export function RespondentCodePage() {
               }
               setBusy(true);
               void resolveInvitationCode(trimmed)
-                .then((result) => router.push(ROUTES.respondentIntro(result.token)))
+                // `url` sudah berupa `/s/<id-undangan>` dari server.
+                .then((result) => router.push(result.url))
                 .catch((reason: unknown) => {
                   setError(
                     reason instanceof ApiError

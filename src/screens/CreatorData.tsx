@@ -11,6 +11,7 @@ import {
   Checkbox,
   Code,
   ConfirmDialog,
+  ContactChannel,
   Divider,
   EmptyState,
   Field,
@@ -29,7 +30,7 @@ import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
-import { getSummary, getResponses, downloadExport, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
+import { getSummary, getResponses, downloadExport, printPublicLinkToken, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
 import { useToast } from '../components/Toast';
 import {
   allAssignments,
@@ -40,8 +41,10 @@ import {
   closeVersion,
   createInvitation,
   localGrantsFor,
+  refreshBootstrap,
   revokeInvitation,
   saveSettings,
+  surveyNoticeOf,
   surveyProfileOf,
   useStore,
 } from '../lib/store';
@@ -77,6 +80,8 @@ export function SharePage({ id }: { id: string }) {
   const invites = allInvitations().filter((invite) => invite.survey_id === id);
   const assignments = allAssignments();
   const [copied, setCopied] = useState<string | null>(null);
+  const [printedLink, setPrintedLink] = useState<string | null>(null);
+  const [printBusy, setPrintBusy] = useState(false);
 
   async function copyLink(url: string, key: string) {
     try {
@@ -135,25 +140,54 @@ export function SharePage({ id }: { id: string }) {
               Jalur umum menjamin idempotensi kiriman, bukan identitas unik manusia.
             </Banner>
             {links.length === 0 ? (
-              <Muted>Belum ada tautan umum untuk survei ini.</Muted>
+              <Muted>Belum ada tautan umum untuk survei ini. Terbitkan versi untuk membuatnya.</Muted>
             ) : (
               <ul className="flex flex-col gap-3">
                 {links.map((l) => (
                   <li key={l.id} className="rounded-md border border-n200 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-mono text-body-sm font-bold tracking-mono text-ink">/s/{l.token}</p>
+                      {printedLink && l.status === 'active' ? (
+                        <p className="font-mono text-body-sm font-bold tracking-mono text-ink break-all">/s/{printedLink}</p>
+                      ) : (
+                        <p className="text-body-sm text-muted">Token tidak ditampilkan lagi setelah dibuat.</p>
+                      )}
                       <Badge tone={l.status === 'active' ? 'success' : 'warning'}>{l.status === 'active' ? 'Aktif' : 'Tidak aktif'}</Badge>
                     </div>
                     <p className="mt-2 text-caption text-muted">{l.label}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         variant="secondary"
-                        onClick={() => void copyLink(`${window.location.origin}/s/${l.token}`, l.token)}
-                        disabled={state === 'loading' || l.status !== 'active'}
+                        onClick={() => {
+                          setPrintBusy(true);
+                          void printPublicLinkToken(id)
+                            .then((issued) => {
+                              setPrintedLink(issued.token);
+                              notify('Token tautan umum baru diterbitkan; tautan lama tidak berlaku lagi.');
+                              return refreshBootstrap();
+                            })
+                            .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Token gagal diterbitkan.', 'danger'))
+                            .finally(() => setPrintBusy(false));
+                        }}
+                        loading={printBusy}
+                        disabled={state === 'loading' || state === 'closed' || l.status !== 'active'}
                       >
-                        {copied === l.token ? 'Tersalin' : 'Salin tautan'}
+                        {printedLink ? 'Terbitkan ulang token' : 'Tampilkan token'}
                       </Button>
-                      <ActionLink to={ROUTES.respondentIntro(l.token)} variant="secondary" disabled={l.status !== 'active'} disabledReason="Tautan nonaktif">Buka sebagai responden</ActionLink>
+                      <Button
+                        variant="secondary"
+                        onClick={() => void copyLink(`${window.location.origin}/s/${printedLink}`, printedLink ?? '')}
+                        disabled={!printedLink || l.status !== 'active'}
+                      >
+                        {printedLink && copied === printedLink ? 'Tersalin' : 'Salin tautan'}
+                      </Button>
+                      <ActionLink
+                        to={ROUTES.respondentIntro(printedLink ?? '')}
+                        variant="secondary"
+                        disabled={!printedLink || l.status !== 'active'}
+                        disabledReason="Tampilkan token lebih dulu"
+                      >
+                        Buka sebagai responden
+                      </ActionLink>
                       {l.status !== 'active' && (
                         <span className="self-center text-caption text-muted">Tautan nonaktif tidak menerima jawaban.</span>
                       )}
@@ -162,6 +196,9 @@ export function SharePage({ id }: { id: string }) {
                 ))}
               </ul>
             )}
+            <p className="text-caption text-muted">
+              Token hanya disimpan sebagai hash. Simpan tautan yang dibagikan; menampilkan token menerbitkan token baru dan mematikan tautan sebelumnya.
+            </p>
           </Card>
 
           <Card className="flex flex-col gap-3">
@@ -434,7 +471,9 @@ export function ResultsPage({ id }: { id: string }) {
               </div>
               <div className="flex flex-col justify-end gap-2">
                 <Label>Total kiriman final</Label>
-                <p className="text-h2 font-bold text-ink">{loading ? '…' : summary?.total ?? 0}</p>
+                <p className="text-h2 font-bold text-ink">
+                  {loading ? '…' : summary?.total ?? (summary?.fewer_than != null ? `< ${summary.fewer_than}` : 0)}
+                </p>
               </div>
             </div>
             <p className="text-caption text-muted">
@@ -444,6 +483,11 @@ export function ResultsPage({ id }: { id: string }) {
             {denied && (
               <Banner tone="danger" title="Akses hasil ditolak">
                 Akun ini tidak memiliki izin membaca hasil pada survei ini.
+              </Banner>
+            )}
+            {!loading && summary?.fewer_than != null && (
+              <Banner tone="info" title="Hasil kelompok kecil ditahan">
+                {`Ringkasan baru ditampilkan setelah versi ini menerima sedikitnya ${summary.fewer_than} respons, agar jawaban tidak dapat menunjuk satu orang.`}
               </Banner>
             )}
           </Card>
@@ -580,7 +624,7 @@ export function ResultsPage({ id }: { id: string }) {
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="secondary"
-                disabled={!csvAllowed || denied || !summary || summary.total === 0 || loading || busy}
+                disabled={!csvAllowed || denied || !summary || !summary.total || loading || busy}
                 aria-describedby={!denied && csvBlockedReason ? 'alasan-csv-nonaktif' : undefined}
                 loading={busy}
                 onClick={() => {
@@ -639,12 +683,13 @@ export function ResultsPage({ id }: { id: string }) {
 
 export function SettingsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { settings, revision, session, notices } = useStore();
+  const { settings, revision, session } = useStore();
   void revision;
   const { state } = useScreenState('creator-settings');
   const profile = surveyProfileOf(id);
-  // Pemberitahuan dibaca dari bootstrap server, bukan fixture; tidak ada fallback ke profil lain.
-  const notice = notices.find((row) => row.profile_id === profile?.id) ?? null;
+  // NR-04: notice dipilih server dari sumber kebijakan survei ini (`surveyNotices`), sama dengan
+  // halaman publik. Daftar `notices` legacy berkunci profil, bukan survei, jadi tidak dipakai di sini.
+  const notice = surveyNoticeOf(id) ?? null;
   const survey = findSurvey(id);
   const canManage = canManageAs(session, survey);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
@@ -687,7 +732,7 @@ export function SettingsPage({ id }: { id: string }) {
                 <tr><Th>Kategori usia responden</Th><Td>{profile.respondent_age_category ? AGE_CATEGORY_LABEL[profile.respondent_age_category] : 'Belum ditetapkan'}</Td></tr>
                 <tr><Th>Mode persetujuan</Th><Td>{profile.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}</Td></tr>
                 <tr><Th>Masa retensi</Th><Td>{profile.retention_days === null ? 'Mengikuti kebijakan pengendali' : `${profile.retention_days} hari`}</Td></tr>
-                <tr><Th>Kontak permintaan data</Th><Td>{profile.data_request_contact ?? 'Lihat pemberitahuan survei'}</Td></tr>
+                <tr><Th>Kontak permintaan data</Th><Td><ContactChannel contact={profile.data_request_contact} empty="Belum ditetapkan pengendali." /></Td></tr>
                 <tr><Th>Transfer data lintas negara</Th><Td>{profile.cross_border_transfer === null ? 'Belum ditinjau' : profile.cross_border_transfer ? 'Ya' : 'Tidak'}</Td></tr>
                 <tr><Th>Kebijakan dan ketentuan</Th><Td><PlainLink to={ROUTES.privacy} className="min-h-[44px]">Kebijakan privasi</PlainLink> · <PlainLink to={ROUTES.terms} className="min-h-[44px]">Ketentuan layanan</PlainLink></Td></tr>
               </Table>

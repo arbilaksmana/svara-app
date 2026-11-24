@@ -45,9 +45,14 @@ const occupied = [];
 if (!env.DATABASE_URL) {
   problems.push('DATABASE_URL kosong. Salin .env.example ke .env, atau ekspor DATABASE_URL di shell.');
 } else if (env.DATABASE_URL.includes('@db:')) {
-  problems.push('DATABASE_URL menunjuk host `db`, yang hanya ada di dalam Docker Compose. Untuk dev lokal pakai 127.0.0.1:5432.');
-} else if (!(await listening(5432))) {
-  problems.push('PostgreSQL tidak menerima koneksi di 127.0.0.1:5432. Jalankan `docker compose up -d db`.');
+  problems.push('DATABASE_URL menunjuk host `db`, yang hanya ada di dalam Docker Compose. Untuk dev lokal pakai 127.0.0.1.');
+} else {
+  // Port diambil dari DATABASE_URL, bukan 5432 tetap: compose memetakan POSTGRES_PORT (mis. 5434).
+  const target = new URL(env.DATABASE_URL);
+  const dbPort = Number(target.port || 5432);
+  if (!(await listening(dbPort))) {
+    problems.push(`PostgreSQL tidak menerima koneksi di ${target.hostname}:${dbPort}. Jalankan ` + '`docker compose up -d db`' + '.');
+  }
 }
 
 if (await listening(WEB_PORT)) occupied.push(WEB_PORT);

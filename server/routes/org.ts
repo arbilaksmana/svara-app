@@ -113,31 +113,82 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       }
       crossBorder = body.cross_border_transfer ? 1 : 0;
     }
-    await run(
-      `UPDATE organizations
-          SET name = ?, organization_type = ?, respondent_age_category = ?, consent_mode = ?,
-              policy_url = ?, terms_url = ?, retention_days = ?, data_request_contact = ?,
-              cross_border_transfer = ?
-        WHERE id = ?`,
-      required('organization_name', current.organization_name, 200),
-      required('organization_type', current.organization_type, 50),
-      ageCategory,
-      consentMode,
-      required('policy_url', current.policy_url, 500),
-      required('terms_url', current.terms_url, 500),
-      retentionDays,
-      merged('data_request_contact', current.data_request_contact ?? '', 200) || null,
-      crossBorder,
+    // BF-05: naik versi notice hanya boleh ke teks yang sudah ada di katalog organisasi; tidak ada
+    // teks yang dikarang atau fallback ke versi lain.
+    const requestedNotice = body.notice_version === undefined ? null : asString(body.notice_version, 'notice_version', 20);
+    if (requestedNotice === '') fail(422, 'validation_error', 'notice_version wajib diisi.');
+    const noticeVersion = requestedNotice ?? current.notice_version;
+    if (!(await get<{ ok: number }>(
+      'SELECT 1 AS ok FROM organization_notices WHERE organization_id = ? AND version = ?',
       organizationId,
-    );
+      noticeVersion,
+    ))) {
+      const versions = (await all<{ version: string }>(
+        'SELECT version FROM organization_notices WHERE organization_id = ? ORDER BY version',
+        organizationId,
+      )).map((row) => row.version);
+      fail(
+        422,
+        'notice_version_unavailable',
+        `Notice organisasi versi ${noticeVersion} belum tersedia. ` +
+          (versions.length ? `Versi yang tersedia: ${versions.join(', ')}.` : 'Belum ada notice organisasi sama sekali.'),
+        { notice_version: noticeVersion, available_versions: versions },
+      );
+    }
+    const noticeChange = await withTx(async () => {
+      await run(
+        `UPDATE organizations
+            SET name = ?, organization_type = ?, respondent_age_category = ?, consent_mode = ?,
+                policy_url = ?, terms_url = ?, retention_days = ?, data_request_contact = ?,
+                cross_border_transfer = ?, notice_version = ?
+          WHERE id = ?`,
+        required('organization_name', current.organization_name, 200),
+        required('organization_type', current.organization_type, 50),
+        ageCategory,
+        consentMode,
+        required('policy_url', current.policy_url, 500),
+        required('terms_url', current.terms_url, 500),
+        retentionDays,
+        merged('data_request_contact', current.data_request_contact ?? '', 200) || null,
+        crossBorder,
+        noticeVersion,
+        organizationId,
+      );
+      if (noticeVersion === current.notice_version) return null;
+      // Draf tanpa jawaban belum pernah ditampilkan ke responden: mengikuti notice baru. Draf yang
+      // sudah punya jawaban tetap pada versi notice yang disetujui responden dan dilaporkan di respons.
+      const drafts = await all<{ id: string; survey_id: string; responses: number }>(
+        `SELECT v.id, v.survey_id,
+                (SELECT COUNT(*) FROM responses r WHERE r.version_id = v.id) AS responses
+           FROM survey_versions v JOIN surveys s ON s.id = v.survey_id
+          WHERE s.organization_id = ? AND v.status = 'draft'
+          ORDER BY v.survey_id, v.number`,
+        organizationId,
+      );
+      const followed: string[] = [];
+      const kept: Array<{ version_id: string; survey_id: string; responses: number }> = [];
+      for (const draft of drafts) {
+        if (Number(draft.responses) > 0) {
+          kept.push({ version_id: draft.id, survey_id: draft.survey_id, responses: Number(draft.responses) });
+          continue;
+        }
+        await run('UPDATE survey_versions SET notice_version = ? WHERE id = ?', noticeVersion, draft.id);
+        followed.push(draft.id);
+      }
+      return { from: current.notice_version, to: noticeVersion, drafts_followed: followed, drafts_kept: kept };
+    });
     await audit(req, 'Ubah profil organisasi', organizationId, 'berhasil', {
       respondent_age_category: ageCategory,
       consent_mode: consentMode,
+      notice_version: noticeVersion,
+      drafts_followed: noticeChange?.drafts_followed.length ?? 0,
+      drafts_kept: noticeChange?.drafts_kept.length ?? 0,
     });
     res.json({
       data: {
         source: 'organization',
         profile: await get<OrgProfileRow>(`SELECT ${ORG_COLUMNS} FROM organizations WHERE id = ?`, organizationId),
+        notice_change: noticeChange,
       },
     });
   } catch (error) {
