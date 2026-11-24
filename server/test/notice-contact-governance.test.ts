@@ -143,7 +143,7 @@ test('NR-04: bootstrap membawa notice dari sumber kebijakan survei, bukan baris 
 
   // Sumber yang sama dengan halaman publik: katalog notice organisasi, dengan versi masing-masing
   // konteks (tautan publik memakai versi terbit 1.0, pengaturan creator memakai draf 1.1).
-  const intro = await publicIntro('link-umum-demo');
+  const intro = await publicIntro('pl_demoTautanUmum1A');
   assert.equal(intro.notice.version, '1.0');
   assert.match(intro.notice.data_categories, /Penyelenggara adalah sekolah/);
   assert.equal(intro.notice.purpose, notice.purpose, 'teks dari katalog yang sama');
@@ -163,15 +163,15 @@ test('UIX-08: kanal kontak pengantar = data_request_contact organisasi, bukan sa
   await run("UPDATE organizations SET data_request_contact = 'dpo@smk-nusantara.test' WHERE id = 'org_smk'");
   await run("UPDATE platform_profile SET data_request_contact = 'privasi@svara.test' WHERE id = 'platform'");
   try {
-    const intro = await publicIntro('link-umum-demo');
+    const intro = await publicIntro('pl_demoTautanUmum1A');
     assert.equal(intro.profile.data_request_contact, 'dpo@smk-nusantara.test');
     // Teks notice tetap menyalin alamat lama; kanal yang dipakai bukan teks itu.
     assert.equal(intro.notice.contact, 'privasi@organisasi.contoh');
 
-    const ctx = (await request('/public/surveys/link-umum-demo')).json.data as PublicContextData;
+    const ctx = (await request('/public/surveys/pl_demoTautanUmum1A')).json.data as PublicContextData;
     const html = render(
-      createElement(respondent.IntroView, { token: 'link-umum-demo', ctx, attempt: 'none', onChoose: () => {}, reload: () => {} }),
-      '/s/link-umum-demo',
+      createElement(respondent.IntroView, { token: 'pl_demoTautanUmum1A', ctx, attempt: 'none', onChoose: () => {}, reload: () => {} }),
+      '/s/pl_demoTautanUmum1A',
     );
     const contactRow = /<dt[^>]*>Kontak<\/dt>[\s\S]*?<\/dd>/.exec(html)?.[0];
     assert.ok(contactRow, 'baris Kontak pada pemberitahuan harus dirender');
@@ -180,7 +180,7 @@ test('UIX-08: kanal kontak pengantar = data_request_contact organisasi, bukan sa
 
     // Organisasi tanpa kontak memakai kanal platform, bukan alamat contoh yang dikarang klien.
     await run("UPDATE organizations SET data_request_contact = NULL WHERE id = 'org_smk'");
-    const fallback = await publicIntro('link-umum-demo');
+    const fallback = await publicIntro('pl_demoTautanUmum1A');
     assert.equal(fallback.profile.data_request_contact, 'privasi@svara.test');
   } finally {
     await run("UPDATE organizations SET data_request_contact = 'privasi@organisasi.contoh' WHERE id = 'org_smk'");

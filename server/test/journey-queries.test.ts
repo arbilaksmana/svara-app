@@ -157,6 +157,9 @@ after(async () => {
 test('PERF-05: perjalanan 20 butir membaca question_options sekali per request', async () => {
   await runJourney('golden');
   const journey = journeys.at(-1)!;
-  assert.equal(journey.queries, 35, `query per perjalanan: ${journey.queries}`);
+  // 31 (bukan 35 seperti di cabang w6-perfops): merge UIX-08/BF-10 memusatkan pemilihan notice ke
+  // `noticeRowFor` dan fallback kontak organisasi->platform tidak menambah round-trip per request,
+  // sehingga perjalanan membaca 4 query lebih sedikit. Asersi mengikuti angka terukur di merged.
+  assert.equal(journey.queries, 31, `query per perjalanan: ${journey.queries}`);
   assert.equal(journey.optionReads, 4, 'satu baca question_options per request (intro, consent, form, submit)');
 });
