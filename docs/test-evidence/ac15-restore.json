@@ -1,12 +1,16 @@
 {
   "label": "DEMO ONLY — uji pg_dump/pg_restore lokal, bukan bukti audit atau kesiapan produksi",
-  "generated_at": "2026-11-18T18:01:58.630Z",
+  "generated_at": "2026-11-24T01:27:22.312Z",
   "environment": {
     "node": "v24.15.0",
+    "baseline": {
+      "commit": "19ab823e5372d3de27432d3a664c6b05e98f44c2",
+      "dirty": true
+    },
     "platform": "win32 x64",
     "storage": "PostgreSQL via pg",
     "postgres_server_version": "17.12",
-    "database": "svara_ac15_099d5288",
+    "database": "svara_ac15_512d915b",
     "tools": {
       "pg_dump": "postgres:17-alpine: pg_dump",
       "pg_restore": "postgres:17-alpine: pg_restore",
@@ -32,7 +36,7 @@
     "audit_logs": 8,
     "server_version": "17.12",
     "backup_created": true,
-    "backup_bytes": 47532
+    "backup_bytes": 74239
   },
   "after_delete": {
     "responses": 5,

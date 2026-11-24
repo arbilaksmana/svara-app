@@ -3,6 +3,7 @@ import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
 import type { AuthedRequest } from '../security.ts';
+import type { AuditActor } from '../http.ts';
 import {
   accessibleSurveys,
   asBoolean,
@@ -117,6 +118,35 @@ export const surveysRouter = Router();
  */
 function requestAccept(req: AuthedRequest): string | null {
   return req.get('accept')?.slice(0, 200) ?? null;
+}
+
+class ExportAborted extends Error {}
+
+interface RunningExport {
+  /** Baris audit 'gagal' untuk ekspor yang dipotong shutdown. */
+  audit: () => Promise<void>;
+  /** Respons yang sudah selesai ditulis per batch terakhir. */
+  rows: number;
+  aborted: boolean;
+  /** Resolver penantian drain yang harus dilepas saat shutdown membatalkan ekspor. */
+  onAbort: Set<() => void>;
+}
+
+/** Ekspor CSV yang masih mengalir; shutdown memakai daftar ini untuk mencatat berkas terpotong. */
+const runningExports = new Set<RunningExport>();
+
+/**
+ * PERF-12/NEW-PO-03: `server.close()` tidak menghentikan respons yang sedang mengalir, jadi tanpa ini
+ * ekspor berjalan menahan proses sampai batas paksa 5 s. Tandai batal, putus koneksi, lalu catat audit
+ * 'gagal' sebelum pool ditutup.
+ */
+export async function abortRunningExports(): Promise<void> {
+  const running = [...runningExports].filter((exportState) => !exportState.aborted);
+  for (const exportState of running) {
+    exportState.aborted = true;
+    for (const release of [...exportState.onAbort]) release();
+  }
+  await Promise.allSettled(running.map((exportState) => exportState.audit()));
 }
 
 /** Respons per batch ekspor CSV. EXPORT_BATCH_SIZE hanya bisa menurunkannya (test memaksa banyak batch). */
@@ -923,19 +953,22 @@ async function responseBatch(surveyId: string, versionId: string, after: Respons
 }
 
 /** Tulis potongan CSV dan tunggu `drain` bila buffer penuh; false bila koneksi klien sudah tertutup. */
-async function writeCsv(res: Response, chunk: string): Promise<boolean> {
-  if (!res.write(chunk) && !res.destroyed) {
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        res.off('drain', done);
-        res.off('close', done);
-        resolve();
-      };
-      res.on('drain', done);
-      res.on('close', done);
-    });
+/** `exportState` dipakai shutdown: penantian drain habis lebih awal supaya baris audit 'gagal' sempat ditulis. */
+async function writeCsv(res: Response, chunk: string, exportState?: RunningExport): Promise<boolean> {
+  if (!res.write(chunk) && !res.destroyed && !exportState?.aborted) {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const done = () => {
+      res.off('drain', done);
+      res.off('close', done);
+      exportState?.onAbort.delete(done);
+      resolve();
+    };
+    res.on('drain', done);
+    res.on('close', done);
+    exportState?.onAbort.add(done);
+    await promise;
   }
-  return !res.destroyed;
+  return !res.destroyed && !exportState?.aborted;
 }
 
 function byResponse(rows: AnswerDbRow[]): Map<string, AnswerDbRow[]> {
@@ -1052,11 +1085,23 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
     let text = `${CSV_BOM}${csvLine(header)}${CSV_EOL}`;
     let rows = 0;
     let stopped: string | undefined;
+    // PERF-12/NEW-PO-03: shutdown menandai ekspor berjalan agar berkas terpotong tetap tercatat 'gagal'.
+    const auditActor: AuditActor = { account: req.account };
+    const streamAudit: RunningExport = { audit: () => audit(auditActor, 'Ekspor CSV', object, 'gagal', {
+      format,
+      rows: streamAudit.rows,
+      includeText,
+      individual: true,
+      filename,
+      reason: 'shutdown',
+    }), rows: 0, aborted: false, onAbort: new Set() };
+    runningExports.add(streamAudit);
     try {
       for (let after: ResponseDbRow | undefined; ; ) {
         const batch = await responseBatch(survey.id, version.id, after);
         const answersByResponse = await answersForResponses(batch.map((response) => response.id));
         if (res.destroyed) break;
+        streamAudit.rows = rows;
         for (const response of batch) {
           const answers = answersByResponse.get(response.id) ?? [];
           const byCode = new Map(answers.map((answer) => [answer.question_code, answer]));
@@ -1081,16 +1126,28 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
           res.setHeader('Content-Type', 'text/csv; charset=utf-8');
           res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         }
-        const open = text === '' || (await writeCsv(res, text));
+        // Shutdown membatalkan penantian drain agar baris 'gagal' bisa ditulis sebelum pool ditutup.
+        const open = text === '' || (await writeCsv(res, text, streamAudit));
+        if (streamAudit.aborted) throw new ExportAborted();
         rows += batch.length;
         if (!open || batch.length < EXPORT_BATCH_SIZE) break;
         text = '';
         after = batch[batch.length - 1];
       }
     } catch (error) {
-      if (!res.headersSent) throw error;
-      console.error('[api] ekspor CSV terhenti di tengah aliran', error);
-      stopped = 'stream_error';
+      if (error instanceof ExportAborted) stopped = 'shutdown';
+      else if (!res.headersSent) throw error;
+      else {
+        console.error('[api] ekspor CSV terhenti di tengah aliran', error);
+        stopped = 'stream_error';
+      }
+    } finally {
+      runningExports.delete(streamAudit);
+    }
+    // Shutdown sudah mencatat 'gagal' untuk ekspor yang dipotong; jangan tulis baris final kedua.
+    if (streamAudit.aborted) {
+      res.destroy();
+      return;
     }
     const metadata = { format, rows, includeText, individual: true, filename };
     if (stopped || res.destroyed) {

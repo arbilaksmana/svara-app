@@ -1,12 +1,12 @@
 {
   "label": "DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.",
-  "generated_at": "2026-11-23T21:29:52.665Z",
-  "provenance": {
-    "commit": "bb8612c0b1f8392a0439bf5319505c089b1ba161",
-    "tree": "dirty"
-  },
+  "generated_at": "2026-11-24T01:27:17.337Z",
   "environment": {
     "node": "v24.15.0",
+    "baseline": {
+      "commit": "19ab823e5372d3de27432d3a664c6b05e98f44c2",
+      "dirty": true
+    },
     "platform": "win32 x64",
     "storage": "PostgreSQL via pg Pool",
     "postgres_server_version": "17.12"
@@ -37,9 +37,9 @@
     "summary_total": 8,
     "csv_rows": 8,
     "created_response_ids": [
-      "r_3bed79ca69fe5ec1",
-      "r_93186c789d642048",
-      "r_dc67ef6022c50bea"
+      "r_9353e2cc11ddb5b8",
+      "r_c8f59f01d6ee341d",
+      "r_69e74e7023081dfb"
     ],
     "all_created_ids_present": true,
     "survey_version_values": [

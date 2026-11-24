@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { Client } from 'pg';
+import { sourceBaseline } from './demo-db.ts';
 
 const adminRaw = process.env.AC15_ADMIN_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
 if (!adminRaw) {
@@ -180,6 +181,7 @@ try {
     generated_at: new Date().toISOString(),
     environment: {
       node: process.version,
+      baseline: sourceBaseline(),
       platform: `${process.platform} ${process.arch}`,
       storage: 'PostgreSQL via pg',
       postgres_server_version: before.server_version,

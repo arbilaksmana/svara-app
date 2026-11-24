@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 
 /**
@@ -12,6 +13,26 @@ export function demoDatabaseUrl(): string {
     throw new Error('Demo hanya boleh dijalankan pada basis data bernama test/demo/AC13/AC15/AC16.');
   }
   return raw;
+}
+
+export interface SourceBaseline {
+  commit: string | null;
+  dirty: boolean | null;
+}
+
+/**
+ * NEW-PO-05: artefak demo harus bisa dikaitkan ke sumber yang menghasilkannya. `dirty` menandai
+ * artefak yang dibuat dari working tree dengan perubahan belum commit. Repo tanpa git (arsip
+ * sumber) menghasilkan `null`, bukan menggagalkan demo.
+ */
+export function sourceBaseline(): SourceBaseline {
+  try {
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() || null;
+    const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0;
+    return { commit, dirty };
+  } catch {
+    return { commit: null, dirty: null };
+  }
 }
 
 export interface DemoDatabase {
