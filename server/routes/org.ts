@@ -104,7 +104,14 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value < 0)) {
         fail(422, 'validation_error', 'retention_days harus bilangan bulat >= 0.');
       }
-      retentionDays = value as number | null;
+      const next = value as number | null;
+      // BF-06: retensi memakai kebijakan TERKINI, jadi memperpendek masa simpan langsung menghapus data
+      // yang dikumpulkan di bawah kebijakan lama pada run retensi berikutnya. Wajib dikonfirmasi eksplisit.
+      const shortened = next !== null && (current.retention_days === null || next < current.retention_days);
+      if (shortened && body.confirm_retention_shrink !== true) {
+        fail(409, 'retention_shrink_confirmation_required', 'Memperpendek retention_days akan menghapus data yang lebih tua dari batas baru pada run retensi berikutnya. Kirim confirm_retention_shrink: true untuk melanjutkan.');
+      }
+      retentionDays = next;
     }
     let crossBorder: number | null = current.cross_border_transfer;
     if (body.cross_border_transfer !== undefined) {

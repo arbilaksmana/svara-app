@@ -12,6 +12,7 @@ interface SurveyRow {
 interface IntegrationTokenScope {
   organization_id: string | null;
   survey_id: string | null;
+  expires_at: string | null;
 }
 
 interface VersionRow {
@@ -53,10 +54,29 @@ function serviceToken(req: Request): string | undefined {
 async function integrationScope(token: string): Promise<IntegrationTokenScope | undefined> {
   const tokenHash = createHash('sha256').update(token).digest('hex');
   const scope = await get<IntegrationTokenScope>(
-    'SELECT organization_id, survey_id FROM integration_token_scopes WHERE token_hash = ?',
+    'SELECT organization_id, survey_id, expires_at FROM integration_token_scopes WHERE token_hash = ?',
     tokenHash,
   );
-  if (!scope || Boolean(scope.organization_id) === Boolean(scope.survey_id)) return undefined;
+  if (!scope) return undefined;
+  // BF-09c: respons sama dengan cakupan tidak ada agar klien tidak bisa membedakan keduanya; audit tetap
+  // mencatatnya tanpa token maupun hash-nya.
+  const expiresAt = scope.expires_at === null ? NaN : Date.parse(scope.expires_at);
+  if (expiresAt <= Date.now()) {
+    await run(
+      'INSERT INTO audit_logs (id, actor, action, object, outcome, at, metadata, account_id, organization_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      newId('log'),
+      'layanan-15',
+      'Kredensial integrasi kedaluwarsa',
+      scope.organization_id ?? scope.survey_id ?? '',
+      'ditolak',
+      nowIso(),
+      null,
+      null,
+      scope.organization_id,
+    );
+    return undefined;
+  }
+  if (Boolean(scope.organization_id) === Boolean(scope.survey_id)) return undefined;
   return scope;
 }
 

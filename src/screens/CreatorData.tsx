@@ -343,6 +343,10 @@ export function ResultsPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [exportRequested, setExportRequested] = useState(false);
+  // BF-07: ekspor CSV per-responden wajib menyebut penerima dan tujuan.
+  const [exportRecipient, setExportRecipient] = useState('');
+  const [exportPurpose, setExportPurpose] = useState('');
+  const exportContextReady = exportRecipient.trim().length > 0 && exportPurpose.trim().length > 0;
   useEffect(() => { setExportRequested(false); }, [versionId]);
   const [responses, setResponses] = useState<IndividualResponse[] | null>(null);
   const [responsesError, setResponsesError] = useState<Error | null>(null);
@@ -621,15 +625,23 @@ export function ResultsPage({ id }: { id: string }) {
                 CSV UTF-8 per versi dan kodebook. Nama tidak masuk ekspor standar; token tidak pernah diekspor.
               </Banner>
             )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field id="ekspor-penerima" label="Penerima data" hint="Untuk siapa ekspor ini dibuat. Wajib sebelum mengunduh CSV per-responden." required>
+                {(aria) => <TextInput {...aria} maxLength={200} value={exportRecipient} onChange={(e) => setExportRecipient(e.target.value)} />}
+              </Field>
+              <Field id="ekspor-tujuan" label="Pemakaian data" hint="Untuk apa data dipakai. Dicatat di jejak audit." required>
+                {(aria) => <TextInput {...aria} maxLength={200} value={exportPurpose} onChange={(e) => setExportPurpose(e.target.value)} />}
+              </Field>
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="secondary"
-                disabled={!csvAllowed || denied || !summary || !summary.total || loading || busy}
+                disabled={!csvAllowed || denied || !summary || !summary.total || loading || busy || !exportContextReady}
                 aria-describedby={!denied && csvBlockedReason ? 'alasan-csv-nonaktif' : undefined}
                 loading={busy}
                 onClick={() => {
                   setBusy(true);
-                  void downloadExport(id, versionId, 'csv')
+                  void downloadExport(id, versionId, 'csv', { recipient: exportRecipient.trim(), purpose: exportPurpose.trim() })
                     .then(({ blob, filename }) => {
                       const url = URL.createObjectURL(blob);
                       const anchor = document.createElement('a');

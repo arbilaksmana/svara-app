@@ -14,6 +14,7 @@ const MIGRATION_019 = '019_close_superseded_published_versions.sql';
 const MIGRATION_020 = '020_guardian_evidence_moderation.sql';
 const MIGRATION_021 = '021_access_grant_provenance.sql';
 const MIGRATION_022 = '022_drop_plaintext_link_tokens.sql';
+const MIGRATION_023 = '023_integration_token_expiry.sql';
 
 let server: Server;
 let origin: string;
@@ -476,9 +477,10 @@ test('019 mengikuti aturan publish untuk survei lain: tiga versi terbit, tautan 
   );
   assert.deepEqual([(await intro(TOKENS.tunggal)).state, (await intro(TOKENS.tunggal)).version.number], ['active', 1]);
 
-  // Undangan individual v1 mengikuti publish: barisnya tetap, formulirnya tertutup karena versinya ditutup.
+  // Undangan individual v1 mengikuti publish: barisnya tetap (diasersi di bawah), tetapi sejak KP-04/NR-05
+  // formulir publik menyajikan versi terbit terbaru; persetujuan v1 tidak lagi berlaku (SEC-02).
   const invitation = await intro(INVITATION_TOKEN);
-  assert.deepEqual([invitation.state, invitation.canSubmit, invitation.version.number], ['closed', false, 1]);
+  assert.deepEqual([invitation.state, invitation.canSubmit, invitation.version.number], ['active', true, 2]);
   const after = await historical();
   assert.deepEqual(after.invitations, historicalBefore.invitations, 'undangan tidak diubah');
   assert.deepEqual(after.surveys, historicalBefore.surveys, 'baris survei tidak diubah');
@@ -509,8 +511,8 @@ test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', asyn
   await sql('UPDATE public_links SET expires_at = $1 WHERE token_hash = $2', ['', hash(TOKENS.layananV1)]);
   assert.deepEqual(
     await migrate(),
-    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022],
-    'migrasi 019-022 tetap berjalan',
+    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022, MIGRATION_023],
+    'migrasi 019-023 tetap berjalan',
   );
   assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
   // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.

@@ -324,7 +324,7 @@ test('NR-07: survei tertutup tanpa ?version memakai versi terakhir yang pernah t
   const rows = responses.json.data as Array<{ version_id: string }>;
   assert.deepEqual(rows.map((row) => row.version_id), [second.version.id, second.version.id]);
 
-  const csv = await fetch(`${base}/surveys/${survey.id}/export?format=csv`, { headers: { Cookie: creatorA } });
+  const csv = await fetch(`${base}/surveys/${survey.id}/export?format=csv&recipient=Uji%20NR-07&purpose=Uji%20ekspor`, { headers: { Cookie: creatorA } });
   const csvText = await csv.text();
   assert.equal(csv.status, 200, csvText.slice(0, 300));
   assert.match(csv.headers.get('content-disposition') ?? '', new RegExp(`hasil-${survey.id}-v2\\.csv`));
@@ -344,7 +344,7 @@ test('NR-07: survei tertutup tanpa ?version memakai versi terakhir yang pernah t
 
   // Izin tidak berubah: akun organisasi lain tetap ditolak di ketiga endpoint.
   const denied = await Promise.all(
-    ['summary', 'responses', 'export?format=csv'].map(async (path) => {
+    ['summary', 'responses', 'export?format=csv&recipient=Uji%20NR-07&purpose=Uji%20ekspor'].map(async (path) => {
       const result = await request(`/surveys/${survey.id}/${path}`, { cookie: creatorB });
       return [result.status, result.json.code];
     }),
@@ -375,7 +375,7 @@ test('NR-07: survei diarsipkan memakai versi terbit terakhir, bukan draf yang ik
 
   const draft = await data<{ survey: { id: string } }>(creatorA, '/surveys', 'POST', { title: 'Draf angket ekstrakurikuler', owner_scope: 'organization' });
   await data(creatorA, `/surveys/${draft.survey.id}`, 'PUT', surveyPayload('Draf angket ekstrakurikuler', 'Pilihan ekskul beragam.'));
-  for (const path of ['summary', 'responses', 'export?format=csv']) {
+  for (const path of ['summary', 'responses', 'export?format=csv&recipient=Uji%20NR-07&purpose=Uji%20ekspor']) {
     const result = await request(`/surveys/${draft.survey.id}/${path}`, { cookie: creatorA });
     assert.deepEqual([result.status, result.json.code], [409, 'no_published_version'], path);
   }
@@ -629,7 +629,8 @@ test('Upgrade main → kini: survei yang ditutup/diarsipkan main dan permintaan 
     const responses = await request(`/surveys/${survey.id}/responses`, { cookie });
     assert.equal(responses.status, 200, responses.text);
     assert.deepEqual((responses.json.data as Array<{ id: string }>).map((row) => row.id), [`r_${survey.id}`]);
-    const csv = await fetch(`${base}/surveys/${survey.id}/export?format=csv`, { headers: { Cookie: cookie } });
+    // BF-07: ekspor individual wajib menyebut penerima dan tujuan.
+    const csv = await fetch(`${base}/surveys/${survey.id}/export?format=csv&recipient=Uji%20NR-07&purpose=Uji%20retensi`, { headers: { Cookie: cookie } });
     assert.equal(csv.status, 200, await csv.clone().text());
     assert.match(csv.headers.get('content-disposition') ?? '', new RegExp(`hasil-${survey.id}-v1\\.csv`));
     await csv.arrayBuffer();

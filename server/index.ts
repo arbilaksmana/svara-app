@@ -24,13 +24,22 @@ if (demoSeed) {
 
 const integrationToken = process.env.INTEGRATION_TOKEN?.trim();
 const integrationOrganizationId = process.env.INTEGRATION_ORGANIZATION_ID?.trim();
+// BF-09c: kosong → NULL (tanpa kedaluwarsa, perilaku lama); terisi harus ISO-8601 agar salah ketik di
+// startup tidak tiba-tiba membuat token berhenti berlaku.
+const integrationTokenExpiresAt = process.env.INTEGRATION_TOKEN_EXPIRES_AT?.trim() || null;
+if (integrationTokenExpiresAt !== null && Number.isNaN(Date.parse(integrationTokenExpiresAt))) {
+  throw new Error('INTEGRATION_TOKEN_EXPIRES_AT harus ISO-8601 (mis. 2027-01-01T00:00:00Z) atau kosong.');
+}
 if (integrationToken && integrationOrganizationId) {
   await run(
-    `INSERT INTO integration_token_scopes (token_hash, organization_id)
-     VALUES (?, ?)
-     ON CONFLICT (token_hash) DO UPDATE SET organization_id = EXCLUDED.organization_id, survey_id = NULL`,
+    `INSERT INTO integration_token_scopes (token_hash, organization_id, expires_at, created_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (token_hash) DO UPDATE SET organization_id = EXCLUDED.organization_id, survey_id = NULL,
+       expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at`,
     createHash('sha256').update(integrationToken).digest('hex'),
     integrationOrganizationId,
+    integrationTokenExpiresAt,
+    new Date().toISOString(),
   );
 }
 

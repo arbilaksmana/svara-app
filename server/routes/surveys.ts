@@ -113,8 +113,8 @@ interface AnswerDbRow {
 export const surveysRouter = Router();
 
 /**
- * Header Accept permintaan apa adanya (dipotong) untuk audit ekspor. Penerima dan tujuan akhir berkas
- * setelah diunduh tidak diketahui server, jadi tidak dicatat seolah-olah diketahui.
+ * Header Accept permintaan apa adanya (dipotong) untuk audit ekspor. Penerima dan tujuan berkas dicatat dari
+ * deklarasi pemanggil (`recipient`/`purpose`, KP-03), bukan disimpulkan dari header ini.
  */
 function requestAccept(req: AuthedRequest): string | null {
   return req.get('accept')?.slice(0, 200) ?? null;
@@ -952,8 +952,31 @@ async function responseBatch(surveyId: string, versionId: string, after: Respons
   );
 }
 
-/** Tulis potongan CSV dan tunggu `drain` bila buffer penuh; false bila koneksi klien sudah tertutup. */
-/** `exportState` dipakai shutdown: penantian drain habis lebih awal supaya baris audit 'gagal' sempat ditulis. */
+const EXPORT_CONTEXT_MAX = 200;
+
+/**
+ * KP-03/BF-07: ekspor berisi data individual wajib menyebut penerima dan tujuan. Nilai dibaca dari query
+ * atau header `X-Export-Recipient`/`X-Export-Purpose` (yang dipakai `downloadExport`); header menang.
+ * Kosong/spasi → 422 `export_context_required`; lebih dari 200 karakter → 422 `validation_error`.
+ */
+function exportContext(req: AuthedRequest, field: 'recipient' | 'purpose'): string {
+  const header = req.get(`X-Export-${field === 'recipient' ? 'Recipient' : 'Purpose'}`) ?? req.query[field];
+  const value = typeof header === 'string' ? header.trim() : '';
+  if (!value) {
+    fail(
+      422,
+      'export_context_required',
+      'Ekspor CSV individual wajib menyebut recipient (penerima data) dan purpose (tujuan pemakaian).',
+    );
+  }
+  if (value.length > EXPORT_CONTEXT_MAX) {
+    fail(422, 'validation_error', `${field} maksimal ${EXPORT_CONTEXT_MAX} karakter.`, { field });
+  }
+  return value;
+}
+
+/** Tulis potongan CSV dan tunggu `drain` bila buffer penuh; false bila koneksi klien sudah tertutup.
+ *  `exportState` dipakai shutdown: penantian drain habis lebih awal supaya baris audit 'gagal' sempat ditulis. */
 async function writeCsv(res: Response, chunk: string, exportState?: RunningExport): Promise<boolean> {
   if (!res.write(chunk) && !res.destroyed && !exportState?.aborted) {
     const { promise, resolve } = Promise.withResolvers<void>();
@@ -1018,6 +1041,9 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
         'Ekspor CSV memuat data per responden; izin membaca jawaban individual atau pengaturan survei menolaknya. Gunakan format=codebook untuk agregat.',
       );
     }
+    // KP-03/BF-07: diverifikasi sebelum header CSV atau baris audit ekspor apa pun, jadi penolakan tetap JSON.
+    const context =
+      format === 'csv' ? { recipient: exportContext(req, 'recipient'), purpose: exportContext(req, 'purpose') } : undefined;
     const requested = typeof req.query.version === 'string' ? req.query.version : '';
     const version = requested ? await requireVersion(requested) : await defaultResultVersion(survey.id);
     if (version.survey_id !== survey.id) fail(403, 'forbidden_version', 'Versi bukan milik survei ini.');
@@ -1070,6 +1096,8 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
     ];
     const object = `${survey.id} · v${version.number}`;
     const filename = `hasil-${survey.id}-v${version.number}.csv`;
+    // KP-03/BF-07: `context` wajib ada pada jalur CSV; konteks ditulis di setiap baris audit ekspor.
+    if (!context) throw new Error('ekspor CSV tanpa konteks recipient/purpose');
     // Fail-closed: jejak audit ditulis sebelum data respons dibaca dan sebelum byte pertama dikirim.
     // Bila INSERT gagal, galat keluar sebagai 500 JSON tanpa isi CSV. Baris ini berstatus 'dimulai' dan
     // satu-satunya yang memuat kolom dan Accept; hasil akhir dan jumlah baris dicatat terpisah di bawah.
@@ -1079,6 +1107,8 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       individual: true,
       filename,
       columns: header,
+      recipient: context.recipient,
+      purpose: context.purpose,
       request_accept: requestAccept(req),
     });
     // Baris ditulis per batch; header HTTP baru terkirim bersama batch pertama sehingga galat sebelumnya tetap JSON.
@@ -1093,6 +1123,8 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       includeText,
       individual: true,
       filename,
+      recipient: context.recipient,
+      purpose: context.purpose,
       reason: 'shutdown',
     }), rows: 0, aborted: false, onAbort: new Set() };
     runningExports.add(streamAudit);
@@ -1149,7 +1181,7 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       res.destroy();
       return;
     }
-    const metadata = { format, rows, includeText, individual: true, filename };
+    const metadata = { format, rows, includeText, individual: true, filename, recipient: context.recipient, purpose: context.purpose };
     if (stopped || res.destroyed) {
       // Sebagian baris mungkin sudah keluar; putus koneksi agar klien tidak menganggap berkas lengkap.
       res.destroy();

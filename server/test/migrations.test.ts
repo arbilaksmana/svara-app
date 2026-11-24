@@ -49,6 +49,7 @@ const VERSIONS = [
   '020_guardian_evidence_moderation.sql',
   '021_access_grant_provenance.sql',
   '022_drop_plaintext_link_tokens.sql',
+  '023_integration_token_expiry.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
