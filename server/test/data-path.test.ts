@@ -122,7 +122,8 @@ test('L-03: angka (negatif, desimal, eksponen) ditulis apa adanya; teks berawala
     );
   }
 
-  const csv = await call(`/surveys/${surveyId}/export?format=csv&version=${versionId}`);
+  // BF-07: ekspor yang memuat baris per-responden wajib menyebut penerima dan tujuan.
+  const csv = await call(`/surveys/${surveyId}/export?format=csv&version=${versionId}&recipient=Uji%20L-03&purpose=Uji%20netralisasi`);
   assert.equal(csv.status, 200, csv.text);
   const rows = csvTable(csv.text);
   assert.deepEqual(rows.map((row) => row.C01), ['-1', '-2.5', '1e+21', '-1e-7'], 'nilai number tidak diberi apostrof');
