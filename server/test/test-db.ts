@@ -26,6 +26,19 @@ export async function closeTestDatabase(): Promise<void> {
   await closePool();
 }
 
+/**
+ * Sama seperti `resetTestDatabase`, tetapi `search_path` sesi pengujian tetap menunjuk skema yang baru
+ * dibuat. `resetSchema` mengganti schema `public`, jadi path berbasis OID di sesi lama menjadi tidak sah
+ * ("no schema has been selected") bagi pengujian yang memakai jaring koneksi bersama, bukan request server.
+ */
+export async function resetAndAttachTestDatabase(): Promise<void> {
+  const { resetSchema, migrate } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate();
+  const { pool } = await import('../db.ts');
+  await pool.query("SELECT set_config('search_path', 'public', false)");
+}
+
 async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
   const client = new Client({ connectionString: url });
   await client.connect();
