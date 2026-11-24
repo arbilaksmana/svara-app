@@ -5,7 +5,11 @@ import { migrate } from './migrate.ts';
 import { productionWithoutHttpsWarning } from './security.ts';
 import { seedDemoIfEmpty } from './seed-data.ts';
 import { demoSeedEnabled } from './seed-policy.ts';
+import { placeholderSecretsProblem } from './placeholder-secrets.ts';
+import { abortRunningExports } from './routes/surveys.ts';
 
+const placeholderSecrets = placeholderSecretsProblem(process.env);
+if (placeholderSecrets) throw new Error(placeholderSecrets);
 const demoSeed = demoSeedEnabled();
 const httpsWarning = productionWithoutHttpsWarning();
 if (httpsWarning) console.warn(httpsWarning);
@@ -42,11 +46,18 @@ const server = app.listen(port, host, () => {
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
-    server.close(() => {
-      closePool()
-        .catch((error) => console.error('[db] gagal menutup pool', error))
-        .finally(() => process.exit(0));
-    });
+    // PERF-12: `server.close` menunggu respons yang masih mengalir; ekspor CSV yang dipotong harus
+    // dibatalkan dan dicatat 'gagal' lebih dulu agar shutdown selesai jauh di bawah batas paksa 5 s.
+    void abortRunningExports()
+      .catch((error) => console.error('[api] gagal mencatat ekspor yang terpotong', error))
+      .then(() => {
+        server.close(() => {
+          closePool()
+            .catch((error) => console.error('[db] gagal menutup pool', error))
+            .finally(() => process.exit(0));
+        });
+        server.closeIdleConnections();
+      });
     setTimeout(() => process.exit(1), 5_000).unref();
   });
 }

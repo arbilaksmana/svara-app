@@ -285,7 +285,10 @@ export async function requireVersion(versionId: string): Promise<VersionRow> {
   return version;
 }
 
-export function actorFor(req: AuthedRequest): string {
+/** Identitas audit yang bisa disimpan setelah `req` dibuang (mis. audit shutdown di latar). */
+export type AuditActor = Pick<AuthedRequest, 'account'>;
+
+export function actorFor(req: AuditActor): string {
   return req.account?.id ?? 'publik';
 }
 
@@ -316,7 +319,7 @@ async function insertAudit(
 }
 
 export async function audit(
-  req: AuthedRequest,
+  req: AuditActor,
   action: string,
   object: string,
   outcome: AuditOutcome,

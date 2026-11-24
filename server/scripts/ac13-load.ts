@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
+import { sourceBaseline, resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
 
 const PORT = 3199;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
@@ -130,11 +130,18 @@ try {
     ]),
   );
 
+  // SEC-02: persetujuan wajib menyebut versi yang benar-benar dirender (token buram dari intro).
+  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
       call(`/public/surveys/${token}/consent`, {
         method: 'POST',
-        body: { respondent_click: true, eligibility: true, guardian_evidence_ref: 'DEMO-AC13-WALI' },
+        body: {
+          respondent_click: true,
+          eligibility: true,
+          version_id: intro.consent_version,
+          guardian_evidence_ref: 'DEMO-AC13-WALI',
+        },
       }),
     ),
   );
@@ -185,6 +192,7 @@ try {
     generated_at: new Date().toISOString(),
     environment: {
       node: process.version,
+      baseline: sourceBaseline(),
       platform: `${process.platform} ${process.arch}`,
       cpu_count: (await import('node:os')).cpus().length,
       server: `127.0.0.1:${PORT}`,
@@ -198,9 +206,11 @@ try {
       unique_response_ids: responseIds.size,
       summary_total: summary.total,
       answered_per_item: summary.items.map((item) => item.answered),
-      p95_commit_ms: Number(p95(durations).toFixed(2)),
+      // Durasi ini diukur di klien: fetch sampai respons kiriman diterima, termasuk jaringan loopback,
+      // antrean event loop, dan jalur submit server (resolve konteks + transaksi). Bukan lama commit DB.
+      p95_submit_client_ms: Number(p95(durations).toFixed(2)),
       total_wall_ms: Number(totalElapsedMs.toFixed(2)),
-      max_commit_ms: Number(Math.max(...durations).toFixed(2)),
+      max_submit_client_ms: Number(Math.max(...durations).toFixed(2)),
     },
     limitations: [
       'Tidak mengukur jaringan nyata, TLS, atau batas produksi.',

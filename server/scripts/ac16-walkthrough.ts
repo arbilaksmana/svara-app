@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
+import { sourceBaseline, resetDemoDatabase, stopServer, waitForServer } from './demo-db.ts';
 
 const PORT = 3198;
 const BASE = `http://127.0.0.1:${PORT}/api/v1`;
@@ -123,6 +123,8 @@ try {
     { AD01: 2, TS01: 2, K02: 'Contoh sintetis tiga' },
   ];
 
+  // SEC-02: persetujuan wajib menyebut versi yang benar-benar dirender (token buram dari intro).
+  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   for (const [index, pattern] of patterns.entries()) {
     const consent = data<{ consent_id: string }>(
       await call(`/public/surveys/${token}/consent`, {
@@ -130,6 +132,7 @@ try {
         body: {
           respondent_click: true,
           eligibility: true,
+          version_id: intro.consent_version,
           guardian_evidence_ref: `DEMO-AC16-WALI-${index + 1}`,
         },
       }),
@@ -198,6 +201,7 @@ try {
     generated_at: new Date().toISOString(),
     environment: {
       node: process.version,
+      baseline: sourceBaseline(),
       platform: `${process.platform} ${process.arch}`,
       storage: 'PostgreSQL via pg Pool',
       postgres_server_version: database.serverVersion,

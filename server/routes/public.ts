@@ -172,15 +172,24 @@ async function questionRows(versionId: string): Promise<QuestionRow[]> {
   return all<QuestionRow>('SELECT * FROM questions WHERE version_id = ? ORDER BY ord, code', versionId);
 }
 
-async function optionRows(questionId: string): Promise<OptionRow[]> {
-  return all<OptionRow>('SELECT * FROM question_options WHERE question_id = ? ORDER BY ord', questionId);
-}
-
 async function publicQuestions(versionId: string): Promise<{ questions: PublicQuestion[]; options: PublicOption[] }> {
   const questions: PublicQuestion[] = [];
   const options: PublicOption[] = [];
-  for (const question of await questionRows(versionId)) {
-    const questionOptions = await optionRows(question.id);
+  const rows = await questionRows(versionId);
+  const byQuestion = new Map<string, OptionRow[]>();
+  if (rows.length > 0) {
+    const placeholders = rows.map(() => '?').join(', ');
+    for (const option of await all<OptionRow>(
+      `SELECT * FROM question_options WHERE question_id IN (${placeholders}) ORDER BY question_id, ord`,
+      ...rows.map((row) => row.id),
+    )) {
+      const bucket = byQuestion.get(option.question_id);
+      if (bucket) bucket.push(option);
+      else byQuestion.set(option.question_id, [option]);
+    }
+  }
+  for (const question of rows) {
+    const questionOptions = byQuestion.get(question.id) ?? [];
     questions.push({
       id: question.id,
       code: question.code,
@@ -477,6 +486,10 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
       text: typeof row.text === 'string' ? row.text : null,
     });
   }
+  // Opsi seluruh versi sudah dimuat `publicQuestions`; jangan baca ulang tabel opsi per pertanyaan.
+  const optionsByQuestion = new Map<string, OptionRow[]>();
+  for (const question of context.questions) optionsByQuestion.set(question.id, []);
+  for (const option of context.options) optionsByQuestion.get(option.question_id)?.push(option);
   const known = new Set(context.questions.map((question) => question.code));
   for (const code of byCode.keys()) {
     if (!known.has(code)) fail(422, 'unknown_question', `Pertanyaan ${code} bukan bagian dari versi ini.`, { code });
@@ -496,7 +509,7 @@ async function parseAnswers(context: PublicContext, raw: unknown): Promise<Valid
       result.push({ question, option: null, text, skipped: false });
       continue;
     }
-    const options = await optionRows(question.id);
+    const options = optionsByQuestion.get(question.id) ?? [];
     let option = options.find((item) => item.id === input?.option_id) ?? null;
     if (!option && input?.option_id) {
       fail(422, 'invalid_option', `Opsi untuk ${question.code} bukan bagian dari pertanyaan ini.`, { code: question.code });
