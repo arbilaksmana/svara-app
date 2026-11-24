@@ -350,8 +350,7 @@ test('M4: bootstrap menandai undangan versi yang sudah tidak terbit sebagai ditu
   assert.equal(INVITATION_STATUS_LABEL[statusOf(active.invitation.id)!], 'Ditutup');
   assert.ok(INVITATION_STATUS_TONE[statusOf(active.invitation.id)!], 'tone badge tersedia');
 
-  // Status tampilan saja: baris undangan tidak diubah. Formulir publik meremap ke versi terbit terbaru
-  // (KP-04/NR-05), bukan tertutup.
+  // Status tampilan saja: baris undangan tidak diubah. Formulir publik menyajikan versi terbit terbaru (KP-04/NR-05).
   assert.equal((await get<{ status: string }>('SELECT status FROM invitations WHERE id = ?', active.invitation.id))?.status, 'active');
   const resolved = await request('/public/invitations/resolve', 'POST', { code: active.invitation.code });
   assert.equal(resolved.status, 200, JSON.stringify(resolved.json));
