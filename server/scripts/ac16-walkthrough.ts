@@ -126,8 +126,6 @@ try {
     { AD01: 2, TS01: 2, K02: 'Contoh sintetis tiga' },
   ];
 
-  // SEC-02: persetujuan wajib menyebut versi yang benar-benar dirender (token buram dari intro).
-  const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   for (const [index, pattern] of patterns.entries()) {
     const consent = data<{ consent_id: string }>(
       await call(`/public/surveys/${token}/consent`, {
@@ -136,7 +134,6 @@ try {
           version_id: intro.consent_version,
           respondent_click: true,
           eligibility: true,
-          version_id: intro.consent_version,
           guardian_evidence_ref: `DEMO-AC16-WALI-${index + 1}`,
         },
       }),
