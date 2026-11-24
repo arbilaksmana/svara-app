@@ -40,6 +40,9 @@ let officerCookie = '';
 let surveyId = '';
 let versionId = '';
 let exportPath = '';
+/** KP-03/BF-07: ekspor CSV individual wajib menyebut penerima dan tujuan; keduanya ikut dicatat di audit. */
+const RECIPIENT = 'Dinas Pendidikan uji';
+const PURPOSE = 'Uji ekspor per batch';
 let questionIds = new Map<string, string>();
 
 interface Download {
@@ -245,6 +248,8 @@ function auditMetadata(rows: number, includeText: boolean, reason?: string): str
     includeText,
     individual: true,
     filename: `hasil-${surveyId}-v1.csv`,
+    recipient: RECIPIENT,
+    purpose: PURPOSE,
     ...(reason ? { reason } : {}),
   });
 }
@@ -295,7 +300,7 @@ before(async () => {
   });
   const published = await api<{ data: { version: { id: string } } }>(`/surveys/${surveyId}/publish`, { method: 'POST', cookie: ownerCookie });
   versionId = published.data.version.id;
-  exportPath = `/surveys/${surveyId}/export?format=csv&version=${versionId}`;
+  exportPath = `/surveys/${surveyId}/export?format=csv&version=${versionId}&recipient=${encodeURIComponent(RECIPIENT)}&purpose=${encodeURIComponent(PURPOSE)}`;
   questionIds = new Map(
     (await all<{ id: string; code: string }>('SELECT id, code FROM questions WHERE version_id = ?', versionId)).map((row) => [row.code, row.id]),
   );
@@ -536,6 +541,8 @@ test('M6: audit ekspor ditulis sebelum byte pertama dan hanya memuat yang diketa
     individual: true,
     filename: `hasil-${surveyId}-v1.csv`,
     columns: exportColumns(includeText),
+    recipient: RECIPIENT,
+    purpose: PURPOSE,
     request_accept: accept,
   });
   assert.deepEqual(await startedBy('u_creator_a'), started(true), 'pemilik: nama berkas, kolom lengkap, dan Accept permintaan');
@@ -602,5 +609,8 @@ test('Std-3: ekspor CSV mencatat satu baris selesai; baris mulai berstatus dimul
   assert.equal(typeof started.request_accept, 'string');
   assert.equal((started.request_accept as string).length, 200, 'Accept dipotong pada 200 karakter');
   assert.ok(accept.startsWith(started.request_accept as string), 'potongan Accept adalah awal header asli');
-  assert.deepEqual(finished, { format: 'csv', rows: total, includeText: true, individual: true, filename: `hasil-${surveyId}-v1.csv` });
+  assert.deepEqual(finished, {
+    format: 'csv', rows: total, includeText: true, individual: true, filename: `hasil-${surveyId}-v1.csv`,
+    recipient: RECIPIENT, purpose: PURPOSE,
+  });
 });
