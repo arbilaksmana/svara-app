@@ -1009,7 +1009,7 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.equal(ad01?.options.length, 5, 'opsi tanpa pemilih tetap tampil');
   assert.equal(ad01.answered, summary.total, 'semua respons seed harus menjawab item wajib AD01');
 
-  const officerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: officer });
+  const officerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: officer });
   assert.equal(officerCsv.status, 200);
   assert.ok(officerCsv.headers.get('content-type')?.startsWith('text/csv'));
   assert.equal(officerCsv.bytes[0], 0xef, 'CSV memakai BOM UTF-8');
@@ -1025,15 +1025,15 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.ok(officerCsv.text.includes('Perlu panduan singkat.'), 'teks bebas tampil untuk penerima berizin');
 
   // Pemilik kini berhak penuh (keputusan user): teks bebas ikut untuk pemilik.
-  const creatorCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', {
+  const creatorCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', {
     cookie: await session('creator.b@svara.local'),
   });
   assert.equal(creatorCsv.status, 403, 'creator bukan pemilik tanpa grant tidak boleh ekspor');
 
-  const ownerCsv = await call('/surveys/s_demo4/export?version=v_demo4_1&format=csv', { cookie: creator });
+  const ownerCsv = await call('/surveys/s_demo4/export?version=v_demo4_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: creator });
   assert.equal(ownerCsv.status, 200, 'pemilik survei otomatis boleh ekspor tanpa grant');
 
-  const denied = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: creatorB });
+  const denied = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: creatorB });
   assert.equal(denied.status, 403);
 
   const codebook = await call('/surveys/s_demo1/export?version=v_demo1_1&format=codebook', { cookie: officer });
@@ -1106,7 +1106,7 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
   assert.equal(created.status, 201);
 
   const cookie = await session('officer@svara.local');
-  const csv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie });
+  const csv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie });
   assert.equal(csv.status, 200);
   assert.ok(!csv.text.includes('\n=SUM'), 'formula diberi awalan kutip');
   assert.ok(csv.text.includes("'=SUM(1,2)"), 'nilai formula dinetralkan saat ekspor');
@@ -2010,7 +2010,7 @@ test('Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi', asy
     ),
     'pemilik membaca teks bebas tanpa grant',
   );
-  const ownerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', {
+  const ownerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', {
     cookie: await session('creator.a@svara.local'),
   });
   assert.equal(ownerCsv.status, 200);
@@ -2024,7 +2024,7 @@ test('Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi', asy
   const adminResponses = await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: orgAdmin });
   assert.equal(adminResponses.status, 200, adminResponses.text);
   assert.ok(adminResponses.text.includes('Perlu panduan singkat.'), 'org_admin membaca teks bebas survei organisasinya');
-  const adminExport = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: orgAdmin });
+  const adminExport = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: orgAdmin });
   assert.equal(adminExport.status, 200);
 
   // Organisasi lain (org_perpus via creator.b), creator org_smk lain tanpa grant, akun tanpa organisasi.
@@ -2052,7 +2052,7 @@ test('Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi', asy
       ['GET', '/surveys/s_demo1', undefined],
       ['PUT', '/surveys/s_demo1/settings', { allowResults: true, allowIndividual: true }],
       ['GET', '/surveys/s_demo1/responses?version=v_demo1_1', undefined],
-      ['GET', '/surveys/s_demo1/export?version=v_demo1_1&format=csv', undefined],
+      ['GET', '/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', undefined],
     ] as const) {
       const denied = await call(path, { method, cookie, body });
       assert.equal(denied.status, 403, `${label}: ${method} ${path} harus 403`);

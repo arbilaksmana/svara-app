@@ -135,13 +135,13 @@ test('Ekspor CSV dan codebook hanya memuat isi versi yang diminta', async () => 
   const secondVersion = secondPublish.body?.data?.version?.id ?? '';
   assert.ok(secondVersion.length > 0 && secondVersion !== firstVersion, 'versi kedua harus berbeda');
 
-  const v1Export = csvRows((await call(`/surveys/${surveyId}/export?version=${firstVersion}`, { cookie: creator })).text);
+  const v1Export = csvRows((await call(`/surveys/${surveyId}/export?version=${firstVersion}&recipient=Uji%20KP-03&purpose=Uji%20ekspor`, { cookie: creator })).text);
   const v1Header = v1Export[0]!;
   assert.deepEqual(v1Export.map((row) => row[0]), ['response_id'], 'versi 1 tidak boleh memuat baris respons versi lain');
   assert.ok(v1Header.includes('V1A'), `header versi 1 harus memuat V1A: ${v1Header.join(',')}`);
   assert.ok(!v1Header.includes('V2A') && !v1Header.includes('V2B'), `header versi 1 bocor: ${v1Header.join(',')}`);
 
-  const v2Header = csvRows((await call(`/surveys/${surveyId}/export?version=${secondVersion}`, { cookie: creator })).text)[0]!;
+  const v2Header = csvRows((await call(`/surveys/${surveyId}/export?version=${secondVersion}&recipient=Uji%20KP-03&purpose=Uji%20ekspor`, { cookie: creator })).text)[0]!;
   assert.ok(v2Header.includes('V2A') && v2Header.includes('V2B'), `header versi 2 kurang: ${v2Header.join(',')}`);
 
   const v1Codebook = await call(`/surveys/${surveyId}/export?format=codebook&version=${firstVersion}`, { cookie: creator });
@@ -152,13 +152,13 @@ test('Ekspor CSV dan codebook hanya memuat isi versi yang diminta', async () => 
   assert.deepEqual([...new Set(csvRows(v2Codebook.text).slice(1).map((row) => row[1]))].sort(), ['V2A', 'V2B']);
 
   // Tanpa filter versi, ekspor memakai versi terbit terbaru dan tidak mencampur versi lama.
-  const latest = await call(`/surveys/${surveyId}/export`, { cookie: creator });
+  const latest = await call(`/surveys/${surveyId}/export?recipient=Uji%20KP-03&purpose=Uji%20ekspor`, { cookie: creator });
   assert.equal(latest.status, 200, latest.text);
   const latestRows = csvRows(latest.text);
   assert.ok(latestRows[0]!.includes('V2A') && !latestRows[0]!.includes('V1A'), `default harus versi terbaru: ${latestRows[0]!.join(',')}`);
   assert.deepEqual(latestRows.map((row) => row[0]), ['response_id']);
 
-  const foreign = await call(`/surveys/${surveyId}/export?version=v_demo1_1`, { cookie: creator });
+  const foreign = await call(`/surveys/${surveyId}/export?version=v_demo1_1&recipient=Uji%20KP-03&purpose=Uji%20ekspor`, { cookie: creator });
   assert.equal(foreign.status, 403, foreign.text);
   assert.equal(foreign.body?.code, 'forbidden_version');
 });
@@ -174,12 +174,12 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
   });
   assert.equal(toggled.status, 200, toggled.text);
 
-  const denied = await call('/surveys/s_demo1/export?format=csv', { cookie: fullGrant });
+  const denied = await call('/surveys/s_demo1/export?format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: fullGrant });
   assert.equal(denied.status, 403, `CSV per-responden harus ditolak: ${denied.text}`);
   assert.equal(denied.body?.code, 'forbidden_export_individual');
   assert.ok(!denied.text.includes('respondent_id'), 'penolakan tidak boleh mengirim header CSV');
 
-  assert.equal((await call('/surveys/s_demo1/export?format=csv', { cookie: owner })).status, 200, 'pemilik tidak terikat allow_individual');
+  assert.equal((await call('/surveys/s_demo1/export?format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: owner })).status, 200, 'pemilik tidak terikat allow_individual');
 
   const codebook = await call('/surveys/s_demo1/export?format=codebook', { cookie: fullGrant });
   assert.equal(codebook.status, 200, codebook.text);
@@ -202,7 +202,7 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
     assert.equal((await call('/surveys/s_demo1/export', { cookie: fullGrant })).body?.code, 'forbidden_export');
 
     await denyCodebook(true);
-    const individualDenied = await call('/surveys/s_demo1/export?format=csv', { cookie: fullGrant });
+    const individualDenied = await call('/surveys/s_demo1/export?format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: fullGrant });
     assert.equal(individualDenied.status, 403, 'can_read_individual tanpa allow_individual tetap ditolak');
     assert.equal(individualDenied.body?.code, 'forbidden_export_individual');
   } finally {
@@ -215,7 +215,7 @@ test('SEC-03: izin ekspor grant tidak melewati allow_individual', async () => {
     body: { allowResults: true, allowIndividual: true },
   });
   assert.equal(restoredSettings.status, 200, restoredSettings.text);
-  const restored = await call('/surveys/s_demo1/export?format=csv', { cookie: fullGrant });
+  const restored = await call('/surveys/s_demo1/export?format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: fullGrant });
   assert.equal(restored.status, 200, restored.text);
   const header = csvRows(restored.text)[0]!;
   assert.ok(header.includes('respondent_id') && header.includes('identity_source'), `header CSV kurang: ${header.join(',')}`);

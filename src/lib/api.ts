@@ -312,12 +312,27 @@ export async function getResponses(id: string, versionId: string): Promise<Indiv
   );
 }
 
-export async function downloadExport(id: string, versionId: string, format: 'csv' | 'codebook'): Promise<{ blob: Blob; filename: string }> {
+/**
+ * KP-03/BF-07: ekspor CSV memuat baris per-responden, jadi server mewajibkan recipient+purpose
+ * (diteruskan lewat header `X-Export-*`, bukan URL, agar tidak tercatat di log akses). Kodebook tidak
+ * mengirim keduanya.
+ */
+export async function downloadExport(
+  id: string,
+  versionId: string,
+  format: 'csv' | 'codebook',
+  context?: { recipient: string; purpose: string },
+): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = { 'X-Svara-Client': 'web' };
+  if (format === 'csv' && context) {
+    headers['X-Export-Recipient'] = context.recipient;
+    headers['X-Export-Purpose'] = context.purpose;
+  }
   let response: Response;
   try {
     response = await fetch(
       `/api/v1/surveys/${encodeURIComponent(id)}/export?version=${encodeURIComponent(versionId)}&format=${format}`,
-      { credentials: 'same-origin', headers: { 'X-Svara-Client': 'web' } },
+      { credentials: 'same-origin', headers },
     );
   } catch {
     throw new ApiError(0, { code: 'network_error', error: 'Server tidak dapat dijangkau.' });
