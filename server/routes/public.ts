@@ -337,16 +337,34 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
   const invitation = await invitationForToken(token);
   if (invitation) {
     const assignment = await get<AssignmentRow>('SELECT * FROM assignments WHERE id = ?', invitation.assignment_id);
-    const version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
+    let version = await get<VersionRow>('SELECT * FROM survey_versions WHERE id = ?', invitation.version_id);
     const survey = await get<SurveyRow>('SELECT * FROM surveys WHERE id = ?', invitation.survey_id);
     if (!assignment || !version || !survey) fail(404, 'token_not_found', 'Tautan tidak dikenal.');
-    const profile = await noticeSourceFor(survey);
-    const notice = await noticeForVersion(profile, version.notice_version);
     const existing = await get<{ id: string }>('SELECT id FROM responses WHERE assignment_id = ? LIMIT 1', assignment.id);
     let state = baseState(version, survey);
     if (invitation.status === 'used' || existing) state = 'used';
     else if (invitation.status === 'revoked') state = 'revoked';
     else if (invitation.status === 'expired' || invitationExpired(invitation.expires_at)) state = 'expired';
+    // KP-04/NR-05: undangan yang diterbitkan untuk versi lama disajikan sebagai versi terbit terbaru,
+    // sama seperti tautan umum BF-04. Kewajiban persetujuan ulang ditegakkan SEC-02: consent_records
+    // terikat version_id+notice_version, jadi persetujuan v1 tidak membuka formulir v2. Status undangan
+    // used/revoked/expired dan survei yang tidak terbit tetap 'closed' — tidak ada versi pengganti
+    // dikarang bila versi lama ditutup tanpa penerbitan baru.
+    if (state === 'closed' && version.status !== 'published' && survey.status === 'published') {
+      const latest = await get<VersionRow>(
+        `SELECT * FROM survey_versions
+         WHERE survey_id = ? AND status = 'published' AND number > ?
+         ORDER BY number DESC LIMIT 1`,
+        survey.id,
+        version.number,
+      );
+      if (latest) {
+        version = latest;
+        state = 'active';
+      }
+    }
+    const profile = await noticeSourceFor(survey);
+    const notice = await noticeForVersion(profile, version.notice_version);
     const { questions, options } = await publicQuestions(version.id);
     return {
       kind: 'invitation',

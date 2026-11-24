@@ -350,13 +350,15 @@ test('M4: bootstrap menandai undangan versi yang sudah tidak terbit sebagai ditu
   assert.equal(INVITATION_STATUS_LABEL[statusOf(active.invitation.id)!], 'Ditutup');
   assert.ok(INVITATION_STATUS_TONE[statusOf(active.invitation.id)!], 'tone badge tersedia');
 
-  // Status tampilan saja: baris undangan tidak diubah, dan formulir publik memang tertutup.
+  // Status tampilan saja: baris undangan tidak diubah. Formulir publik meremap ke versi terbit terbaru
+  // (KP-04/NR-05), bukan tertutup.
   assert.equal((await get<{ status: string }>('SELECT status FROM invitations WHERE id = ?', active.invitation.id))?.status, 'active');
   const resolved = await request('/public/invitations/resolve', 'POST', { code: active.invitation.code });
   assert.equal(resolved.status, 200, JSON.stringify(resolved.json));
   // SEC-09: penukaran kode mengembalikan URL berisi ID undangan, bukan token mentah.
   const form = await publicContext((resolved.json.data as { url: string }).url.replace(/^\/s\//u, ''));
-  assert.equal(form.data.state, 'closed');
+  assert.equal(form.data.state, 'active');
+  assert.equal(form.data.version.number, 2, 'undangan v1 menyajikan versi terbit terbaru (KP-04)');
 });
 
 test('Publish menolak survei organisasi yang notice-nya tidak tersedia, lalu menerima setelah notice tersedia', async () => {
