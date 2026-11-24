@@ -83,6 +83,25 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
+/** Tautan umum: `pl_` + base64url 12 byte (16 karakter). */
+const LINK_TOKEN = /^pl_[A-Za-z0-9_-]{16}$/u;
+/** Token undangan: 18 byte base64url (24 karakter). */
+const INVITATION_TOKEN = /^[A-Za-z0-9_-]{24}$/u;
+/** `newId('inv')`: ID undangan adalah referensi, bukan kredensial. */
+const INVITATION_ID = /^inv_[0-9a-f]{16}$/u;
+
+/**
+ * SEC-10: token pada path `/s/:token` ditukar menjadi hash sebelum lookup, dan SQL hanya membandingkan
+ * `token_hash`. Bentuk nilai menentukan pembacaan: token bertaut hash, atau ID undangan hasil penukaran
+ * kode (SEC-09) yang bukan kredensial. Nilai lain tidak pernah menyentuh basis data.
+ */
+export function publicTokenShape(token: string): 'link' | 'invitation' | 'invitation_id' | null {
+  if (LINK_TOKEN.test(token)) return 'link';
+  if (INVITATION_TOKEN.test(token)) return 'invitation';
+  if (INVITATION_ID.test(token)) return 'invitation_id';
+  return null;
+}
+
 export async function createSession(accountId: string): Promise<{ token: string; expiresAt: string }> {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + SESSION_MS).toISOString();

@@ -91,6 +91,33 @@ export interface GrantRow {
   can_read_individual: number;
   can_export: number;
   can_read_free_text: number;
+  /** BR-06: alasan pemberian grant; wajib diisi super admin sejak migrasi 021. */
+  purpose: string | null;
+  /** BR-06: grant berlaku sampai waktu ini; NULL = tanpa batas. */
+  expires_at: string | null;
+  /** BR-06: akun super admin pemberi grant. */
+  granted_by: string | null;
+}
+
+/**
+ * BR-06: grant kedaluwarsa tidak berlaku lagi tanpa menghapus barisnya. Waktu yang tidak dapat diurai
+ * dianggap sudah lewat (fail-closed), sama dengan tautan publik.
+ */
+export function grantActive(grant: Pick<GrantRow, 'expires_at'>, now = Date.now()): boolean {
+  if (grant.expires_at === null) return true;
+  const at = Date.parse(grant.expires_at);
+  return Number.isFinite(at) && at > now;
+}
+
+/**
+ * SEC-15: grant kepada akun super admin adalah jalur akses data yang diberikan untuk diri sendiri.
+ * Super admin dikecualikan dari jangkauan grant (`accessibleSurveys`, `permissionsFor`), jadi grant
+ * semacam itu hanya menambah izin baca jawaban tanpa pengawasan kedua.
+ */
+export function rejectSelfGrant(granteeId: string, requesterId: string | undefined, role: string | undefined): void {
+  if (granteeId === requesterId || role === 'super_admin') {
+    fail(422, 'self_grant_forbidden', 'Grant akses data tidak dapat diberikan kepada akun super admin.');
+  }
 }
 
 export async function surveyRow(id: string): Promise<SurveyRow | undefined> {
@@ -102,11 +129,16 @@ export async function versionRow(id: string): Promise<VersionRow | undefined> {
 }
 
 /**
- * Pemilik mengelola surveinya sendiri. org_admin mengelola survei milik organisasinya;
- * survei tanpa organisasi (NULL) tidak pernah jatuh ke org_admin.
+ * Pemilik mengelola survei miliknya sendiri bila survei itu bertaut organisasi: tautan hanya sah selama
+ * akunnya masih anggota organisasi tersebut (BR-11). Keluar dari organisasi mencabut hak kelola tanpa
+ * mengubah baris survei, sama seperti pemilik `organization_id` NULL yang dikelola siapa pun tanpa
+ * organisasi. org_admin mengelola survei milik organisasinya; survei tanpa organisasi (NULL) tidak
+ * pernah jatuh ke org_admin.
  */
 export function canManageSurvey(account: AccountRow, survey: SurveyRow): boolean {
-  if (survey.owner_id === account.id) return true;
+  if (survey.owner_id === account.id) {
+    return survey.organization_id === null || account.organization_id === survey.organization_id;
+  }
   return (
     account.role === 'org_admin' &&
     account.organization_id !== null &&
@@ -128,22 +160,30 @@ export async function accessibleSurveys(account: AccountRow): Promise<SurveyRow[
       account.organization_id,
     );
   }
+  // Grant kedaluwarsa tidak ikut menyumbang survei, baik bagi creator maupun peran lain.
+  const now = new Date().toISOString();
   if (account.role === 'creator') {
     return all<SurveyRow>(
       `SELECT s.* FROM surveys s
         WHERE s.owner_id = ?
-           OR EXISTS (SELECT 1 FROM access_grants g WHERE g.survey_id = s.id AND g.account_id = ?)
+           OR EXISTS (
+                SELECT 1 FROM access_grants g
+                 WHERE g.survey_id = s.id AND g.account_id = ?
+                   AND (g.expires_at IS NULL OR g.expires_at > ?))
         ORDER BY s.updated_at DESC, s.id`,
       account.id,
       account.id,
+      now,
     );
   }
   return all<SurveyRow>(
     `SELECT DISTINCT s.*
        FROM surveys s JOIN access_grants g ON g.survey_id = s.id
       WHERE g.account_id = ?
+        AND (g.expires_at IS NULL OR g.expires_at > ?)
       ORDER BY s.updated_at DESC, s.id`,
     account.id,
+    now,
   );
 }
 
@@ -151,8 +191,17 @@ export async function canReadSurveyMetadata(account: AccountRow, survey: SurveyR
   return canManageSurvey(account, survey) || account.role === 'super_admin' || Boolean(await grantFor(account.id, survey.id));
 }
 
+/**
+ * Grant yang masih berlaku untuk akun pada survei. Grant kedaluwarsa tetap tersimpan (riwayat dan
+ * `granted_by`) tetapi tidak memberi izin apa pun.
+ */
 export async function grantFor(accountId: string, surveyId: string): Promise<GrantRow | undefined> {
-  return get<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? AND survey_id = ?', accountId, surveyId);
+  const grant = await get<GrantRow>(
+    'SELECT * FROM access_grants WHERE account_id = ? AND survey_id = ?',
+    accountId,
+    surveyId,
+  );
+  return grant && grantActive(grant) ? grant : undefined;
 }
 
 export async function settingsFor(

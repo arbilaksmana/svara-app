@@ -112,7 +112,7 @@ scripts/         Smoke test web
 ```
 
 - `server/db.ts` menyediakan `all/get/run/withTx` async. Transaksi memakai satu client lewat `AsyncLocalStorage`, jadi query di dalam `withTx` ikut rollback saat error.
-- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`019`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
+- `server/migrations/` berisi skema 30 tabel (migrasi `001`–`022`, di luar `schema_migrations`) dengan foreign key, unique constraint, dan indeks; `schema_migrations` mencatat versi dan checksum. `server/test/migrations.test.ts` memeriksa jumlah tabel itu.
 - `src/lib/server/guards.ts` membaca cookie sesi lalu memanggil `/api/v1/auth/me` (hanya sesi, tanpa bootstrap penuh) untuk guard peran di server component.
 - `src/components/CreatorBootGate.tsx` menahan layar creator sampai bootstrap selesai, sehingga tidak merender data kosong.
 - `src/lib/navigation-guard.tsx` memblokir navigasi saat draf belum tersimpan (`window.confirm` untuk tautan, `beforeunload` untuk reload/tab).
@@ -147,6 +147,8 @@ scripts/         Smoke test web
 - Pemulihan bukti memerlukan kunci idempotensi dan sesi responden yang mengonsumsi persetujuan. Setelah memuat ulang halaman tinjau, sesi itu dapat mengirim ulang jawaban identik dengan kunci yang sama tanpa membuat respons baru; formulir pengisian tetap terkunci.
 - Rate limit login dan pengiriman, audit log append-only, CSP nonce tanpa `unsafe-inline` pada `script-src`, serta `X-Frame-Options`, `Referrer-Policy`, dan `Permissions-Policy`.
 - Hapus pertanyaan, tutup versi, arsipkan survei, dan cabut undangan meminta konfirmasi eksplisit.
+- **Token tautan dan undangan hanya disimpan sebagai hash** (SEC-09/SEC-10/BR-10, migrasi `022_drop_plaintext_link_tokens.sql`). `public_links.token_hash` dan `invitations.token_hash` adalah satu-satunya pembanding; path `/s/:token` hanya menerima bentuk yang pernah diterbitkan (tautan `pl_` + 16 karakter base64url, undangan 24 karakter) atau ID undangan `inv_…` hasil penukaran kode, dan bentuk lain ditolak `404` tanpa query. Token keluar sekali pada respons penerbitan: `POST /surveys/:id/invitations` dan `POST /surveys/:id/publish` (tautan umum baru). Tautan umum dapat dicetak ulang lewat `POST /surveys/:id/public-link/token`, yang menerbitkan token baru dan mematikan yang lama. Bootstrap tidak lagi memuat token undangan/tautan umum, dan `POST /public/invitations/resolve` mengembalikan `url` formulir berisi ID undangan, bukan token mentah. Kode undangan 32 bit (`UND-` + 8 heksadesimal) agar tidak dapat ditebak dalam hitungan jam; batas percobaan resolver tetap 20 per 10 menit per alamat, dan pertukaran kode yang berhasil diaudit.
+- `GET /public/policy` membaca kontak dan halaman kebijakan dari `organizations` dan `platform_profile` (`data.sources`), bukan tabel `profiles`/`notices` legacy; `synthetic_placeholder` hanya `true` bila tidak satu pun organisasi mengisi `data_request_contact` (BF-10).
 
 ## Organisasi dan lingkup
 
@@ -170,14 +172,20 @@ Apa artinya untuk visibilitas (`canManageSurvey` dan `accessibleSurveys` di `ser
 
 | Akun | Daftar survei | Mengelola |
 | --- | --- | --- |
-| `super_admin` | Semua survei | Semua survei |
+| `super_admin` | Semua survei | Tidak ada (lihat catatan) |
 | `org_admin` | Survei dengan `organization_id` organisasinya | Survei organisasinya saja; survei `organization_id` NULL tidak pernah jatuh ke `org_admin` |
 | `creator` | Survei miliknya dan survei yang diberi grant ke akun itu | Survei miliknya saja; grant tidak memberi hak kelola |
 | Selain itu | Survei yang diberi grant | Tidak ada, hanya grant |
 
-Mengelola berarti pemilik (`owner_id`) atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`canManageSurvey`). Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
+Mengelola berarti pemilik (`owner_id`) yang masih anggota organisasi survei, atau `org_admin` dari organisasi survei; akun tanpa organisasi tidak dapat mengelola lewat jalur `org_admin` (`canManageSurvey`). Pemilik survei organisasi yang keluar dari organisasi itu kehilangan hak kelola pada permintaan berikutnya tanpa perubahan baris survei (BR-11); `org_admin` organisasi tersebut tetap mengelola. Creator rekan satu organisasi tidak otomatis melihat atau mengelola survei rekan tersebut; jalurnya tetap grant per survei.
 
-`GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
+**SEC-16: ambang k-anonim ringkasan.** `GET /surveys/:id/summary` menahan total dan butir per pertanyaan (termasuk `free_text_count`) selama versi tersebut belum menerima 5 respons (`SUMMARY_MIN_RESPONSES` di `server/summary.ts`): `total` menjadi `null`, `items` kosong, dan `fewer_than: 5` menjelaskan jumlah yang ditahan. Ambang berlaku untuk semua peran yang boleh membaca ringkasan. Parameter kelompok kecil yang lebih rinci tetap terbuka (PRD §9.5).
+
+**BR-04:** `super_admin` melihat seluruh survei lewat `GET /surveys` dan metrik operasional, tetapi `canManageSurvey` tidak memberinya hak kelola: penyimpanan, publikasi, undangan, pengaturan, maupun ekspor memerlukan grant. Pemberian grant kepada akun `super_admin` ditolak `422 self_grant_forbidden` (SEC-15), jadi super admin tidak dapat menambah izin baca jawaban untuk dirinya sendiri lewat API.
+
+`GET /surveys` dan bootstrap memakai daftar yang sama, terurut `updated_at DESC, id`, tanpa baris duplikat bila pemilik juga memiliki grant. Grant yang lewat `expires_at` tidak ikut menyumbang survei.
+
+**BR-06: grant bertujuan, berpemberi, dan bermasa berlaku.** `PUT /admin/grants/:accountId` dan `PUT /admin/grants` mewajibkan `purpose` (3–300 karakter) pada setiap grant, dan menerima `expires_at` ISO-8601 berzona waktu (`null` = tanpa batas; waktu di masa lalu ditolak `422` — grant dicabut dengan menghapusnya). `granted_by` diisi server dari akun super admin pemanggil, tidak dapat dipalsukan lewat payload. Grant kedaluwarsa tetap tersimpan beserta riwayatnya, tetapi `grantFor`/`accessibleSurveys` mengabaikannya, jadi izin baca, ekspor, dan daftar survei menyusut otomatis tanpa menghapus baris. Kolom ditambahkan migrasi `021_access_grant_provenance.sql` (nullable, aman untuk grant lama); detail grant untuk setiap perubahan tercatat di `audit_logs.metadata.grants` (SEC-14). Data distribusi di bootstrap (`invitations`, `publicLinks`, `assignments`) tetap terbatas pada survei yang dapat dikelola, bukan seluruh survei yang terlihat.
 
 Daftar creator memberi label "Diberikan akses" pada survei bukan miliknya. Baris tersebut hanya menawarkan "Lihat hasil"; navigasi surveinya hanya "Hasil", tanpa Editor, Pratinjau, Publikasi, Bagikan, Pengaturan, atau Riwayat. Hak baca hasil dan ekspor tetap diperiksa API sesuai grant dan pengaturan survei.
 
@@ -472,10 +480,12 @@ Organisasi sintetis (`seedDemoIfEmpty` di `server/seed-data.ts`):
 
 `platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 
-- `link-umum-demo`: survei SMK, mode wali, pemberitahuan sintetis.
-- `link-umum-perpus`: survei perpustakaan, persetujuan diri.
-- `undangan-demo`: undangan satu kali.
+- `pl_demoTautanUmum1A`: tautan umum survei SMK, mode wali, pemberitahuan sintetis.
+- `pl_demoTautanPrps01`: tautan umum survei perpustakaan, persetujuan diri.
+- `undanganDemo01AAAAAAAAAA`: undangan satu kali; kodenya `UND-01-AKTIF`.
 - Kode undangan individual juga bisa dibuka dari halaman masuk lewat "Saya memiliki kode undangan".
+
+Token di atas adalah konstanta demo di kode seed (`server/seed-data.ts`); basis data hanya menyimpan hash-nya, sama seperti token yang diterbitkan aplikasi.
 
 ## Skrip demo
 

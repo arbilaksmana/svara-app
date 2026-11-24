@@ -12,6 +12,7 @@ import {
   newId,
   parseLimit,
   pathParam,
+  rejectSelfGrant,
   sendError,
 } from '../http.ts';
 
@@ -29,6 +30,25 @@ interface GrantInput {
   can_read_individual: boolean;
   can_export: boolean;
   can_read_free_text: boolean;
+  /** BR-06: wajib diisi; tanpa tujuan, grant lintas tenant tidak dapat ditinjau. */
+  purpose: string;
+  expires_at: string | null;
+  granted_by: string;
+}
+
+/**
+ * BR-06: `expires_at` masa lalu ditolak — super admin yang ingin mencabut grant menghapus barisnya.
+ * Nilai tak-terurai atau tanpa zona waktu ditolak agar kedaluwarsa tidak ambigu antar zona.
+ */
+function grantExpiry(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  const at = Date.parse(value);
+  if (!value || Number.isNaN(at) || !/[zZ]|[+-]\d{2}:?\d{2}$/u.test(value)) {
+    fail(422, 'validation_error', 'expires_at harus waktu ISO-8601 dengan zona waktu, atau null.');
+  }
+  if (at <= Date.now()) fail(422, 'validation_error', 'expires_at harus di masa depan; hapus grant untuk mencabutnya.');
+  return value;
 }
 
 interface EventRow {
@@ -55,15 +75,24 @@ async function activeSuperAdmins(): Promise<number> {
   );
 }
 
-adminRouter.get('/admin/accounts', async (_req: AuthedRequest, res: Response) => {
+adminRouter.get('/admin/accounts', async (req: AuthedRequest, res: Response) => {
   try {
     const accounts = await all<AccountRow & { created_at: string }>(
       'SELECT id, email, display_name, role, status, organization_id, created_at FROM accounts ORDER BY display_name',
     );
+    // Grant ikut lingkup akun penerima: creator/super_admin hanya melihat grant yang berlaku untuknya.
+    // Penerima grant adalah akun non-super_admin, jadi penyaring `g.account_id` tidak menghilangkan grant
+    // milik akun lain bagi super admin (`g.account_id = g.account_id`).
     const grants = await all<Record<string, unknown>>(
       `SELECT g.*, s.title AS survey_title
-         FROM access_grants g LEFT JOIN surveys s ON s.id = g.survey_id
+         FROM access_grants g
+         LEFT JOIN surveys s ON s.id = g.survey_id
+         LEFT JOIN accounts a ON a.id = g.account_id
+        WHERE a.role <> 'super_admin'
+          AND (g.account_id = ? OR ? = 'super_admin')
         ORDER BY g.account_id, g.survey_id`,
+      req.account!.id,
+      req.account!.role,
     );
     res.json({ data: { accounts, grants } });
   } catch (error) {
@@ -348,9 +377,20 @@ adminRouter.put('/admin/platform-profile', async (req: AuthedRequest, res: Respo
   }
 });
 
-async function replaceGrants(accountId: string, grants: GrantInput[]): Promise<void> {
-  const account = await get<{ id: string }>('SELECT id FROM accounts WHERE id = ?', accountId);
+/** Baris audit izin (SEC-14): per grant, siapa memberi, untuk apa, dan sampai kapan. */
+function grantAuditRows(rows: GrantInput[]): Array<Record<string, unknown>> {
+  return rows.map((grant) => ({
+    survey_id: grant.survey_id,
+    purpose: grant.purpose,
+    expires_at: grant.expires_at,
+    granted_by: grant.granted_by,
+  }));
+}
+
+async function replaceGrants(accountId: string, grants: GrantInput[], grantedBy: string): Promise<void> {
+  const account = await get<{ id: string; role: string }>('SELECT id, role FROM accounts WHERE id = ?', accountId);
   if (!account) fail(404, 'account_not_found', 'Akun tidak ditemukan.');
+  rejectSelfGrant(account.id, grantedBy, account.role);
   for (const grant of grants) {
     if (grant.survey_id) {
       const survey = await get<{ id: string }>('SELECT id FROM surveys WHERE id = ?', grant.survey_id);
@@ -361,36 +401,49 @@ async function replaceGrants(accountId: string, grants: GrantInput[]): Promise<v
     await run('DELETE FROM access_grants WHERE account_id = ?', accountId);
     for (const grant of grants) {
       await run(
-        `INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text,
+                                    purpose, expires_at, granted_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         newId('g'),
         accountId,
         grant.survey_id,
         grant.can_read_individual ? 1 : 0,
         grant.can_export ? 1 : 0,
         grant.can_read_free_text ? 1 : 0,
+        grant.purpose,
+        grant.expires_at,
+        grant.granted_by,
       );
     }
   });
 }
 
-function parseGrant(raw: unknown): GrantInput {
+/** `grantedBy` adalah super admin pemanggil: pemberi grant tidak dapat dipalsukan lewat payload. */
+function parseGrant(raw: unknown, grantedBy: string): GrantInput {
   if (!raw || typeof raw !== 'object') fail(422, 'validation_error', 'Data izin tidak valid.');
   const row = raw as Record<string, unknown>;
+  const purpose = typeof row.purpose === 'string' ? row.purpose.trim() : '';
+  if (purpose.length < 3 || purpose.length > 300) {
+    fail(422, 'validation_error', 'purpose grant wajib diisi 3-300 karakter.');
+  }
   return {
     survey_id: typeof row.survey_id === 'string' && row.survey_id ? row.survey_id : null,
     can_read_individual: asBoolean(row.can_read_individual, false),
     can_export: asBoolean(row.can_export, false),
     can_read_free_text: asBoolean(row.can_read_free_text, false),
+    purpose,
+    expires_at: grantExpiry(row.expires_at),
+    granted_by: grantedBy,
   };
 }
 
 adminRouter.put('/admin/grants/:id', async (req: AuthedRequest, res: Response) => {
   try {
-    const raw = Array.isArray(req.body?.grants) ? req.body.grants : [];
-    const grants = raw.map(parseGrant);
-    await replaceGrants(pathParam(req, 'id'), grants);
-    await audit(req, 'Ubah izin akses', pathParam(req, 'id'), 'berhasil', { grants: grants.length });
+    const grantedBy = req.account!.id;
+    const raw: unknown[] = Array.isArray(req.body?.grants) ? (req.body.grants as unknown[]) : [];
+    const grants = raw.map((item) => parseGrant(item, grantedBy));
+    await replaceGrants(pathParam(req, 'id'), grants, grantedBy);
+    await audit(req, 'Ubah izin akses', pathParam(req, 'id'), 'berhasil', { grants: grantAuditRows(grants) });
     res.json({ data: { ok: true, grants } });
   } catch (error) {
     sendError(res, error);
@@ -399,28 +452,37 @@ adminRouter.put('/admin/grants/:id', async (req: AuthedRequest, res: Response) =
 
 adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
   try {
-    const raw = Array.isArray(req.body?.grants) ? req.body.grants : [];
-    const byAccount = new Map<string, GrantInput[]>();
+    const grantedBy = req.account!.id;
+    const raw: unknown[] = Array.isArray(req.body?.grants) ? (req.body.grants as unknown[]) : [];
+    const rawByAccount = new Map<string, unknown[]>();
     for (const item of raw) {
       if (!item || typeof item !== 'object') fail(422, 'validation_error', 'Data izin tidak valid.');
       const row = item as Record<string, unknown>;
       const accountId = asString(row.account_id ?? '', 'account_id', 100);
       if (!accountId) fail(422, 'validation_error', 'account_id wajib diisi.');
-      const list = byAccount.get(accountId) ?? [];
-      list.push(parseGrant(item));
-      byAccount.set(accountId, list);
+      const list = rawByAccount.get(accountId) ?? [];
+      list.push(item);
+      rawByAccount.set(accountId, list);
     }
-    const accountIds = [...byAccount.keys()];
+    const accountIds = [...rawByAccount.keys()];
+    // SEC-15 diperiksa sebelum bentuk payload lain: balasan harus menyebut aturannya, bukan field pertama
+    // yang kebetulan kosong.
+    const known = accountIds.length
+      ? await all<{ id: string; role: string }>(
+          `SELECT id, role FROM accounts WHERE id IN (${accountIds.map(() => '?').join(',')})`,
+          ...accountIds,
+        )
+      : [];
+    for (const account of known) rejectSelfGrant(account.id, grantedBy, account.role);
+    const byAccount = new Map<string, GrantInput[]>(
+      [...rawByAccount].map(([accountId, items]) => [accountId, items.map((item) => parseGrant(item, grantedBy))] as const),
+    );
     await withTx(async () => {
       // Hanya akun yang disebut pada payload yang izinnya diganti; izin akun lain tetap utuh.
       if (accountIds.length > 0) {
-        const list = await all<{ id: string }>(
-          `SELECT id FROM accounts WHERE id IN (${accountIds.map(() => '?').join(',')})`,
-          ...accountIds,
-        );
-        if (list.length !== accountIds.length) {
-          const known = new Set(list.map((row) => row.id));
-          fail(422, 'account_not_found', `Akun ${accountIds.find((id) => !known.has(id))} tidak ditemukan.`);
+        if (known.length !== accountIds.length) {
+          const knownIds = new Set(known.map((row) => row.id));
+          fail(422, 'account_not_found', `Akun ${accountIds.find((id) => !knownIds.has(id))} tidak ditemukan.`);
         }
         await run(
           `DELETE FROM access_grants WHERE account_id IN (${accountIds.map(() => '?').join(',')})`,
@@ -433,19 +495,26 @@ adminRouter.put('/admin/grants', async (req: AuthedRequest, res: Response) => {
             fail(422, 'survey_not_found', `Survei ${grant.survey_id} tidak ditemukan.`);
           }
           await run(
-            `INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text,
+                                        purpose, expires_at, granted_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             newId('g'),
             accountId,
             grant.survey_id,
             grant.can_read_individual ? 1 : 0,
             grant.can_export ? 1 : 0,
             grant.can_read_free_text ? 1 : 0,
+            grant.purpose,
+            grant.expires_at,
+            grant.granted_by,
           );
         }
       }
     });
-    await audit(req, 'Ubah izin akses', accountIds.join(', ') || 'tidak ada akun', 'berhasil', { rows: raw.length });
+    const detail = [...byAccount.entries()].flatMap(([accountId, grants]) =>
+      grants.map((grant) => ({ account_id: accountId, ...grantAuditRows([grant])[0] })),
+    );
+    await audit(req, 'Ubah izin akses', accountIds.join(', ') || 'tidak ada akun', 'berhasil', { grants: detail });
     res.json({ data: { ok: true } });
   } catch (error) {
     sendError(res, error);

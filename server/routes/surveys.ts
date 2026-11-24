@@ -199,7 +199,13 @@ async function detailFor(surveyId: string) {
     versionDetails.push({ ...version, question_ids: rows.map((question) => question.id) });
     for (const row of rows) questions.push(await serializeQuestion(row));
   }
-  return { survey, versions: versionDetails, questions, profile: await surveyProfileFor(survey) };
+  // Tautan umum hanya untuk survei ini: pemegang izin kelola dapat memulihkan tokennya satu per satu
+  // (POST /surveys/:id/public-link/token), bukan dari daftar lintas survei di bootstrap.
+  const publicLinks = await all<Record<string, unknown>>(
+    'SELECT id, survey_id, version_id, label, status, expires_at, created_at FROM public_links WHERE survey_id = ? ORDER BY created_at DESC',
+    surveyId,
+  );
+  return { survey, versions: versionDetails, questions, profile: await surveyProfileFor(survey), publicLinks };
 }
 
 function parseQuestions(raw: unknown): QuestionInput[] {
@@ -602,32 +608,38 @@ surveysRouter.post('/surveys/:id/publish', async (req: AuthedRequest, res: Respo
       await closePublishedVersions(survey.id, now, 'superseded');
       await run('UPDATE survey_versions SET status = ?, published_at = ? WHERE id = ?', 'published', now, draft.id);
       await run('UPDATE surveys SET status = ?, current_version_id = ?, updated_at = ? WHERE id = ?', 'published', draft.id, now, survey.id);
-      const existing = await get<{ token: string }>(
-        'SELECT token FROM public_links WHERE survey_id = ? AND version_id = ? LIMIT 1',
+      const existing = await get<{ id: string }>(
+        'SELECT id FROM public_links WHERE survey_id = ? AND version_id = ? LIMIT 1',
         survey.id,
         draft.id,
       );
-      const publicToken = existing?.token ?? `pl_${randomBytes(12).toString('base64url')}`;
-      if (!existing) {
-        await run(
-          `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?)`,
-          newId('pl'),
-          survey.id,
-          draft.id,
-          publicToken,
-          sha256Hex(publicToken),
-          `Tautan umum · ${survey.title}`,
-          now,
-        );
+      if (existing) {
+        // SEC-10: token hanya disimpan sebagai hash. Tautan yang sudah ada dapat dicetak ulang oleh
+        // pemegang izin kelola lewat POST /surveys/:id/public-link/token, bukan dibaca balik di sini.
+        return { draft, publicToken: null };
       }
+      const publicToken = `pl_${randomBytes(12).toString('base64url')}`;
+      await run(
+        `INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', NULL, ?)`,
+        newId('pl'),
+        survey.id,
+        draft.id,
+        sha256Hex(publicToken),
+        `Tautan umum · ${survey.title}`,
+        now,
+      );
       return { draft, publicToken };
     });
     await audit(req, 'Publikasi versi', `${survey.id} · v${draft.number}`, 'berhasil');
     res.json({
       data: {
         version: (await versionRows(survey.id)).find((version) => version.id === draft.id),
-        publicLink: { token: publicToken, url: `/s/${publicToken}` },
+        // `tokenPending: true` berarti tautan umum sudah ada dan tokennya tidak dapat dibaca balik
+        // (SEC-10); UI mencetak ulang lewat POST /surveys/:id/public-link/token.
+        publicLink: publicToken
+          ? { token: publicToken, url: `/s/${publicToken}`, tokenPending: false }
+          : { token: null, url: null, tokenPending: true },
         detail: await detailFor(survey.id),
       },
     });
@@ -695,7 +707,8 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
     const expiresAt = invitationExpiresAt(req.body?.expires_at);
     const assignmentId = newId('a');
     const invitationId = newId('inv');
-    const code = `UND-${randomBytes(3).toString('hex').toUpperCase()}`;
+    // SEC-09: 4 byte = 32 bit; kode 3 byte (24 bit) dapat brute force dalam hitungan jam.
+    const code = `UND-${randomBytes(4).toString('hex').toUpperCase()}`;
     const token = randomBytes(18).toString('base64url');
     await withTx(async () => {
       await run(
@@ -707,20 +720,20 @@ surveysRouter.post('/surveys/:id/invitations', async (req: AuthedRequest, res: R
         `lokal-${randomBytes(3).toString('hex')}`,
       );
       await run(
-        `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token, token_hash, status, expires_at, used_at, revoked_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL, ?)`,
+        `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token_hash, status, expires_at, used_at, revoked_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL, ?)`,
         invitationId,
         assignmentId,
         survey.id,
         published.id,
         code,
-        token,
         sha256Hex(token),
         expiresAt,
         nowIso(),
       );
     });
-    // Kode undangan dapat ditukar menjadi token lewat resolver publik; audit hanya memuat ID.
+    // Kode undangan ditukar menjadi URL formulir lewat resolver publik; audit hanya memuat ID. Token
+    // mentah hanya ada di respons ini (SEC-10), karena basis data menyimpan hash saja.
     await audit(req, 'Buat undangan', `${survey.id} · ${invitationId}`, 'berhasil');
     res.status(201).json({
       data: {
@@ -792,6 +805,65 @@ surveysRouter.put('/surveys/:id/settings', async (req: AuthedRequest, res: Respo
     );
     await audit(req, 'Ubah pengaturan hasil', survey.id, 'berhasil', { allowResults, allowIndividual });
     res.json({ data: { allowResults, allowIndividual } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/**
+ * SEC-10: cetak ulang tautan umum satu survei. Token hanya ada sebagai hash, jadi satu-satunya cara
+ * menampilkannya lagi adalah menerbitkan token baru untuk baris `public_links` yang dipilih; bentuk
+ * token lama berhenti berlaku. Tautan diarahkan ke versi terbit terbaru (`latest`), bukan versi acuan
+ * pembuatan, karena tautan umum memang di-remap ke versi terbit terbaru (BF-04).
+ */
+surveysRouter.post('/surveys/:id/public-link/token', async (req: AuthedRequest, res: Response) => {
+  try {
+    if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
+    const survey = await requireManageSurvey(req.account, req.params.id);
+    const latest = await get<{ id: string }>(
+      `SELECT id FROM survey_versions WHERE survey_id = ? AND status = 'published' ORDER BY number DESC LIMIT 1`,
+      survey.id,
+    );
+    if (!latest) fail(409, 'no_published_version', 'Terbitkan versi sebelum mencetak tautan umum.');
+    const token = `pl_${randomBytes(12).toString('base64url')}`;
+    const linkId = await withTx(async () => {
+      // Tautan umum per survei adalah satu baris: mencetak ulang mengganti token, label, dan versi
+      // acuannya. Tautan lama berhenti berlaku pada saat yang sama (token hanya ada sebagai hash, jadi
+      // hash-nya diganti) dan daftar tautan tidak menumpuk.
+      const created = await get<{ id: string }>(
+        'SELECT id FROM public_links WHERE survey_id = ? ORDER BY created_at ASC, id ASC LIMIT 1',
+        survey.id,
+      );
+      const now = nowIso();
+      if (created) {
+        await run(
+          `UPDATE public_links
+              SET version_id = ?, token_hash = ?, label = ?, status = 'active', closed_reason = NULL,
+                  expires_at = NULL, created_at = ?
+            WHERE id = ?`,
+          latest.id,
+          sha256Hex(token),
+          `Tautan umum · ${survey.title}`,
+          now,
+          created.id,
+        );
+        return created.id;
+      }
+      const linkId = newId('pl');
+      await run(
+        `INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', NULL, ?)`,
+        linkId,
+        survey.id,
+        latest.id,
+        sha256Hex(token),
+        `Tautan umum · ${survey.title}`,
+        now,
+      );
+      return linkId;
+    });
+    await audit(req, 'Terbitkan token tautan umum', `${survey.id} · ${linkId}`, 'berhasil');
+    res.status(201).json({ data: { id: linkId, token, url: `/s/${token}` } });
   } catch (error) {
     sendError(res, error);
   }

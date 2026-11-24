@@ -311,8 +311,13 @@ test('NR-07: survei tertutup tanpa ?version memakai versi terakhir yang pernah t
 
   const summary = await request(`/surveys/${survey.id}/summary`, { cookie: creatorA });
   assert.equal(summary.status, 200, summary.text);
-  const summaryData = summary.json.data as { version_id: string; number: number; total: number };
-  assert.deepEqual([summaryData.version_id, summaryData.number, summaryData.total], [second.version.id, 2, 2]);
+  // SEC-16: versi default tetap dibuktikan lewat versi dan jumlah yang ditahan; total tidak diungkap
+  // karena hanya dua respons (di bawah ambang k-anonim).
+  const summaryData = summary.json.data as { version_id: string; number: number; total: number | null; fewer_than: number | null };
+  assert.deepEqual(
+    [summaryData.version_id, summaryData.number, summaryData.total, summaryData.fewer_than],
+    [second.version.id, 2, null, 5],
+  );
 
   const responses = await request(`/surveys/${survey.id}/responses`, { cookie: creatorA });
   assert.equal(responses.status, 200, responses.text);
@@ -331,7 +336,11 @@ test('NR-07: survei tertutup tanpa ?version memakai versi terakhir yang pernah t
 
   const v1 = await request(`/surveys/${survey.id}/summary?version=${survey.first.version.id}`, { cookie: creatorA });
   assert.equal(v1.status, 200, v1.text);
-  assert.deepEqual([(v1.json.data as { number: number }).number, (v1.json.data as { total: number }).total], [1, 1]);
+  assert.deepEqual(
+    [(v1.json.data as { number: number }).number, (v1.json.data as { total: number | null }).total],
+    [1, null],
+    'versi 1 di bawah ambang: total ditahan',
+  );
 
   // Izin tidak berubah: akun organisasi lain tetap ditolak di ketiga endpoint.
   const denied = await Promise.all(
@@ -358,9 +367,10 @@ test('NR-07: survei diarsipkan memakai versi terbit terakhir, bukan draf yang ik
   ]);
   const summary = await request(`/surveys/${survey.id}/summary`, { cookie: creatorA });
   assert.equal(summary.status, 200, summary.text);
+  // SEC-16: versi default (bukan draf yang ikut ditutup) dibuktikan; total ditahan karena di bawah ambang.
   assert.deepEqual(
-    [(summary.json.data as { number: number }).number, (summary.json.data as { total: number }).total],
-    [1, 1],
+    [(summary.json.data as { number: number }).number, (summary.json.data as { total: number | null }).total],
+    [1, null],
   );
 
   const draft = await data<{ survey: { id: string } }>(creatorA, '/surveys', 'POST', { title: 'Draf angket ekstrakurikuler', owner_scope: 'organization' });
@@ -610,9 +620,10 @@ test('Upgrade main → kini: survei yang ditutup/diarsipkan main dan permintaan 
   for (const [survey, versionNumber] of [[surveys[0]!, 1], [surveys[1]!, 1]] as const) {
     const summary = await request(`/surveys/${survey.id}/summary`, { cookie });
     assert.equal(summary.status, 200, `${survey.title}: ${summary.text}`);
+    // SEC-16: versi default dibuktikan dengan nomor versi; satu respons berada di bawah ambang k-anonim.
     assert.deepEqual(
-      [(summary.json.data as { number: number }).number, (summary.json.data as { total: number }).total],
-      [versionNumber, 1],
+      [(summary.json.data as { number: number }).number, (summary.json.data as { total: number | null }).total],
+      [versionNumber, null],
       survey.title,
     );
     const responses = await request(`/surveys/${survey.id}/responses`, { cookie });

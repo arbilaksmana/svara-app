@@ -304,10 +304,15 @@ test('UIX-01/BR-01: creator melihat survei ber-grant tanpa memperoleh hak kelola
     assert.ok(owned[key].some((row) => row.survey_id === 's_demo1'), `${key} tetap tersedia bagi pemilik`);
   }
 
-  const original = (await bootstrap(admin)).grants;
+  // BR-10/SEC-15: bootstrap super admin tidak lagi membawa grant akun lain; daftar awal dibaca dari
+  // /admin/accounts (grant sebagai izin baca data tidak lagi disalin ke payload super admin).
+  const original = data<{ grants: Array<{ account_id: string; survey_id: string | null; can_read_individual: boolean; can_export: boolean; can_read_free_text: boolean; purpose: string | null; expires_at: string | null }> }>(
+    await call('/admin/accounts', { cookie: admin }),
+  ).grants;
   const setGrants = async (accountId: string, surveyIds: string[]) => {
     const result = await call(`/admin/grants/${accountId}`, {
-      method: 'PUT', cookie: admin, body: { grants: surveyIds.map((survey_id) => ({ survey_id })) },
+      // BR-06: setiap grant baru wajib menyebut tujuannya.
+      method: 'PUT', cookie: admin, body: { grants: surveyIds.map((survey_id) => ({ survey_id, purpose: 'Uji izin akses' })) },
     });
     assert.equal(result.status, 200, result.text);
   };
@@ -326,7 +331,22 @@ test('UIX-01/BR-01: creator melihat survei ber-grant tanpa memperoleh hak kelola
   } finally {
     for (const id of ['u_creator_a', 'u_orgadmin', 'u_petugas']) {
       const restored = await call(`/admin/grants/${id}`, {
-        method: 'PUT', cookie: admin, body: { grants: original.filter((grant) => grant.account_id === id) },
+        method: 'PUT',
+        cookie: admin,
+        body: {
+          grants: original
+            .filter((grant) => grant.account_id === id)
+            .map((grant) => ({
+              survey_id: grant.survey_id,
+              can_read_individual: grant.can_read_individual,
+              can_export: grant.can_export,
+              can_read_free_text: grant.can_read_free_text,
+              purpose: grant.purpose,
+              // BR-06 menolak `expires_at` di masa lalu (grant dicabut dengan menghapusnya); grant seed
+              // yang sudah kedaluwarsa dikembalikan tanpa batas waktu di uji ini.
+              expires_at: grant.expires_at && Date.parse(grant.expires_at) > Date.now() ? grant.expires_at : null,
+            })),
+        },
       });
       assert.equal(restored.status, 200, restored.text);
     }
@@ -459,7 +479,11 @@ test('AC02: draf tidak lengkap tersimpan, blokir publikasi, salin konfigurasi ta
   assert.equal(publishCopy.status, 200, publishCopy.text);
   const copySummary = await call(`/surveys/${copy.survey.id}/summary?version=${copyVersionId}`, { cookie });
   assert.equal(copySummary.status, 200);
-  assert.equal((copySummary.json as { data: { total: number } }).data.total, 0);
+  // SEC-16: versi tanpa respons tidak mengungkap angka nol; ambangnya dilaporkan.
+  assert.deepEqual(
+    { total: (copySummary.json as { data: { total: number | null; fewer_than: number | null } }).data.total },
+    { total: null },
+  );
 });
 
 test('AC02/AC04: draf baru tidak menggantikan versi yang masih terbit pada tautan umum', async () => {
@@ -514,7 +538,7 @@ test('AC02/AC04: draf baru tidak menggantikan versi yang masih terbit pada tauta
   assert.ok(draft, 'versi draf baru dibuat');
   assert.equal(after.survey.current_version_id, draft.id);
 
-  const legacy = await call('/public/surveys/link-umum-demo');
+  const legacy = await call('/public/surveys/pl_demoTautanUmum1A');
   assert.equal(legacy.status, 200);
   assert.equal(data<{ version: { number: number } }>(legacy).version.number, published.number);
   assert.ok(!legacy.text.includes(draft.id), 'ID draf tidak dikirim ke responden');
@@ -660,7 +684,13 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
   const cookie = await session('creator.a@svara.local');
   const resolve = await call('/public/invitations/resolve', { method: 'POST', body: { code: 'UND-01-AKTIF' } });
   assert.equal(resolve.status, 200);
-  assert.equal((resolve.json as { data: { token: string } }).data.token, 'undangan-demo');
+  // SEC-09: token undangan hanya tersimpan sebagai hash; penukaran kode mengembalikan URL formulir
+  // berisi ID undangan, bukan token mentah.
+  const resolvedInvite = (resolve.json as { data: { token?: string; url: string } }).data;
+  assert.equal(resolvedInvite.token, undefined);
+  // ID seed `inv_01` bukan bentuk `newId` yang dikenali pembaca publik; yang diuji adalah kontrak
+  // resolver (URL formulir tanpa kredensial).
+  assert.equal(resolvedInvite.url, '/s/inv_01');
 
   const past = await call('/surveys/s_demo1/invitations', {
     method: 'POST',
@@ -692,7 +722,7 @@ test('AC03: tautan umum, kedaluwarsa, pencabutan, dan kode undangan', async () =
 });
 
 test('SEC-04/BF-03: referensi wali bebas tercatat self_attested, bukan verified', async () => {
-  const token = 'link-umum-demo';
+  const token = 'pl_demoTautanUmum1A';
   const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true, 'tautan demo wajib bermode wali');
 
@@ -976,7 +1006,7 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   assert.ok(summary.total >= 5);
   const ad01 = summary.items.find((item) => item.code === 'AD01');
   assert.ok(ad01);
-  assert.equal(ad01.options.length, 5, 'opsi tanpa pemilih tetap tampil');
+  assert.equal(ad01?.options.length, 5, 'opsi tanpa pemilih tetap tampil');
   assert.equal(ad01.answered, summary.total, 'semua respons seed harus menjawab item wajib AD01');
 
   const officerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv', { cookie: officer });
@@ -1051,7 +1081,7 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
 });
 
 test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai tersimpan', async () => {
-  const token = 'link-umum-demo';
+  const token = 'pl_demoTautanUmum1A';
   const context = data<{ guardianRequired: boolean; consent_version: string }>(await call(`/public/surveys/${token}`));
   assert.equal(context.guardianRequired, true);
   const issuedConsent = await call(`/public/surveys/${token}/consent`, {
@@ -1091,7 +1121,7 @@ test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh k
     version: { notice_version: string };
     consent_version: string;
     guardianRequired: boolean;
-  }>(await call('/public/surveys/link-umum-demo'));
+  }>(await call('/public/surveys/pl_demoTautanUmum1A'));
 
   // s_demo1 milik org_smk dengan consent_mode guardian dan notice_version versi 1.0.
   assert.equal(context.profile.source, 'organization');
@@ -1103,7 +1133,7 @@ test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh k
   assert.equal(context.notice.version, '1.0');
 
   const consent = data<{ consent_id: string; notice_version: string; notice_source: string }>(
-    await call('/public/surveys/link-umum-demo/consent', {
+    await call('/public/surveys/pl_demoTautanUmum1A/consent', {
       method: 'POST',
       body: { version_id: context.consent_version, respondent_click: true, eligibility: true, guardian_evidence_ref: 'ref-wali-sumber' },
     }),
@@ -1127,7 +1157,7 @@ test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh k
   } finally {
     await db.end();
   }
-  const failClosed = await call('/public/surveys/link-umum-demo');
+  const failClosed = await call('/public/surveys/pl_demoTautanUmum1A');
   assert.equal(failClosed.status, 500);
   assert.equal((failClosed.json as { code: string }).code, 'notice_version_unavailable');
 
@@ -1166,10 +1196,10 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
   // L-04: penangguhan menghapus semua sesi akun, jadi cookie cache lama tidak berlaku lagi.
   sessions.delete('creator.b@svara.local');
 
-  const before = data<{ grants: Array<{ account_id: string }> }>(
-    await call('/bootstrap', { cookie: admin }),
-  );
-  assert.ok(before.grants.some((grant) => grant.account_id === 'u_petugas'));
+  // BR-10/SEC-15: bootstrap super admin hanya membawa grant miliknya sendiri; grant akun lain dibaca
+  // lewat /admin/accounts, diubah test lain.
+  const before = data<{ grants: Array<{ account_id: string }> }>(await call('/bootstrap', { cookie: admin }));
+  assert.deepEqual(before.grants, []);
 
   const setGrants = await call('/admin/grants/u_petugas', {
     method: 'PUT',
@@ -1181,12 +1211,18 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
           can_read_individual: true,
           can_export: true,
           can_read_free_text: false,
+          purpose: 'Uji izin akses',
         },
       ],
     },
   });
   assert.equal(setGrants.status, 200);
   const officer = await session('officer@svara.local');
+  // BR-06: endpoint grant mengganti seluruh daftar akun; grant seed dipulihkan di akhir uji agar test
+  // berikutnya tetap menemukan izin teks penuh.
+  const seededOfficerGrants = data<{ grants: Array<Record<string, unknown>> }>(
+    await call('/admin/accounts', { cookie: admin }),
+  ).grants.filter((grant) => grant.account_id === 'u_petugas');
 
   const officerAccount = accounts.accounts.find((row) => row.id === 'u_petugas');
   assert.equal(officerAccount?.role, 'creator', 'akun penerima izin kini berperan creator');
@@ -1212,21 +1248,22 @@ test('AC12: akun, izin terpisah, dan perubahan berlaku pada permintaan berikutny
     }
   }
 
-  // Dicabut pada akhir: test lain bergantung pada grant teks penuh milik u_petugas.
-  await call('/admin/grants/u_petugas', {
+  // Dikembalikan pada akhir: test lain bergantung pada grant teks penuh milik u_petugas.
+  const restoredOfficer = await call('/admin/grants/u_petugas', {
     method: 'PUT',
     cookie: admin,
     body: {
-      grants: [
-        {
-          survey_id: 's_demo1',
-          can_read_individual: true,
-          can_export: true,
-          can_read_free_text: false,
-        },
-      ],
+      grants: seededOfficerGrants.map((grant) => ({
+        survey_id: grant.survey_id,
+        can_read_individual: Boolean(grant.can_read_individual),
+        can_export: Boolean(grant.can_export),
+        can_read_free_text: Boolean(grant.can_read_free_text),
+        purpose: String(grant.purpose),
+        expires_at: grant.expires_at,
+      })),
     },
   });
+  assert.equal(restoredOfficer.status, 200, restoredOfficer.text);
   const withoutText = data<Array<{ answers: Array<{ question_code: string; text: string | null }> }>>(
     await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: officer }),
   );
@@ -1713,7 +1750,7 @@ test('Retry identik setelah publish berikutnya tetap mengembalikan bukti yang sa
 });
 
 test('AC13: 30 kiriman paralel pada satu tautan umum masing-masing menghasilkan satu respons', async () => {
-  const token = 'link-umum-perpus';
+  const token = 'pl_demoTautanPrps01';
   const { consent_version: consentVersion } = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const consents = await Promise.all(
     Array.from({ length: 30 }, () =>
@@ -1925,7 +1962,7 @@ test('PUT /admin/grants hanya mengganti izin akun yang disebut pada payload', as
   const updated = await call('/admin/grants', {
     method: 'PUT',
     cookie: admin,
-    body: { grants: [{ account_id: 'u_creator_a', survey_id: 's_demo3', can_export: true }] },
+    body: { grants: [{ account_id: 'u_creator_a', survey_id: 's_demo3', can_export: true, purpose: 'Tinjauan ekspor' }] },
   });
   assert.equal(updated.status, 200, updated.text);
 

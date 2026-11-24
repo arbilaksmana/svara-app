@@ -89,7 +89,7 @@ interface PublicLinkRow {
   id: string;
   survey_id: string;
   version_id: string;
-  token: string;
+  token_hash: string;
   label: string;
   status: string;
   expires_at: string | null;
@@ -110,6 +110,9 @@ interface GrantRow {
   can_read_individual: number;
   can_export: number;
   can_read_free_text: number;
+  purpose: string | null;
+  expires_at: string | null;
+  granted_by: string | null;
 }
 
 interface AccountAdminRow {
@@ -284,6 +287,9 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
         )
       ).map((row) => ({
         ...row,
+        // SEC-10/BR-10: token undangan adalah kredensial satu kali; salinan tersimpannya milik form
+        // penerbitan, bukan payload bootstrap.
+        token: null,
         status:
           row.status !== 'active'
             ? row.status
@@ -309,7 +315,11 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
             : row.status === 'active' && version?.status === 'closed'
               ? 'closed'
               : row.status;
-        return { ...row, url: `/s/${row.token}`, status };
+        // SEC-10: token mentah tidak lagi dikirim ke browser; token hanya keluar sekali pada respons
+        // publish dan dapat dicetak ulang oleh pemegang izin lewat POST /surveys/:id/public-link/token.
+        // URL bertoken tidak dimiliki lagi oleh baris dan hash tidak ikut dikirim: token adalah milik
+        // penerbitan (SEC-10), bukan payload yang dibaca berulang.
+        return { ...row, token: null, token_hash: '', url: null, status };
       })
     : [];
   const assignments = manageableSurveyIds.length
@@ -319,10 +329,9 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       )
     : [];
 
-  const grants =
-    account.role === 'super_admin'
-      ? await all<GrantRow>('SELECT * FROM access_grants ORDER BY account_id, survey_id')
-      : await all<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? ORDER BY survey_id', account.id);
+  // Grant hanya untuk akun penerimanya. Super admin tidak menerima grant akun lain: grant adalah izin
+  // baca data (SEC-15) dan sudah dapat ditinjau di /admin/accounts.
+  const grants = await all<GrantRow>('SELECT * FROM access_grants WHERE account_id = ? ORDER BY survey_id', account.id);
   const accounts =
     account.role === 'super_admin'
       ? await all<AccountAdminRow>(

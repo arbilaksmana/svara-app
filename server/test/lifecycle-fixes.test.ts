@@ -245,7 +245,13 @@ test('M3: tautan yang ditutup arsip tidak hidup lagi setelah simpan dan terbit u
   assert.equal(attempt.consent.json.code, 'submission_closed');
   assert.equal(attempt.response, undefined);
   assert.deepEqual(await all('SELECT id FROM responses WHERE survey_id = ?', survey.id), []);
-  assert.deepEqual(await all('SELECT c.id FROM consent_records c JOIN public_links l ON l.id = c.public_link_id WHERE l.token = ?', token), []);
+  assert.deepEqual(
+    await all(
+      'SELECT c.id FROM consent_records c JOIN public_links l ON l.id = c.public_link_id WHERE l.token_hash = ?',
+      createHash('sha256').update(token).digest('hex'),
+    ),
+    [],
+  );
 
   // Pembanding: tautan versi baru tetap bekerja, jadi penolakan di atas bukan karena terbit ulang gagal.
   const fresh = await consentAndSubmit(second.publicLink.token, 'lifecycle-m3-arsip-0002');
@@ -281,8 +287,8 @@ test('M3: close menulis alasan sendiri; close → terbit ulang tetap menyajikan 
   const { token } = survey.first.publicLink;
   await call(creatorA, `/surveys/${survey.id}/close`, 'POST');
   const closed = await get<{ status: string; closed_reason: string | null }>(
-    'SELECT status, closed_reason FROM public_links WHERE token = ?',
-    token,
+    'SELECT status, closed_reason FROM public_links WHERE token_hash = ?',
+    createHash('sha256').update(token).digest('hex'),
   );
   assert.deepEqual(closed, { status: 'closed', closed_reason: 'closed' }, 'penutupan survei bukan superseded');
   assert.equal((await publicContext(token)).data.state, 'closed');
@@ -313,7 +319,10 @@ test('M3: tautan pra-014 (closed tanpa closed_reason) tetap closed setelah terbi
   const { token } = survey.first.publicLink;
   await call(creatorA, `/surveys/${survey.id}/close`, 'POST');
   // Kode main menutup tautan lewat close/arsip tanpa alasan; migrasi 014 menambah kolom bernilai NULL.
-  await run('UPDATE public_links SET closed_reason = NULL WHERE token = ?', token);
+  await run(
+    'UPDATE public_links SET closed_reason = NULL WHERE token_hash = ?',
+    createHash('sha256').update(token).digest('hex'),
+  );
   await survey.revise('Pertanyaan diperbarui setelah upgrade.');
   const context = await publicContext(token);
   assert.equal(context.data.state, 'closed', 'alasan tidak diketahui tidak dilayani ulang');
@@ -345,7 +354,8 @@ test('M4: bootstrap menandai undangan versi yang sudah tidak terbit sebagai ditu
   assert.equal((await get<{ status: string }>('SELECT status FROM invitations WHERE id = ?', active.invitation.id))?.status, 'active');
   const resolved = await request('/public/invitations/resolve', 'POST', { code: active.invitation.code });
   assert.equal(resolved.status, 200, JSON.stringify(resolved.json));
-  const form = await publicContext((resolved.json.data as { token: string }).token);
+  // SEC-09: penukaran kode mengembalikan URL berisi ID undangan, bukan token mentah.
+  const form = await publicContext((resolved.json.data as { url: string }).url.replace(/^\/s\//u, ''));
   assert.equal(form.data.state, 'closed');
 });
 
@@ -401,12 +411,15 @@ test('Publish menolak survei mandiri bila notice platform versinya tidak tersedi
 test('B1: menutup survei tidak gagal karena expires_at tautan yang tak terurai', async () => {
   const survey = await publishedSurvey(creatorA, 'Survei kepuasan layanan perpustakaan sekolah');
   const { token } = survey.first.publicLink;
-  await run("UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token = ?", token);
+  await run(
+    "UPDATE public_links SET expires_at = 'bukan-tanggal' WHERE token_hash = ?",
+    createHash('sha256').update(token).digest('hex'),
+  );
   const closed = await request(`/surveys/${survey.id}/close`, 'POST', undefined, { Cookie: creatorA });
   assert.equal(closed.status, 200, JSON.stringify(closed.json));
   const link = await get<{ status: string; closed_reason: string | null }>(
-    'SELECT status, closed_reason FROM public_links WHERE token = ?',
-    token,
+    'SELECT status, closed_reason FROM public_links WHERE token_hash = ?',
+    createHash('sha256').update(token).digest('hex'),
   );
   assert.deepEqual(link, { status: 'closed', closed_reason: 'closed' });
 });

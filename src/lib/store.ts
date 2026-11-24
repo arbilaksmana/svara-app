@@ -217,11 +217,14 @@ function hydrate(data: api.BootstrapData): void {
   );
   replace(options, data.options);
   replace(assignments, data.assignments);
+  // SEC-10: server tidak lagi mengirim token pada bootstrap; nilai kosong menjaga bentuk tipe untuk fixture
+  // lama. Undangan hanya dapat dibuka dari tautan yang sudah dibagikan, tautan umum dicetak ulang lewat
+  // `printPublicLinkToken`.
   replace(
     invitations,
     data.invitations.map((invitation) => ({
       ...invitation,
-      token: invitation.token ?? '',
+      token: '',
       status: invitation.status as Invitation['status'],
     })),
   );
@@ -229,7 +232,8 @@ function hydrate(data: api.BootstrapData): void {
     publicLinks,
     data.publicLinks.map((link) => ({
       ...link,
-      url: link.url ?? `/s/${link.token}`,
+      token: '',
+      url: '',
       status: link.status as PublicLink['status'],
     })),
   );

@@ -221,7 +221,10 @@ test('UIX-05: kontrol Kelola tautan tetap tautan aktif saat versi terbit dimuat 
   assert.equal(manage.tag, 'a', 'Kelola tautan harus berupa tautan, bukan span nonaktif');
   assert.match(manage.attrs, /href="\/creator\/surveys\/s_terbit\/share"/);
   assert.doesNotMatch(manage.attrs, /aria-disabled/);
-  assert.match(html, /href="\/s\/pl_token_terbit"/, 'Tautan responden aktif dibaca dari bootstrap');
+  // SEC-10: token tidak lagi disalin di bootstrap, jadi halaman publikasi menunjuk halaman pembagian untuk
+  // mencetak ulang token, bukan merender tautan `/s/<token>`.
+  assert.doesNotMatch(html, /href="\/s\/pl_token_terbit"/, 'token tidak dirender dari bootstrap');
+  assert.match(html, /href="\/creator\/surveys\/s_terbit\/share"/, 'halaman pembagian ditawarkan');
 });
 
 /* ---------- UIX-17 ---------- */

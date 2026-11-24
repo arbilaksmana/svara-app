@@ -388,22 +388,24 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     );
 
     const invitations: Array<[string, string, string, string, string, string, string, string | null, string | null, string | null]> = [
-      ['inv_01', 'a_demo06', 's_demo1', 'v_demo1_1', 'undangan-demo', 'UND-01-AKTIF', 'active', '2026-12-31T00:00:00Z', null, null],
-      ['inv_02', 'a_demo01', 's_demo1', 'v_demo1_1', 'undangan-terpakai', 'UND-02-TERPAKAI', 'used', '2026-12-31T00:00:00Z', '2026-11-09T05:00:00Z', null],
-      ['inv_03', 'a_demo03', 's_demo1', 'v_demo1_1', 'undangan-dicabut', 'UND-03-DICABUT', 'revoked', '2026-12-31T00:00:00Z', null, '2026-11-10T02:00:00Z'],
-      ['inv_04', 'a_demo04', 's_demo1', 'v_demo1_1', 'undangan-kedaluwarsa', 'UND-04-KEDALUWARSA', 'expired', '2026-11-08T00:00:00Z', null, null],
-      ['inv_p01', 'a_perpus01', 's_demo2', 'v_demo2_1', 'undangan-perpus', 'UND-P01-AKTIF', 'active', '2026-12-31T00:00:00Z', null, null],
+      ['inv_01', 'a_demo06', 's_demo1', 'v_demo1_1', 'undanganDemo01AAAAAAAAAA', 'UND-01-AKTIF', 'active', '2026-12-31T00:00:00Z', null, null],
+      ['inv_02', 'a_demo01', 's_demo1', 'v_demo1_1', 'undanganDemo02BBBBBBBBBB', 'UND-02-TERPAKAI', 'used', '2026-12-31T00:00:00Z', '2026-11-09T05:00:00Z', null],
+      ['inv_03', 'a_demo03', 's_demo1', 'v_demo1_1', 'undanganDemo03CCCCCCCCCC', 'UND-03-DICABUT', 'revoked', '2026-12-31T00:00:00Z', null, '2026-11-10T02:00:00Z'],
+      ['inv_04', 'a_demo04', 's_demo1', 'v_demo1_1', 'undanganDemo04DDDDDDDDDD', 'UND-04-KEDALUWARSA', 'expired', '2026-11-08T00:00:00Z', null, null],
+      ['inv_p01', 'a_perpus01', 's_demo2', 'v_demo2_1', 'undanganPerpus01AAAAAAAA', 'UND-P01-AKTIF', 'active', '2026-12-31T00:00:00Z', null, null],
     ];
+    // SEC-10: hanya hash token yang disimpan. Token seed berbentuk sama dengan token yang diterbitkan
+    // aplikasi (base64url 24 karakter untuk undangan, `pl_` + 16 untuk tautan umum) agar `/s/:token`
+    // menerimanya; nilainya konstanta demo yang ditulis di kode seed, bukan salinan dari basis data.
     for (const [id, assignment, survey, version, token, code, status, expires, used, revoked] of invitations) {
       await run(
-        `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token, token_hash, status, expires_at, used_at, revoked_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invitations (id, assignment_id, survey_id, version_id, code, token_hash, status, expires_at, used_at, revoked_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         assignment,
         survey,
         version,
         code,
-        token,
         sha256(token),
         status,
         expires,
@@ -414,17 +416,16 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     }
 
     const links: Array<[string, string, string, string, string, string]> = [
-      ['pl_demo1', 's_demo1', 'v_demo1_1', 'link-umum-demo', 'Tautan umum · survei utama', 'active'],
-      ['pl_demo2', 's_demo2', 'v_demo2_1', 'link-umum-perpus', 'Tautan umum · perpustakaan', 'active'],
+      ['pl_demo1', 's_demo1', 'v_demo1_1', 'pl_demoTautanUmum1A', 'Tautan umum · survei utama', 'active'],
+      ['pl_demo2', 's_demo2', 'v_demo2_1', 'pl_demoTautanPrps01', 'Tautan umum · perpustakaan', 'active'],
     ];
     for (const [id, survey, version, token, label, status] of links) {
       await run(
-        `INSERT INTO public_links (id, survey_id, version_id, token, token_hash, label, status, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+        `INSERT INTO public_links (id, survey_id, version_id, token_hash, label, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
         id,
         survey,
         version,
-        token,
         sha256(token),
         label,
         status,
@@ -528,15 +529,28 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       ['g_03', 'u_creator_b', 's_demo3', false, false, false],
       ['g_04', 'u_creator_a', 's_demo2', false, true, false],
     ];
+    // BR-06: data demo mencatat pemberi, tujuan, dan masa berlaku. g_04 kedaluwarsa agar jalur grant
+    // kedaluwarsa ikut terwakili di data seed; sisa kolom bermakna untuk setiap baris.
+    const grantProvenance: Record<string, { purpose: string; expiresAt: string | null }> = {
+      g_01: { purpose: 'Ekspor hasil survei organisasi', expiresAt: '2027-12-31T00:00:00Z' },
+      g_02: { purpose: 'Pendampingan pengisian kelas uji', expiresAt: '2027-12-31T00:00:00Z' },
+      g_03: { purpose: 'Tinjauan mutu lintas sekolah', expiresAt: '2027-12-31T00:00:00Z' },
+      g_04: { purpose: 'Evaluasi perpustakaan (berakhir)', expiresAt: '2026-01-01T00:00:00Z' },
+    };
     for (const [id, account, surveyId, read, exportData, text] of grants) {
+      const provenance = grantProvenance[id]!;
       await run(
-        'INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text) VALUES (?, ?, ?, ?, ?, ?)',
+        `INSERT INTO access_grants (id, account_id, survey_id, can_read_individual, can_export, can_read_free_text,
+                                    purpose, expires_at, granted_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'u_admin')`,
         id,
         account,
         surveyId,
         bool(read),
         bool(exportData),
         bool(text),
+        provenance.purpose,
+        provenance.expiresAt,
       );
     }
 
