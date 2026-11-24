@@ -170,8 +170,12 @@ test('dryRun: hitungan sama dengan run nyata, baris tetap ada, audit bertanda dr
   const dryAudits = await retentionAudits();
   assert.equal(dryAudits.length, 1);
   assert.equal(dryAudits[0]!.metadata.dryRun, true);
+  // dryRun bukan penghapusan: outcome audit berbeda agar penyaring tidak mengira ada data terhapus.
+  assert.equal(dryAudits[0]!.outcome, 'diperiksa');
 
   const real = await purgeExpiredResponses({ dryRun: false, now: NOW });
+  const realAudits = await retentionAudits();
+  assert.equal(realAudits.at(-1)!.outcome, 'berhasil', 'run nyata tetap berhasil');
   assert.deepEqual(real.scopes, dry.scopes);
   assert.deepEqual(await ids('responses'), ['r_10']);
   assert.deepEqual(await ids('consent_records'), ['c_10']);

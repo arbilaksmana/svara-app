@@ -72,7 +72,9 @@ export async function purgeExpiredResponses(options: { dryRun: boolean; now?: Da
         'sistem',
         'Retensi data',
         scopeSummary(scope),
-        'berhasil',
+        // dryRun adalah pemeriksaan, bukan penghapusan: outcome berbeda agar penyaring audit tidak
+        // mengira ada data yang benar-benar dihapus.
+        options.dryRun ? 'diperiksa' : 'berhasil',
         nowIso(),
         JSON.stringify({ ...scope, ...result, dryRun: options.dryRun }),
         null,

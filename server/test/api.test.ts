@@ -2122,6 +2122,27 @@ test('GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2',
   });
   assert.equal(invalidMode.status, 422);
 
+  // BF-06: memperpendek retention_days menghapus data pada run retensi berikutnya -> wajib konfirmasi.
+  await call('/org/profile', { method: 'PUT', cookie: orgAdmin, body: { retention_days: 365 } });
+  const shrink = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { retention_days: 30 },
+  });
+  assert.equal(shrink.status, 409);
+  assert.equal((shrink.json as { code?: string }).code, 'retention_shrink_confirmation_required');
+  const confirmed = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { retention_days: 30, confirm_retention_shrink: true },
+  });
+  assert.equal(confirmed.status, 200, 'konfirmasi eksplisit diterima');
+  const lengthen = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { retention_days: 90 },
+  });
+  assert.equal(lengthen.status, 200, 'memperpanjang tidak perlu konfirmasi');
   // Hanya sebagian field: nilai lain dipertahankan, aturan gabungan tetap divalidasi.
   const senderOnly = await call('/org/profile', {
     method: 'PUT',
