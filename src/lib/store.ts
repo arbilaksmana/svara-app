@@ -27,10 +27,10 @@ import type {
   AuditLog,
   DeploymentProfile,
   EventStatus,
+  SurveyNotice,
   SurveyProfile,
   IntegrationEvent,
   Invitation,
-  Notice,
   OrgAuditRow,
   OrgInvitation,
   OrgMember,
@@ -105,7 +105,6 @@ export interface Snapshot {
   integrationNote: string;
   stats: AdminStats | null;
   statsError: string | null;
-  notices: Notice[];
   org: OrgWorkspace | null;
   orgError: string | null;
   dataRequests: DataRequest[] | null;
@@ -132,7 +131,8 @@ let grants: Record<string, GrantState> = {};
 let drafts: Record<string, DraftState> = {};
 /** Profil kebijakan per survei dari bootstrap; kosong sampai bootstrap berhasil. */
 let surveyProfiles: Record<string, SurveyProfile> = {};
-let noticeList: Notice[] = [];
+/** Notice per survei dari sumber kebijakan yang sama dengan halaman publik. */
+let surveyNotices: Record<string, SurveyNotice | null> = {};
 let integrationNote = '';
 try {
   integrationNote = localStorage.getItem(NOTE_KEY) ?? '';
@@ -157,7 +157,6 @@ function buildSnapshot(): Snapshot {
     integrationNote,
     stats,
     statsError,
-    notices: noticeList,
     org,
     orgError,
     dataRequests: dataRequestList,
@@ -238,7 +237,7 @@ function hydrate(data: api.BootstrapData): void {
   for (const key of Object.keys(profiles)) delete profiles[key];
   for (const profile of data.profiles) profiles[profile.id] = profile;
   surveyProfiles = { ...data.surveyProfiles };
-  noticeList = [...data.notices];
+  surveyNotices = { ...(data.surveyNotices ?? {}) };
 
   replace(accounts, data.accounts);
   replace(organizations, data.organizations ?? []);
@@ -600,12 +599,16 @@ export function surveyProfileOf(surveyId: string): SurveyProfile | undefined {
   return surveyProfiles[surveyId];
 }
 
-export function allProfiles(): DeploymentProfile[] {
-  return Object.values(profiles);
+/**
+ * Notice untuk satu survei, dipilih server dari sumber kebijakan survei itu. `null` berarti versi
+ * notice survei ini belum tersedia di sumbernya, bukan pilihan dari profil lain.
+ */
+export function surveyNoticeOf(surveyId: string): SurveyNotice | null | undefined {
+  return surveyNotices[surveyId];
 }
 
-export function allNotices(): Notice[] {
-  return noticeList;
+export function allProfiles(): DeploymentProfile[] {
+  return Object.values(profiles);
 }
 
 export function allQuestions(): Question[] {

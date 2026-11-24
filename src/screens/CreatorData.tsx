@@ -11,6 +11,7 @@ import {
   Checkbox,
   Code,
   ConfirmDialog,
+  ContactChannel,
   Divider,
   EmptyState,
   Field,
@@ -42,6 +43,7 @@ import {
   localGrantsFor,
   revokeInvitation,
   saveSettings,
+  surveyNoticeOf,
   surveyProfileOf,
   useStore,
 } from '../lib/store';
@@ -639,12 +641,13 @@ export function ResultsPage({ id }: { id: string }) {
 
 export function SettingsPage({ id }: { id: string }) {
   const notify = useToast();
-  const { settings, revision, session, notices } = useStore();
+  const { settings, revision, session } = useStore();
   void revision;
   const { state } = useScreenState('creator-settings');
   const profile = surveyProfileOf(id);
-  // Pemberitahuan dibaca dari bootstrap server, bukan fixture; tidak ada fallback ke profil lain.
-  const notice = notices.find((row) => row.profile_id === profile?.id) ?? null;
+  // NR-04: notice dipilih server dari sumber kebijakan survei ini (`surveyNotices`), sama dengan
+  // halaman publik. Daftar `notices` legacy berkunci profil, bukan survei, jadi tidak dipakai di sini.
+  const notice = surveyNoticeOf(id) ?? null;
   const survey = findSurvey(id);
   const canManage = canManageAs(session, survey);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
@@ -687,7 +690,7 @@ export function SettingsPage({ id }: { id: string }) {
                 <tr><Th>Kategori usia responden</Th><Td>{profile.respondent_age_category ? AGE_CATEGORY_LABEL[profile.respondent_age_category] : 'Belum ditetapkan'}</Td></tr>
                 <tr><Th>Mode persetujuan</Th><Td>{profile.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}</Td></tr>
                 <tr><Th>Masa retensi</Th><Td>{profile.retention_days === null ? 'Mengikuti kebijakan pengendali' : `${profile.retention_days} hari`}</Td></tr>
-                <tr><Th>Kontak permintaan data</Th><Td>{profile.data_request_contact ?? 'Lihat pemberitahuan survei'}</Td></tr>
+                <tr><Th>Kontak permintaan data</Th><Td><ContactChannel contact={profile.data_request_contact} empty="Belum ditetapkan pengendali." /></Td></tr>
                 <tr><Th>Transfer data lintas negara</Th><Td>{profile.cross_border_transfer === null ? 'Belum ditinjau' : profile.cross_border_transfer ? 'Ya' : 'Tidak'}</Td></tr>
                 <tr><Th>Kebijakan dan ketentuan</Th><Td><PlainLink to={ROUTES.privacy} className="min-h-[44px]">Kebijakan privasi</PlainLink> · <PlainLink to={ROUTES.terms} className="min-h-[44px]">Ketentuan layanan</PlainLink></Td></tr>
               </Table>

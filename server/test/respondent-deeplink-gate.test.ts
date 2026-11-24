@@ -1,7 +1,7 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as storage from '../../src/lib/draft.ts';
-import type { ConsentPayload } from '../../src/lib/api.ts';
+import type { ConsentPayload, ReceiptData } from '../../src/lib/api.ts';
 
 class MemoryStorage implements Storage {
   #items = new Map<string, string>();
@@ -68,4 +68,23 @@ test('NR-08: gerbang hanya membaca token itu dan tidak menyentuh token lain', ()
   storage.markFlowEntry('tok_b');
   assert.equal(storage.attemptGateNeeded(TOKEN), true);
   assert.equal(storage.attemptGateNeeded('tok_b'), false, 'Tanda alur token B tidak membuka gerbang token A');
+});
+
+const RECEIPT: ReceiptData = {
+  response_id: 'r_sebelumnya', survey_id: 's_demo1', version_number: 1,
+  submitted_at: '2026-11-20T02:00:00.000Z', status: 'final', idempotency_key: 'key_sebelumnya',
+};
+
+test('NR-08/SEC-07: responden baru menghapus bukti pengiriman orang sebelumnya di tab yang sama', () => {
+  abandonWithDraft();
+  storage.saveReceipt(TOKEN, RECEIPT, 'key_sebelumnya');
+  storage.discardAttempt(TOKEN);
+  assert.equal(storage.readReceipt(TOKEN), null, 'bukti responden sebelumnya tidak boleh tetap tampil');
+  assert.equal(storage.hasUnsentAttempt(TOKEN), false);
+
+  // Jalur normal: bukti milik respons final yang baru tetap tersimpan sesudah pembersihan.
+  storage.writeConsent(TOKEN, consent('c_baru'));
+  storage.completeSubmission(TOKEN, RECEIPT, 'key_baru');
+  assert.equal(storage.readReceipt(TOKEN)?.receipt.response_id, 'r_sebelumnya');
+  assert.equal(storage.readConsent(TOKEN), null, 'persetujuan lama tetap dibersihkan setelah kirim');
 });

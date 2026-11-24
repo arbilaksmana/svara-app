@@ -9,6 +9,7 @@ import {
   auditPublic,
   fail,
   newId,
+  noticeRowFor,
   pathParam,
   payloadHash,
   sendError,
@@ -235,7 +236,7 @@ interface PolicyNotice {
 }
 
 async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
-  const row = survey.organization_id
+  let row = survey.organization_id
     ? await get<Omit<NoticeSource, 'source'>>(
         `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
                 policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
@@ -249,17 +250,21 @@ async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
            FROM platform_profile WHERE id = 'platform'`,
       );
   if (!row) fail(409, 'policy_source_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
+  // UIX-08: kontak pengendali yang dapat dipakai adalah kolom organisasi survei; bila belum diisi,
+  // pengelola platform yang menjadi kanal. Notice tidak menyalin alamat platform diam-diam.
+  if (row.data_request_contact === null) {
+    const platform = await get<{ data_request_contact: string | null }>(
+      "SELECT data_request_contact FROM platform_profile WHERE id = 'platform'",
+    );
+    row = { ...row, data_request_contact: platform?.data_request_contact ?? null };
+  }
   return { ...row, source: survey.organization_id ? 'organization' : 'platform' };
 }
 
 async function noticeRow(source: NoticeSource, version: string): Promise<PolicyNotice | undefined> {
-  return source.source === 'organization'
-    ? get<PolicyNotice>(
-        'SELECT * FROM organization_notices WHERE organization_id = ? AND version = ? ORDER BY effective_date DESC LIMIT 1',
-        source.id,
-        version,
-      )
-    : get<PolicyNotice>('SELECT * FROM platform_notices WHERE version = ? ORDER BY effective_date DESC LIMIT 1', version);
+  // Aturan pemilihan baris yang sama dipakai bootstrap (`surveyNoticesFor`), jadi layar creator dan
+  // pengantar responden tidak dapat menampilkan notice versi yang berbeda.
+  return noticeRowFor(source.source, source.id, version);
 }
 
 /**

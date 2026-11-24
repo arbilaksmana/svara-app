@@ -1,6 +1,10 @@
 {
+  "provenance": {
+    "commit": "bb8612c0b1f8392a0439bf5319505c089b1ba161",
+    "tree": "dirty"
+  },
   "label": "DEMO ONLY — simulasi beban lokal, bukan bukti kapasitas produksi",
-  "generated_at": "2026-11-18T18:01:54.435Z",
+  "generated_at": "2026-11-23T21:29:56.375Z",
   "environment": {
     "node": "v24.15.0",
     "platform": "win32 x64",
@@ -8,7 +12,7 @@
     "server": "127.0.0.1:3199",
     "storage": "PostgreSQL via pg Pool",
     "postgres_server_version": "17.12",
-    "database": "svara_demo_ac13"
+    "database": "svara_test_notice"
   },
   "scenario": {
     "concurrent_submissions": 30,
@@ -41,9 +45,9 @@
       30,
       30
     ],
-    "p95_commit_ms": 350.15,
-    "total_wall_ms": 356.6,
-    "max_commit_ms": 351.39
+    "p95_commit_ms": 368.34,
+    "total_wall_ms": 372.37,
+    "max_commit_ms": 368.71
   },
   "limitations": [
     "Tidak mengukur jaringan nyata, TLS, atau batas produksi.",

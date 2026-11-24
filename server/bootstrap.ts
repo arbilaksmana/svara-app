@@ -1,6 +1,12 @@
 import { all, get, nowIso } from './db.ts';
 import { redactAuditRow, type AccountRow } from './security.ts';
-import { accessibleSurveys, surveyProfilesFor, type SurveyProfile } from './http.ts';
+import {
+  accessibleSurveys,
+  surveyNoticesFor,
+  surveyProfilesFor,
+  type SurveyNotice,
+  type SurveyProfile,
+} from './http.ts';
 
 interface ProfileRow {
   id: string;
@@ -174,6 +180,8 @@ export interface BootstrapPayload {
   notices: unknown[];
   surveys: unknown[];
   surveyProfiles: Record<string, SurveyProfile>;
+  /** Notice yang tampil untuk survei itu, dari sumber kebijakan yang sama dengan halaman publik. */
+  surveyNotices: Record<string, SurveyNotice | null>;
   versions: unknown[];
   questions: unknown[];
   options: unknown[];
@@ -208,6 +216,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       notices,
       surveys: [],
       surveyProfiles: {},
+      surveyNotices: {},
       versions: [],
       questions: [],
       options: [],
@@ -354,12 +363,15 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
   // UI tidak menyusun profil dari fixture: payload membawa profil kebijakan tiap survei.
   // Satu query per lingkup (organisasi/platform), bukan satu query per survei.
   const surveyProfiles: Record<string, SurveyProfile> = await surveyProfilesFor(surveys);
+  // Sumber yang sama dengan halaman publik (`noticeRowFor`): versi pada versi survei saat ini.
+  const surveyNotices = await surveyNoticesFor(surveys, surveyProfiles, versions);
 
   return {
     account: { ...account, email: account.email },
     profiles,
     notices,
     surveyProfiles,
+    surveyNotices,
     surveys: surveys.map((row) => ({ ...row })),
     versions: versions.map((row) => ({ ...row, question_ids: versionQuestionIds.get(row.id) ?? [] })),
     questions: questions.map((row) => ({

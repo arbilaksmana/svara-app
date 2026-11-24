@@ -19,6 +19,7 @@ import {
 
   Panel,
   PlainLink,
+  ContactChannel,
   PolicyLinks,
   SectionTitle,
   Table,
@@ -390,6 +391,8 @@ export function IntroView({
   const [consentError, setConsentError] = useState<string | null>(null);
 
   const { survey, version, isPublicLink, invitation, notice, guardianRequired } = ctx;
+  // Kanal kontak pengendali: kolom organisasi survei, dengan platform sebagai cadangan saat kosong.
+  const profileContact = ctx.profile.data_request_contact;
   const effectiveState = state === 'default' ? serverState(ctx) : state;
   const usedInvite = isInvitationUsed(ctx);
   const blocked = ['closed', 'expired', 'revoked', 'permission-denied', 'error', 'loading'].includes(effectiveState) || usedInvite;
@@ -439,7 +442,6 @@ export function IntroView({
                 ['Penggunaan Modul 15', notice.module15_usage],
                 ['Retensi', notice.retention_text],
                 ['Penerima', notice.recipients],
-                ['Kontak', notice.contact],
                 ['Hak Anda', notice.rights],
                 ['Data anak', notice.child_data_text],
                 ['Transfer lintas negara', notice.cross_border_text],
@@ -449,6 +451,13 @@ export function IntroView({
                   <dd className="mt-1 break-words text-body-sm text-ink">{detail}</dd>
                 </div>
               ))}
+              <div className="border-b border-n200 pb-3">
+                <dt className="text-caption font-bold text-muted">Kontak</dt>
+                {/* UIX-08: kanal = data_request_contact organisasi survei (fallback platform), bukan salinan teks notice. */}
+                <dd className="mt-1 break-words text-body-sm text-ink">
+                  <ContactChannel contact={profileContact} empty="Belum ditetapkan pengendali; hubungi pengelola survei melalui kanal resmi organisasi." />
+                </dd>
+              </div>
             </dl>
             <Banner tone="info" title="Tentang pemberitahuan ini">
               Pemberitahuan dapat dibaca tanpa akun dan tetap tersedia setelah versi survei ditutup.
@@ -1257,7 +1266,8 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
                 </div>
               </form>
               <p className="text-caption text-muted">
-                Bila pemulihan gagal, hubungi pengelola survei{ctx.notice.contact ? `: ${ctx.notice.contact}` : ' melalui kontak pada pemberitahuan survei.'}
+                Bila pemulihan gagal, hubungi pengelola survei melalui kanal resmi organisasi:{' '}
+                <ContactChannel contact={ctx.profile.data_request_contact} empty="kontak pengendali belum ditetapkan." />
               </p>
             </Card>
           )}

@@ -315,6 +315,23 @@ export interface IntegrationEvent {
   last_error?: string | null;
 }
 
+/** Notice yang tampil untuk satu survei; sumbernya kebijakan organisasi survei atau platform. */
+export interface SurveyNotice {
+  id: string;
+  version: string;
+  effective_date: string;
+  purpose: string;
+  data_categories: string;
+  module15_usage: string;
+  retention_text: string;
+  recipients: string;
+  contact: string;
+  rights: string;
+  child_data_text: string;
+  cross_border_text: string;
+  source: 'organization' | 'platform';
+}
+
 export interface Notice {
   id: string;
   profile_id: string;
