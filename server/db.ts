@@ -11,7 +11,9 @@ import type { PoolClient } from 'pg';
 // Urutan prioritas: TEST_DATABASE_URL, lalu nilai yang sudah diekspor shell, lalu `.env`.
 // `loadEnvFile` menimpa variabel yang sudah ada, jadi nilai sebelumnya dipasang kembali; tanpa
 // itu DATABASE_URL test tertimpa nilai dev dan test bisa me-reset schema basis data dev.
-const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+// TEST_DATABASE_URL dipakai HANYA bila DATABASE_URL tidak diset: sebuah nilai yang tertinggal di shell tidak
+// boleh mengarahkan migrasi produksi ke basis data uji.
+const testDatabaseUrl = process.env.DATABASE_URL?.trim() ? undefined : process.env.TEST_DATABASE_URL?.trim();
 if (testDatabaseUrl) process.env.DATABASE_URL = testDatabaseUrl;
 const sebelumEnvFile = { ...process.env };
 try {
