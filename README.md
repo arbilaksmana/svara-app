@@ -503,6 +503,8 @@ pnpm demo:ac16     # tiga responden sintetis + rekonsiliasi CSV
 
 ### Prosedur AC15: pg_dump dan pg_restore
 
+`pnpm demo:ac15` menjalankan `server/scripts/ac15-restore.ts`, dan skrip itu memakai `pg_dump`/`pg_restore` — bukan `VACUUM INTO` (lihat bagian "Catatan backup demo" di bawah). Skrip membuat basis data sementara sendiri bernama `svara_ac15_<hex>` di server `AC15_ADMIN_DATABASE_URL`, mengisi data sintetis (`server/seed.ts --reset` dengan `SEED_DEMO=1`), lalu menguji dump dan restore pada basis data sementara itu. Basis data yang ditunjuk `DATABASE_URL` tidak pernah diubah; pada akhir skrip basis data sementara dihapus.
+
 ```bash
 export AC15_ADMIN_DATABASE_URL='postgres://postgres:postgres_admin_dev@127.0.0.1:5432/postgres'
 export DATABASE_URL='postgres://svara:svara_dev_password@127.0.0.1:5432/svara_test'
@@ -522,6 +524,10 @@ pg_restore --dbname="$DATABASE_URL" --clean --if-exists --no-owner --no-privileg
 - Restore mengembalikan isi cadangan. Penghapusan data yang diminta setelah restore harus diulang dan dicatat; restore bukan alat penghapusan permanen.
 - Bukti ini tidak menguji cadangan terenkripsi, off-site, RPO/RTO, atau prosedur insiden.
 
+### Catatan backup demo (VACUUM INTO)
+
+Catatan ini terpisah dari prosedur AC15 di atas: `pnpm demo:ac15` tidak memakai `VACUUM INTO`. Penyebutan backup demo `VACUUM INTO` lokal adalah catatan rancangan yang tertinggal sejak sebelum runtime pindah ke PostgreSQL; tidak ada skrip di repo yang menjalankannya (satu-satunya mekanisme dump/restore yang benar-benar dijalankan adalah `pg_dump`/`pg_restore` pada bagian AC15), dan `VACUUM INTO` bukan perintah PostgreSQL. Batasannya tetap berlaku: belum ada enkripsi, penyimpanan off-site, atau uji RPO/RTO.
+
 Angka dan keterbatasan tiap skrip ada di `docs/test-evidence/`.
 
 ## Dokumentasi
@@ -537,7 +543,7 @@ Angka dan keterbatasan tiap skrip ada di `docs/test-evidence/`.
 - Retensi, kontak pengendali, dan transfer lintas negara tetap `null` sampai pengendali menetapkannya.
 - Teks kebijakan adalah template sintetis, bukan nasihat hukum.
 - Rate limit disimpan di proses; deployment multi-instance memerlukan penyimpanan bersama. Entri kedaluwarsa disapu bertahap paling sering sekali per menit: tiap panggilan memeriksa paling banyak 64 entri untuk sapuan dan 64 entri untuk mencari ruang, jadi biaya per permintaan tidak bergantung pada jumlah kunci. Tiap jenis kunci (awalan seperti `login`, `login-ip`, `consent`, `submit`) menyimpan paling banyak 50.000 kunci aktif, dan kunci lebih dari 128 karakter disimpan sebagai hash. Bila satu jenis penuh, kunci baru menggantikan entri kedaluwarsa atau entri tertua yang belum mencapai batasnya di antara 64 entri tertua; bucket yang sudah menolak tidak pernah dilepas, dan bila 64 entri itu semuanya menolak, kunci baru jenis itu ikut ditolak `429` sampai ada yang kedaluwarsa.
-- Backup demo memakai `VACUUM INTO` lokal; belum ada enkripsi, off-site, atau uji RPO/RTO.
+- Backup demo: tidak ada enkripsi, off-site, atau uji RPO/RTO. Mekanisme dump/restore yang dijalankan skrip adalah `pg_dump`/`pg_restore` (prosedur AC15); catatan `VACUUM INTO` ada di bagian "Catatan backup demo (VACUUM INTO)".
 - Bukti wali tidak dapat memblokir respons yang sudah disetujui: `responses` tidak merujuk `consent_records`. Status `rejected` hanya tercatat dan diaudit.
 - Retensi dan penghapusan berkas bukti wali belum diotomatiskan; operator harus membersihkan `GUARDIAN_EVIDENCE_DIR` sesuai kebijakan pengendali. Volume `svara_guardian_evidence` ikut tertinggal dan harus dibersihkan manual begitu kebijakan ditetapkan.
 
