@@ -383,6 +383,8 @@ export function ResultsPage({ id }: { id: string }) {
   // Server: canExport/canReadIndividual/canExportIndividual mengembalikan true untuk pengelola (pemilik atau org_admin lingkup).
   const exportAllowed = canManage || myGrants.some((grant) => grants[grant.id]?.export);
   const individualAllowed = canManage || (myGrants.some((grant) => grants[grant.id]?.read) && Boolean(settings[id]?.allowIndividual));
+  // Cermin server canReadFreeText: pengelola selalu boleh; pemegang grant butuh can_read_free_text.
+  const freeTextAllowed = canManage || myGrants.some((grant) => grants[grant.id]?.text);
   // CSV memuat baris per responden: server mensyaratkan izin ekspor dan izin baca individual (canExportIndividual).
   const csvAllowed = exportAllowed && individualAllowed;
   const csvBlockedReason = !exportAllowed || csvAllowed
@@ -554,7 +556,10 @@ export function ResultsPage({ id }: { id: string }) {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Jawaban individual</SectionTitle>
             <p className="text-body-sm text-muted">
-              Akses ini memerlukan izin membaca jawaban individual dan setiap pembacaan tercatat pada log audit. Teks bebas hanya tampil dengan izin terpisah.
+              Akses ini memerlukan izin membaca jawaban individual dan setiap pembacaan tercatat pada log audit.{' '}
+              {freeTextAllowed
+                ? 'Isian teks bebas hanya untuk penerima berizin; akun ini sudah memegang izin itu.'
+                : 'Teks bebas hanya tampil dengan izin terpisah.'}
             </p>
             <div>
               <Button variant="secondary" loading={responsesBusy} disabled={responsesBusy || denied || !individualAllowed || !versionId} onClick={loadResponses}>
