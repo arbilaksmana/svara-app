@@ -494,7 +494,9 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     await answer('r_demo04', 'AD01', 'q_ad01', 5);
     await answer('r_demo04', 'TS01', 'q_ts01', 1);
     await answer('r_demo04', 'K02', 'q_k02', null);
-    await answer('r_demo05', 'AD01', 'q_ad01', 3);
+    // PRD §7 fixture skoring AC08: AD01 = 2, 4, 4, 5, kosong. Item wajib tetap bisa kosong pada
+    // data final seed; validasi kirim hanya membatasi klien, bukan baris final yang sudah tersimpan.
+    await answer('r_demo05', 'AD01', 'q_ad01', null);
     await answer('r_demo05', 'TS01', 'q_ts01', 4);
     await answer('r_demo05', 'K02', 'q_k02', null);
     await answer('r_perpus01', 'P01', 'q_p01', 3);

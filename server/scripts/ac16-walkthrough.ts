@@ -116,7 +116,8 @@ const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
 try {
   await waitForServer(server, 'server demo AC16');
 
-  const token = 'link-umum-demo';
+  // Token tautan umum seed (server/seed-data.ts: pl_demo1); fixture UI `link-umum-demo` tidak ada di server.
+  const token = 'pl_demoTautanUmum1A';
   // SEC-02: persetujuan hanya sah untuk versi+notice yang benar-benar dirender pengantar.
   const intro = data<{ consent_version: string }>(await call(`/public/surveys/${token}`));
   const createdIds: string[] = [];
@@ -172,7 +173,7 @@ try {
     total: number;
     items: Array<{ code: string; answered: number; options: Array<{ value: number | null; count: number }> }>;
   }>(await call('/surveys/s_demo1/summary?version=v_demo1_1'));
-  const csv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv');
+  const csv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Demo%20AC16&purpose=Walkthrough%20sintetis');
   if (csv.status !== 200) throw new Error(`ekspor gagal: ${csv.text}`);
   const rows = parseCsv(csv.text);
   const header = rows[0] ?? [];
@@ -182,7 +183,10 @@ try {
 
   const counts = new Map<number, number>();
   for (const row of body) {
-    const value = Number(row[adIndex]);
+    const cell = row[adIndex] ?? '';
+    // PRD §7: jawaban kosong bukan nilai nol; ekspor menulisnya sebagai sel kosong.
+    if (cell === '') continue;
+    const value = Number(cell);
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
   const summaryAd = summary.items.find((item) => item.code === 'AD01');

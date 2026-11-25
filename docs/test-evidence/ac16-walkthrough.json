@@ -1,11 +1,15 @@
 {
   "label": "DEMO ONLY — data sintetis; bukan studi lapangan, bukan bukti efektivitas.",
-  "generated_at": "2026-11-24T01:27:17.337Z",
+  "generated_at": "2026-11-25T11:43:13.083Z",
+  "provenance": {
+    "commit": "96b696494d4c00e55164fb266c224c986753028f",
+    "tree": "clean"
+  },
   "environment": {
     "node": "v24.15.0",
     "baseline": {
-      "commit": "19ab823e5372d3de27432d3a664c6b05e98f44c2",
-      "dirty": true
+      "commit": "96b696494d4c00e55164fb266c224c986753028f",
+      "dirty": false
     },
     "platform": "win32 x64",
     "storage": "PostgreSQL via pg Pool",
@@ -37,9 +41,9 @@
     "summary_total": 8,
     "csv_rows": 8,
     "created_response_ids": [
-      "r_9353e2cc11ddb5b8",
-      "r_c8f59f01d6ee341d",
-      "r_69e74e7023081dfb"
+      "r_8a3a5159e5748dc2",
+      "r_eace64c2177cff69",
+      "r_70a8a299272f7325"
     ],
     "all_created_ids_present": true,
     "survey_version_values": [
@@ -48,7 +52,7 @@
     "ad01_matches_summary": true,
     "ad01_csv_counts": {
       "2": 2,
-      "3": 2,
+      "3": 1,
       "4": 3,
       "5": 1
     },
@@ -63,7 +67,7 @@
       },
       {
         "value": 3,
-        "count": 2
+        "count": 1
       },
       {
         "value": 4,
