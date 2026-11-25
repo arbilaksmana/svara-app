@@ -211,7 +211,7 @@ export function AdminPlatformPage() {
               <Button onClick={onSave} loading={busy} disabled={!form || busy}>Simpan profil</Button>
               {profile && (
                 <p className="text-caption text-muted">
-                  Versi notice <Code>{profile.notice_version}</Code> · diperbarui {formatWIB(profile.updated_at)}
+                  Versi pemberitahuan <Code>{profile.notice_version}</Code> · diperbarui {formatWIB(profile.updated_at)}
                 </p>
               )}
             </div>

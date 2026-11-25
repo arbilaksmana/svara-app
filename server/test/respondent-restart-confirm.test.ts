@@ -128,7 +128,7 @@ test('NEW-UX-F: dialog konfirmasi memakai ConfirmDialog dengan judul, akibat, da
   const html = render(tree);
   assert.match(html, /<dialog\b/, 'Konfirmasi memakai elemen dialog native dari ConfirmDialog');
   assert.match(html, /Hapus isian yang belum dikirim\?/);
-  assert.match(html, /Persetujuan, jawaban, dan kunci kirim yang tersimpan di tab ini akan dihapus/);
+  assert.match(html, /Draf untuk survei ini akan dihapus dari perangkat ini dan tidak bisa dipulihkan/);
   assert.match(html, /<button[^>]*>Hapus isian<\/button>/);
   assert.match(html, /<button[^>]*>Batal<\/button>/);
   assert.doesNotMatch(html, /Jawaban teks orang sebelumnya|o_sering/, 'Isi draf tidak ditampilkan di dialog');

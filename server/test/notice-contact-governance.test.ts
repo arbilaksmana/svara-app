@@ -152,7 +152,7 @@ test('NR-04: bootstrap membawa notice dari sumber kebijakan survei, bukan baris 
 test('NR-04: halaman pengaturan creator menampilkan notice survei, bukan "belum tersedia"', async () => {
   const html = render(createElement(SettingsPage, { id: 's_demo1' }), '/creator/surveys/s_demo1/settings');
   const text = visibleText(html);
-  assert.match(text, /Versi notice: 1\.1/, 'versi notice yang tampil harus versi sumber survei');
+  assert.match(text, /Versi pemberitahuan: 1\.1/, 'versi pemberitahuan yang tampil harus versi sumber survei');
   assert.match(text, /Penyelenggara adalah sekolah/, 'teks notice organisasi harus tampil');
   assert.doesNotMatch(text, /Pemberitahuan untuk profil kebijakan survei ini belum tersedia/);
 });

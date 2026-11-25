@@ -71,7 +71,7 @@ const FAQ = [
   },
   {
     q: 'Apakah tautan umum menjamin satu respons per orang?',
-    a: 'Tidak. Tautan umum menjamin idempotensi kiriman, bukan identitas unik manusia. Batas satu respons per peserta hanya berlaku pada undangan individual.',
+    a: 'Tidak. Tautan umum mencegah jawaban ganda dari kiriman yang sama, tetapi tidak memastikan satu orang hanya mengisi sekali. Batas satu respons per peserta hanya berlaku pada undangan individual.',
   },
   {
     q: 'Siapa yang bisa melihat jawaban individual?',
@@ -196,9 +196,9 @@ export function HomePage() {
           {/* Jalur data dan persetujuan */}
           <section aria-labelledby="persetujuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti profil deployment</h2>
+              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti kebijakan organisasi</h2>
               <p className="max-w-[65ch] text-body text-muted">
-                Satu profil organisasi menentukan teks notice dan syarat persetujuan. Tidak ada asumsi sektor di dalam kode.
+                Satu profil organisasi menentukan teks pemberitahuan dan syarat persetujuan. Tidak ada asumsi sektor di dalam kode.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">

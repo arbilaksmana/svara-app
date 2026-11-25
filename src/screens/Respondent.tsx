@@ -333,9 +333,8 @@ export function UnsentAttemptChoiceView({
       <Card className="flex flex-col gap-3">
         <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
         <p className="text-body-sm text-muted">
-          Tab ini masih menyimpan persetujuan atau jawaban untuk survei ini yang belum dikirim. Bila itu isian Anda,
-          lanjutkan; jawaban yang tersimpan muncul lagi setelah Anda menyetujui pemberitahuan. Bila bukan, mulai sebagai
-          responden baru agar isian itu dihapus dari tab ini.
+          Draf isian untuk survei ini tersimpan di perangkat ini dan belum terkirim. Lanjutkan isian itu, atau mulai
+          sebagai responden baru untuk menghapusnya.
         </p>
         <div className="flex flex-wrap gap-3">
           <Button variant="secondary" onClick={onResume}>Lanjutkan isian sebelumnya</Button>
@@ -347,7 +346,7 @@ export function UnsentAttemptChoiceView({
       <ConfirmDialog
         open={confirming}
         title="Hapus isian yang belum dikirim?"
-        detail="Persetujuan, jawaban, dan kunci kirim yang tersimpan di tab ini akan dihapus untuk survei ini. Isian yang sudah dikirim tidak terpengaruh."
+        detail="Draf untuk survei ini akan dihapus dari perangkat ini dan tidak bisa dipulihkan. Isian yang sudah terkirim tidak terpengaruh."
         confirmLabel="Hapus isian"
         onClose={onCancelRestart}
         onConfirm={onConfirmRestart}
@@ -439,7 +438,7 @@ export function IntroView({
               {[
                 ['Tujuan', notice.purpose],
                 ['Jenis data', notice.data_categories],
-                ['Penggunaan Modul 15', notice.module15_usage],
+                ['Penerusan data ke pihak lain', notice.module15_usage],
                 ['Retensi', notice.retention_text],
                 ['Penerima', notice.recipients],
                 ['Hak Anda', notice.rights],
@@ -1077,9 +1076,9 @@ export function ReviewPage({ token }: { token: string }) {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Persetujuan dan pemberitahuan</SectionTitle>
             <dl className="grid gap-3 text-body-sm sm:grid-cols-2">
-              <div><dt className="text-caption font-bold text-muted">Versi notice</dt><dd className="mt-1 text-ink">{consent?.notice_version ?? 'Tidak tercatat'}</dd></div>
+              <div><dt className="text-caption font-bold text-muted">Versi pemberitahuan</dt><dd className="mt-1 text-ink">{consent?.notice_version ?? 'Tidak tercatat'}</dd></div>
               <div><dt className="text-caption font-bold text-muted">Dasar persetujuan</dt><dd className="mt-1 text-ink">{consent?.basis ?? 'Tidak tercatat'}</dd></div>
-              <div><dt className="text-caption font-bold text-muted">Klik responden</dt><dd className="mt-1 text-ink">{consent?.respondent_click ? 'Tercatat' : 'Tidak tercatat'}</dd></div>
+              <div><dt className="text-caption font-bold text-muted">Konfirmasi persetujuan</dt><dd className="mt-1 text-ink">{consent?.respondent_click ? 'Tercatat' : 'Tidak tercatat'}</dd></div>
               <div><dt className="text-caption font-bold text-muted">Kelayakan konteks</dt><dd className="mt-1 text-ink">Terkonfirmasi pada pengantar</dd></div>
               <GuardianEvidenceSummary status={consent?.guardian_evidence_status ?? 'not_required'} />
             </dl>

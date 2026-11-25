@@ -477,10 +477,10 @@ Organisasi sintetis (`seedDemoIfEmpty` di `server/seed-data.ts`):
 
 | ID | Nama | Tipe | Kategori usia | Mode persetujuan | Notice |
 | --- | --- | --- | --- | --- | --- |
-| `org_smk` | SMK Nusantara (sintetis) | `school` | `minor` | `guardian` | `1.2` |
-| `org_perpus` | Perpustakaan Kota (sintetis) | `organization` | `adult` | `self` | `1.2` |
+| `org_smk` | SMK Nusantara (contoh) | `school` | `minor` | `guardian` | `1.2` |
+| `org_perpus` | Perpustakaan Kota (contoh) | `organization` | `adult` | `self` | `1.2` |
 
-`platform_profile` berisi satu baris `id='platform'` bernama "Svara (sintetis)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
+`platform_profile` berisi satu baris `id='platform'` bernama "Svara (contoh)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 
 - `pl_demoTautanUmum1A`: tautan umum survei SMK, mode wali, pemberitahuan sintetis.
 - `pl_demoTautanPrps01`: tautan umum survei perpustakaan, persetujuan diri.

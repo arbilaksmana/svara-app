@@ -294,6 +294,10 @@ test('UIX-20: daftar survei, undangan, dan riwayat versi memakai tanggal WIB, bu
   const invitation = row(render(createElement(SharePage, { id: 's_tanggal' }), '/creator/surveys/s_tanggal/share'), 'UND-TANGGAL');
   assert.doesNotMatch(invitation, ISO_DATE, 'Tabel undangan tidak boleh menampilkan tanggal ISO');
   assert.match(invitation, /12 November 2026 pukul 09\.15 WIB/);
+  // Batas waktu diisi tanggal saja; server menyimpannya sebagai akhir hari UTC. Tabel harus
+  // menampilkan tanggal pilihan pengguna, bukan geseran WIB ke 1 Januari 2027.
+  assert.match(invitation, /31 Desember 2026 \(akhir hari\)/, 'Batas waktu undangan harus tanggal yang dipilih');
+  assert.doesNotMatch(invitation, /1 Januari 2027/, 'Batas waktu tidak boleh bergeser sehari karena konversi WIB');
 
   const history = render(createElement(HistoryPage, { id: 's_tanggal' }), '/creator/surveys/s_tanggal/history');
   const first = row(history, '>v1<');

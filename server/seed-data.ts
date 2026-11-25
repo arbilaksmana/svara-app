@@ -28,8 +28,8 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     // Dua organisasi sintetis agar isolasi lingkup org_admin dapat dibuktikan.
     // notice_version organisasi sengaja berbeda dari platform agar sumber notice dapat dibuktikan.
     const organizations: Array<[string, string, string, string, string, string]> = [
-      ['org_smk', 'SMK Nusantara (sintetis)', 'school', 'minor', 'guardian', '1.2'],
-      ['org_perpus', 'Perpustakaan Kota (sintetis)', 'organization', 'adult', 'self', '1.2'],
+      ['org_smk', 'SMK Nusantara (contoh)', 'school', 'minor', 'guardian', '1.2'],
+      ['org_perpus', 'Perpustakaan Kota (contoh)', 'organization', 'adult', 'self', '1.2'],
     ];
     for (const [id, name, type, ageCategory, consentMode, noticeVersion] of organizations) {
       await run(
@@ -49,7 +49,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       `INSERT INTO platform_profile (id, organization_name, organization_type, policy_url, terms_url, retention_days,
         data_request_contact, cross_border_transfer, notice_version, updated_at)
        VALUES ('platform', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      'Svara (sintetis)',
+      'Svara (contoh)',
       'platform',
       '/privacy',
       '/terms',
@@ -88,7 +88,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_smk',
-      'SMK Nusantara (sintetis)',
+      'SMK Nusantara (contoh)',
       'school',
       'minor',
       'guardian',
@@ -105,7 +105,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_perpus',
-      'Perpustakaan Kota (sintetis)',
+      'Perpustakaan Kota (contoh)',
       'organization',
       'adult',
       'self',
