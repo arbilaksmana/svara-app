@@ -182,7 +182,10 @@ try {
 
   const counts = new Map<number, number>();
   for (const row of body) {
-    const value = Number(row[adIndex]);
+    const cell = row[adIndex] ?? '';
+    // PRD §7: jawaban kosong bukan nilai nol; ekspor menulisnya sebagai sel kosong.
+    if (cell === '') continue;
+    const value = Number(cell);
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
   const summaryAd = summary.items.find((item) => item.code === 'AD01');

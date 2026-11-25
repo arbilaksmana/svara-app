@@ -1001,13 +1001,50 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
 
   const summary = data<{
     total: number;
-    items: Array<{ code: string; answered: number; options: Array<{ count: number }> }>;
+    items: Array<{ code: string; answered: number; skipped: number; options: Array<{ value: number; count: number }> }>;
   }>(await call('/surveys/s_demo1/summary?version=v_demo1_1', { cookie: creator }));
   assert.ok(summary.total >= 5);
   const ad01 = summary.items.find((item) => item.code === 'AD01');
   assert.ok(ad01);
   assert.equal(ad01?.options.length, 5, 'opsi tanpa pemilih tetap tampil');
-  assert.equal(ad01.answered, summary.total, 'semua respons seed harus menjawab item wajib AD01');
+  // PRD §7 (AC08): lima respons final seed — AD01 = 2, 4, 4, 5, kosong; frekuensi opsi 1–5 = 0,1,0,2,1.
+  const ad01Responses = data<Array<{
+    id: string;
+    answers: Array<{ question_code: string; option_id: string | null; value: number | null; skipped: boolean }>;
+  }>>(await call('/surveys/s_demo1/responses?version=v_demo1_1', { cookie: officer }));
+  const ad01ByResponse = ad01Responses.map((response) => ({
+    seed: response.id.startsWith('r_demo'),
+    answer: response.answers.find((answer) => answer.question_code === 'AD01'),
+  }));
+  const seedAd01 = ad01ByResponse.filter((row) => row.seed).map((row) => row.answer);
+  const seedAnsweredAd01 = seedAd01.filter((answer) => answer && !answer.skipped).length;
+  assert.equal(seedAnsweredAd01, 4, 'total pengisi AD01 seed empat (PRD §7)');
+  assert.deepEqual(
+    seedAd01.map((answer) => (answer?.skipped ? null : answer?.value)).sort((a, b) => (a ?? 0) - (b ?? 0)),
+    [null, 2, 4, 4, 5],
+    'AD01 seed harus 2, 4, 4, 5, kosong (PRD §7)',
+  );
+  assert.equal(
+    seedAd01.filter((answer) => answer?.value === 4).length / seedAnsweredAd01,
+    0.5,
+    'opsi 4 = 50% dari yang menjawab AD01 (PRD §7)',
+  );
+  // Ringkasan hidup mencakup respons uji lain pada versi ini; selisihnya dihitung dari baris API,
+  // bukan dari total statis.
+  const otherAd01 = ad01ByResponse.filter((row) => !row.seed).map((row) => row.answer);
+  assert.equal(
+    ad01.answered,
+    seedAnsweredAd01 + otherAd01.filter((answer) => answer && !answer.skipped).length,
+    'ringkasan menjumlahkan pengisi AD01 seed dan respons uji lain',
+  );
+  assert.equal(ad01.skipped, 1, 'hanya respons seed r_demo05 yang melewati AD01');
+  assert.deepEqual(
+    [...ad01.options].sort((a, b) => a.value - b.value).map((option) => option.count),
+    [1, 2, 3, 4, 5].map((value) =>
+      [...seedAd01, ...otherAd01].filter((answer) => answer?.value === value).length,
+    ),
+    'frekuensi opsi: seed PRD §7 0,1,0,2,1 + respons uji lain',
+  );
 
   const officerCsv = await call('/surveys/s_demo1/export?version=v_demo1_1&format=csv&recipient=Uji%20KP-03&purpose=Uji%20ekspor', { cookie: officer });
   assert.equal(officerCsv.status, 200);
