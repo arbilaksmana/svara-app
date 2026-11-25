@@ -17,6 +17,13 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }];
   },
+  // Bookmark lama sebelum rute dipindah ke /auth/login dan /creator (T4).
+  async redirects() {
+    return [
+      { source: '/login', destination: '/auth/login', permanent: true },
+      { source: '/surveys', destination: '/creator', permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;
