@@ -124,10 +124,27 @@ export async function migrate(options: { to?: string } = {}): Promise<string[]> 
   return applied;
 }
 
-/** Kosongkan seluruh schema aplikasi untuk db:reset dan basis data uji. */
+/**
+ * Kosongkan seluruh schema aplikasi untuk db:reset dan basis data uji. DDL perawatan ini bukan
+ * query aplikasi: DROP SCHEMA CASCADE bisa melebihi statement_timeout pool yang kecil (PERF-08
+ * memakai 200 ms) dan pembatalannya membuat reset gagal (57014). Satu transaksi dengan
+ * SET LOCAL statement_timeout = 0: batas pool tetap berlaku untuk query lain, dan nilai sesi
+ * kembali otomatis saat transaksi selesai sehingga koneksi pool tidak berubah permanen.
+ */
 export async function resetSchema(): Promise<void> {
-  await pool.query('DROP SCHEMA IF EXISTS public CASCADE');
-  await pool.query('CREATE SCHEMA public');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL statement_timeout = 0');
+    await client.query('DROP SCHEMA IF EXISTS public CASCADE');
+    await client.query('CREATE SCHEMA public');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('/migrate.ts')) {

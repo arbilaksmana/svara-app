@@ -50,6 +50,32 @@ async function waitForServer(child: ChildProcess, output: () => string): Promise
 }
 
 /**
+ * stdout dan stderr adalah pipe terpisah tanpa jaminan urutan: penanda "Svara berjalan" bisa
+ * terbaca sebelum chunk peringatan startup sampai ke proses uji (terlihat di CI). Tunggu barisnya
+ * dengan batas waktu, jangan snapshot sekali baca.
+ */
+async function waitForOutput(child: ChildProcess, output: () => string, pattern: RegExp, timeoutMs: number): Promise<void> {
+  if (pattern.test(output())) return;
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const onData = () => {
+    if (pattern.test(output())) resolve();
+  };
+  child.stdout?.on('data', onData);
+  child.stderr?.on('data', onData);
+  const onExit = (code: number | null) => reject(new Error(`server berhenti (kode ${code}) sebelum pola ${pattern} muncul: ${output()}`));
+  child.once('exit', onExit);
+  const timer = setTimeout(() => reject(new Error(`pola ${pattern} tidak muncul dalam ${timeoutMs} ms: ${output()}`)), timeoutMs).unref();
+  try {
+    await promise;
+  } finally {
+    clearTimeout(timer);
+    child.stdout?.off('data', onData);
+    child.stderr?.off('data', onData);
+    child.off('exit', onExit);
+  }
+}
+
+/**
  * SIGINT asli tidak bisa dikirim lintas proses di Windows (libuv mengubahnya menjadi terminate
  * tanpa handler), jadi proses anak meneruskan tulisan stdin 'SIGINT' ke process.emit. Handler
  * shutdown yang diuji adalah kode produksi yang sama; hanya pemicunya yang lewat stdin.
@@ -67,24 +93,44 @@ function startApi(env: NodeJS.ProcessEnv): ChildProcess {
 }
 
 /**
- * Koneksi dengan header HTTP yang belum lengkap tetap dihitung "active" oleh server.close(),
- * sehingga shutdown hanya bisa selesai lewat jalur keluar paksa; exit 1 membuktikan batasnya.
+ * Koneksi yang pasti "active" bagi server.close(): POST chunked dengan body menggantung.
+ * Respons pertama dibaca sampai header lengkap (bukti parser server sudah bekerja, tanpa sleep),
+ * lalu chunk tanpa terminator dikirim; header parsial saja terbukti rapuh di CI yang cepat —
+ * koneksi sempat dianggap idle, server.close selesai dini, exit 0 (run 45609979461).
  */
 async function holdActiveConnection(): Promise<net.Socket> {
   const socket = net.connect(PORT, '127.0.0.1');
   socket.on('error', () => {}); // server memutus koneksi saat keluar paksa
   await once(socket, 'connect');
-  socket.write('GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n');
+  socket.write('GET /api/v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\nPOST / HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n');
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  let received = '';
+  const onData = (chunk: Buffer) => {
+    received += chunk.toString('latin1');
+    if (received.includes('\r\n\r\n')) resolve();
+  };
+  socket.on('data', onData);
+  // Batas kegagalan saja, bukan jeda: selesai tepat saat header respons pertama tiba.
+  const timer = setTimeout(() => reject(new Error(`server tidak menjawab dalam 5 s: ${received}`)), 5_000).unref();
+  try {
+    await promise;
+  } finally {
+    clearTimeout(timer);
+    socket.off('data', onData);
+  }
+  socket.write('5\r\nhel');
   return socket;
 }
 
 async function shutdownOutcome(child: ChildProcess, output: () => string): Promise<{ code: number | null; elapsedMs: number }> {
   const socket = await holdActiveConnection();
   const exited = once(child, 'exit');
+  const closed = once(child, 'close'); // stdio ter-drain penuh; stderr lengkap sebelum dibaca
   const started = performance.now();
   child.stdin?.write('SIGINT\n');
   const [code] = await exited;
   const elapsedMs = performance.now() - started;
+  await closed;
   socket.destroy();
   assert.ok(output().includes('Svara berjalan'), `server harus sudah siap: ${output()}`);
   return { code: typeof code === 'number' ? code : null, elapsedMs };
@@ -157,6 +203,7 @@ for (const invalid of ['abc', '-5', '0']) {
     const output = captureOutput(child);
     try {
       await waitForServer(child, output);
+      await waitForOutput(child, output, /SHUTDOWN_FORCE_EXIT_MS/, 10_000);
       assert.match(output(), /SHUTDOWN_FORCE_EXIT_MS/, 'nilai tidak valid harus memunculkan satu peringatan');
       const { code, elapsedMs } = await shutdownOutcome(child, output);
       assert.equal(code, 1);
