@@ -27,6 +27,10 @@ services:
       dockerfile: Dockerfile.api
     image: svara-api:local
     restart: unless-stopped
+    # OPS-05: ruang drain harus melebihi batas paksa shutdown API (SHUTDOWN_FORCE_EXIT_MS, maks 120 s).
+    stop_grace_period: 130s
+    mem_limit: 1g
+    cpus: 1.0
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +77,9 @@ services:
         API_ORIGIN: ${API_ORIGIN_BUILD:-http://api:3001}
     image: svara-web:local
     restart: unless-stopped
+    stop_grace_period: 15s
+    mem_limit: 1g
+    cpus: 1.0
     depends_on:
       api:
         condition: service_healthy
