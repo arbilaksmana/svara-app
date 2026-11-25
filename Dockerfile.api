@@ -11,6 +11,8 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3001
 WORKDIR /app
+# OPS-06: npm bawaan base image membawa brace-expansion 5.0.9 dan undici 6.28.0 (CVE HIGH fixable).
+RUN npm install -g npm@11.21.3 && npm cache clean --force
 RUN npm install -g --allow-scripts=esbuild tsx@4.23.15
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./
