@@ -54,6 +54,7 @@ jobs:
       - name: Production web build
         run: pnpm build
       - name: Build containers
+        id: build-containers
         run: |
           docker build -f Dockerfile.api -t svara-api-ci .
           docker build -f Dockerfile.web --build-arg API_ORIGIN=http://127.0.0.1:3001 -t svara-web-ci .
@@ -74,21 +75,25 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
       - name: Generate SBOM (SPDX) for API image
-        if: always()
+        id: sbom-api
+        # Hanya bila image benar-benar dibangun; scan yang gagal tetap menghasilkan SBOM.
+        if: ${{ !cancelled() && steps.build-containers.conclusion == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: svara-api-ci
           format: spdx-json
           output: sbom-api.spdx.json
       - name: Generate SBOM (SPDX) for web image
-        if: always()
+        id: sbom-web
+        if: ${{ !cancelled() && steps.build-containers.conclusion == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: svara-web-ci
           format: spdx-json
           output: sbom-web.spdx.json
       - name: Upload SBOM artifacts
-        if: always()
+        # Setidaknya satu SBOM sukses ⇒ file dijamin ada; jangan gagal hanya karena scan gagal.
+        if: ${{ !cancelled() && (steps.sbom-api.conclusion == 'success' || steps.sbom-web.conclusion == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ github.run_id }}
