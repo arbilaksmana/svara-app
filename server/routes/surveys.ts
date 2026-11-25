@@ -395,6 +395,93 @@ surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   }
 });
 
+/** Kolom `profiles` yang dibutuhkan baris turunan; nilainya disalin dari sumber profil lingkup. */
+interface DerivedProfileRow {
+  organization_name: string;
+  organization_type: string;
+  respondent_age_category: string;
+  consent_mode: string;
+  policy_url: string;
+  terms_url: string;
+  retention_days: number | null;
+  data_request_contact: string | null;
+  cross_border_transfer: number | null;
+  notice_version: string;
+}
+
+/**
+ * KP-10 / NEW-PO-04: `surveys.profile_id` masih FK NOT NULL ke `profiles(id)`, tetapi tabel `profiles` adalah
+ * warisan deployment: instalasi tanpa seed tidak punya barisnya. Sumber profil survei baru adalah
+ * `organizations` (lingkup organisasi) atau `platform_profile` (lingkup platform); baris `profiles` hanya
+ * diturunkan dari sumber itu, sekali, dengan id stabil. Profil yang dipilih klien eksplisit berlaku seperti
+ * sebelumnya; tanpa pilihan klien, padanan profil legacy (nama + jenis sama) dipakai agar data lama tetap terhubung.
+ */
+async function surveyProfileIdFor(organizationId: string | null, requestedProfileId: string | null): Promise<string> {
+  if (requestedProfileId) {
+    const chosen = await get<{ id: string }>('SELECT id FROM profiles WHERE id = ?', requestedProfileId);
+    if (!chosen) {
+      fail(409, 'profile_missing', 'Profil yang dipilih belum dikonfigurasi. Gunakan profil deployment yang ada.');
+    }
+    return chosen.id;
+  }
+  // Lingkup menentukan sumber dan kelengkapannya: profil organisasi atau platform. Baris `profiles` legacy tidak
+  // pernah menjadi alasan survei boleh dibuat, jadi instalasi yang sudah lama berjalan pun wajib punya sumbernya.
+  const source = organizationId
+    ? await get<DerivedProfileRow>(
+        `SELECT name AS organization_name, organization_type, respondent_age_category, consent_mode, policy_url,
+                terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
+           FROM organizations WHERE id = ?`,
+        organizationId,
+      )
+    : await get<DerivedProfileRow>(
+        `SELECT organization_name, organization_type, 'adult'::text AS respondent_age_category,
+                'self'::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
+                cross_border_transfer, notice_version
+           FROM platform_profile WHERE id = 'platform'`,
+      );
+  if (!source) {
+    fail(
+      409,
+      'profile_missing',
+      organizationId
+        ? 'Profil organisasi belum dikonfigurasi. Lengkapi profil organisasi terlebih dahulu.'
+        : 'Profil platform belum dikonfigurasi. Jalankan pnpm admin:bootstrap terlebih dahulu.',
+    );
+  }
+  const id = organizationId ? `p_org_${organizationId}` : 'p_platform';
+  // Kompatibilitas data lama: padanan profil legacy (nama + jenis sama) dipakai bila ada; baris turunan yang
+  // ditulis kode lama (synthetic_placeholder = 1) tidak ikut dipilih karena itu salinan p_smk/p_perpus.
+  const legacy = await get<{ id: string }>(
+    `SELECT id FROM profiles WHERE id = ? OR (organization_name = ? AND organization_type = ?)
+     ORDER BY (id = ?) DESC, (synthetic_placeholder = 0) DESC, id LIMIT 1`,
+    id,
+    source.organization_name,
+    source.organization_type,
+    id,
+  );
+  if (legacy) return legacy.id;
+  // `synthetic_placeholder = 1` menandai baris turunan: nilai profil efektif tetap dibaca dari sumber lingkup.
+  await run(
+    `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+       policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version,
+       synthetic_placeholder)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+     ON CONFLICT (id) DO NOTHING`,
+    id,
+    source.organization_name,
+    source.organization_type,
+    source.respondent_age_category,
+    source.consent_mode,
+    source.policy_url,
+    source.terms_url,
+    source.retention_days,
+    source.data_request_contact,
+    source.cross_border_transfer,
+    source.notice_version,
+  );
+  return id;
+}
+
 surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
@@ -413,13 +500,8 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
     const requestedProfileId = typeof req.body?.profile_id === 'string' && req.body.profile_id
       ? req.body.profile_id
       : null;
-    const profile = await get<{ id: string }>(
-      'SELECT id FROM profiles WHERE id = ?',
-      requestedProfileId ?? 'p_smk',
-    ) ?? (requestedProfileId ? undefined : await get<{ id: string }>('SELECT id FROM profiles ORDER BY id LIMIT 1'));
-    if (!profile) {
-      fail(409, 'profile_missing', 'Profil deployment belum dikonfigurasi. Seed data profil terlebih dahulu.');
-    }
+    // Profil lingkup diperiksa sebelum transaksi, sehingga 409 menyebut profil hilang, bukan notice_source_missing.
+    const profileId = await surveyProfileIdFor(organizationId, requestedProfileId);
     // notice_version tidak diambil dari profiles: sumbernya mengikuti owner_scope.
     const notice = await noticeVersionFor(organizationId);
     const id = newId('s');
@@ -430,7 +512,7 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
          VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL, ?)`,
         id,
         req.account!.id,
-        profile.id,
+        profileId,
         title,
         now,
         now,
