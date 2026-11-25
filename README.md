@@ -393,6 +393,8 @@ SMOKE_WEB_ORIGIN=http://127.0.0.1:3000 \
   pnpm smoke:web    # root, login, CSP nonce, rewrite health, login + bootstrap
 ```
 
+Tanpa `SMOKE_EMAIL`/`SMOKE_PASSWORD`, smoke memakai `admin@ci.local` yang hanya dibuat CI lewat `admin:bootstrap`; di basis data lain isi keduanya dengan akun yang sudah terdaftar.
+
 Suite memakai basis data uji terpisah; tanpa `TEST_DATABASE_URL` skrip berhenti sebelum menyentuh data apa pun.
 
 ```bash

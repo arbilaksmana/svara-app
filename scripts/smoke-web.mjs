@@ -100,7 +100,14 @@ await check('login via rewrite', async () => {
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body?.error ?? `status ${response.status}`);
+  if (!response.ok) {
+    // 401 di sini hampir selalu berarti akun default tidak ada di basis data yang dipakai API.
+    const hint =
+      response.status === 401
+        ? ` — akun smoke "${EMAIL}" kemungkinan tidak ada di basis data API ini; isi SMOKE_EMAIL/SMOKE_PASSWORD dengan akun yang terdaftar (mis. hasil pnpm admin:bootstrap)`
+        : '';
+    throw new Error(`${body?.error ?? `status ${response.status}`}${hint}`);
+  }
   if (body?.data?.account?.role !== 'super_admin') throw new Error('akun smoke bukan super_admin');
   const setCookie = response.headers.getSetCookie?.() ?? [];
   cookie = setCookie.map((value) => value.split(';')[0]).find((value) => value.startsWith('svara_session=')) ?? '';
