@@ -13,7 +13,14 @@ if (placeholderSecrets) throw new Error(placeholderSecrets);
 const demoSeed = demoSeedEnabled();
 const httpsWarning = productionWithoutHttpsWarning();
 if (httpsWarning) console.warn(httpsWarning);
-await migrate();
+// OPS-07: kegagalan migrasi berarti start harus berhenti dengan pesan yang bisa dibaca operator,
+// bukan stack trace. Penolakan karena DB berisi tabel asing / checksum berbeda sampai di sini.
+try {
+  await migrate();
+} catch (error) {
+  console.error(`[db] start dibatalkan: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 
 if (demoSeed) {
   const seeded = await seedDemoIfEmpty();
