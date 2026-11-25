@@ -32,6 +32,12 @@ export const INVITATION_STATUS_LABEL: Record<InvitationStatus, string> = {
   closed: 'Ditutup',
 };
 
+/** Jalur pengisian (enum tersimpan); label manusiawi agar `standalone` tidak bocor ke layar hasil. */
+export const COLLECTION_MODE_LABEL: Partial<Record<string, string>> = {
+  standalone: 'Pengisian mandiri',
+  integrated: 'Integrasi sistem',
+};
+
 /** Status bukti wali pada layar moderasi; tiga status ini yang dapat diputuskan operator. */
 export const GUARDIAN_EVIDENCE_STATUS_LABEL: Record<string, string> = {
   self_attested: 'Menunggu tinjauan',

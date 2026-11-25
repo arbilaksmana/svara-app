@@ -326,7 +326,7 @@ test('BR-12: mencabut undangan yang sudah dipakai → 409 dan status tetap used'
   assert.equal(data<{ state: string }>(await call(`/public/surveys/${usedInvitation.token}`)).state, 'used');
   assert.equal((await call('/public/surveys/undangan-demo')).status, 404, 'bentuk token lama tidak dicari');
   const audited = await get<{ count: number }>(
-    "SELECT COUNT(*)::int AS count FROM audit_logs WHERE action = 'Cabut undangan' AND object LIKE '%inv_02%'",
+    "SELECT COUNT(*)::int AS count FROM audit_logs WHERE action = 'Cabut undangan' AND object = 's_demo1 · inv_02'",
   );
   assert.equal(audited?.count, 0, 'penolakan tidak dicatat sebagai pencabutan berhasil');
 

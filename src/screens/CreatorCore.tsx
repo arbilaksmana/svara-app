@@ -589,7 +589,7 @@ export function EditorPage({ id }: { id: string }) {
                           <Field
                             id={`code-${question.key}`}
                             label="Kode item"
-                            hint="Unik per versi."
+                            hint="Unik per versi. Kode ini menjadi nama kolom di ekspor CSV."
                             error={showIssues && duplicateSet.has(question.code.trim().toUpperCase()) ? 'Kode item duplikat pada versi ini.' : undefined}
                           >
                             {(aria) => (
@@ -597,6 +597,7 @@ export function EditorPage({ id }: { id: string }) {
                                 {...aria}
                                 value={question.code}
                                 onChange={(e) => patchQuestion(question.key, { code: e.target.value })}
+                                placeholder="Contoh: KEPUASAN1"
                                 className="font-mono"
                               />
                             )}
@@ -648,14 +649,14 @@ export function EditorPage({ id }: { id: string }) {
                                 <TextInput {...aria} value={question.hint} onChange={(e) => patchQuestion(question.key, { hint: e.target.value })} />
                               )}
                             </Field>
-                            <Field id={`group-${question.key}`} label="Kode grup" hint="Opsional.">
+                            <Field id={`group-${question.key}`} label="Kode grup" hint="Opsional. Mengelompokkan item di kolom grup ekspor CSV.">
                               {(aria) => (
-                                <TextInput {...aria} value={question.group_code} onChange={(e) => patchQuestion(question.key, { group_code: e.target.value })} className="font-mono" />
+                                <TextInput {...aria} value={question.group_code} onChange={(e) => patchQuestion(question.key, { group_code: e.target.value })} placeholder="Contoh: KEPUASAN" className="font-mono" />
                               )}
                             </Field>
-                            <Field id={`dimension-${question.key}`} label="Dimensi" hint="Opsional.">
+                            <Field id={`dimension-${question.key}`} label="Dimensi" hint="Opsional. Label tema untuk analisis; ikut diekspor di kolom dimensi.">
                               {(aria) => (
-                                <TextInput {...aria} value={question.dimension_code} onChange={(e) => patchQuestion(question.key, { dimension_code: e.target.value })} className="font-mono" />
+                                <TextInput {...aria} value={question.dimension_code} onChange={(e) => patchQuestion(question.key, { dimension_code: e.target.value })} placeholder="Contoh: MOTIVASI" className="font-mono" />
                               )}
                             </Field>
                           </div>
@@ -738,7 +739,7 @@ export function EditorPage({ id }: { id: string }) {
 
             <div className="flex flex-col gap-4 lg:sticky lg:top-24 lg:self-start">
               <Panel className="h-fit">
-                <SectionTitle>Profil deployment</SectionTitle>
+                <SectionTitle>Kebijakan yang berlaku</SectionTitle>
                 <p className="mt-2 text-body-sm text-ink">{profile?.organization_name ?? 'Belum dimuat'}</p>
                 <p className="mt-2 text-caption text-muted">
                   Mode persetujuan: {profile?.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}
@@ -754,13 +755,16 @@ export function EditorPage({ id }: { id: string }) {
               <Panel className="h-fit">
                 <SectionTitle>Tindakan</SectionTitle>
                 <div className="mt-3 flex flex-col gap-2">
-                  <Button variant="primary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
+                  <div className="hidden lg:block">
+                    <Button variant="primary" block onClick={onSave} loading={busy} disabled={busy || state === 'loading' || state === 'closed'}>Simpan draf</Button>
+                  </div>
                   {dirty && <p className="text-caption font-bold text-danger">Perubahan belum disimpan.</p>}
                   <ActionLink to={ROUTES.creatorPreview(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lihat pratinjau</ActionLink>
                   <ActionLink to={ROUTES.creatorPublish(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lanjut ke publikasi</ActionLink>
                 </div>
                 <p className="mt-3 text-caption text-muted">
-                  Simpan draf sebelum membuka pratinjau atau publikasi. Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
+                  Satu tombol Simpan draf menyimpan seluruh draf, semua item sekaligus. Pratinjau dan publikasi baru tersedia
+                  setelah perubahan disimpan. Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
                 </p>
               </Panel>
             </div>

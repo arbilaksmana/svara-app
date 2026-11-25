@@ -762,7 +762,7 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
         state={state}
         permissionDetail="Status integrasi hanya untuk peran yang berwenang."
         conflictTo={ROUTES.adminAudit}
-        errorTitle="Layanan Modul 13/15 terputus"
+        errorTitle="Layanan integrasi terputus"
         errorDetail="Alur mandiri tetap berjalan meski layanan integrasi sedang terganggu."
       >
         <div className="flex flex-col gap-5">
@@ -770,7 +770,7 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
           {state === 'success' && <SuccessBanner title="Event berhasil diulang">ID kejadian tetap dipakai dan tidak membuat respons kedua.</SuccessBanner>}
           {down && (
             <Banner tone="danger" title="Layanan terputus">
-              Alur mandiri tetap berjalan tanpa Modul 13/15. Status pengiriman dapat diulang setelah layanan kembali.
+              Alur mandiri tetap berjalan tanpa layanan integrasi. Status pengiriman dapat diulang setelah layanan kembali.
             </Banner>
           )}
           {retryError && <Banner tone="danger" title="Pengulangan tidak membuktikan pengiriman">{retryError}</Banner>}
@@ -781,7 +781,7 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <SectionTitle>Modul 13 · identitas</SectionTitle>
+                <SectionTitle>Layanan identitas (integrasi)</SectionTitle>
                 <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Simulasi aktif'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
@@ -789,13 +789,13 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
               </p>
               <ul className="mt-3 flex list-inside list-disc flex-col gap-1 text-body-sm text-ink">
                 <li>ID lokal dan kode individual dipakai selama daftar peserta belum tersedia.</li>
-                <li>Bedakan LMS mencatat tautan dibuka dan Modul 14 mencatat jawaban tersimpan.</li>
+                <li>Bedakan LMS mencatat tautan dibuka dan sistem ini mencatat jawaban tersimpan.</li>
                 <li>Jangan membuat identitas kedua otomatis.</li>
               </ul>
             </Card>
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <SectionTitle>Modul 15 · konsumen data</SectionTitle>
+                <SectionTitle>Layanan konsumen data (integrasi)</SectionTitle>
                 <Badge tone={down ? 'danger' : 'success'}>{down ? 'Terputus' : 'Simulasi aktif'}</Badge>
               </div>
               <p className="mt-2 text-body-sm text-muted">
@@ -804,7 +804,7 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
               <ul className="mt-3 flex list-inside list-disc flex-col gap-1 text-body-sm text-ink">
                 <li>Filter cakupan dan kolom, catat penerima.</li>
                 <li><Code>schema_version</Code>, versi survei, kode item, nilai atau teks sesuai izin.</li>
-                <li><Code>collection_mode</Code>: standalone/integrated; <Code>identity_source</Code>: local/module_13.</li>
+                <li><Code>collection_mode</Code>: standalone (pengisian mandiri) / integrated (integrasi sistem); <Code>identity_source</Code>: local/module_13.</li>
               </ul>
             </Card>
           </div>

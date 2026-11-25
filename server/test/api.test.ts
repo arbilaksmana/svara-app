@@ -1414,7 +1414,7 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
   // Notice organisasi baru berasal dari profil deployment legacy bernama sama+tipe (aturan 013).
   const payload = {
     name: 'SMA Harapan Baru (sintetis)',
-    notice_profile_name: 'SMK Nusantara (sintetis)',
+    notice_profile_name: 'SMK Nusantara (contoh)',
     organization_type: 'school',
     respondent_age_category: 'minor',
     consent_mode: 'guardian',
@@ -2333,7 +2333,7 @@ test('Super admin mengubah profil platform tanpa menyentuh profil organisasi', a
     await call('/org/profile', { cookie: await session('orgadmin@svara.local') }),
   );
   assert.equal(orgUntouched.source, 'organization');
-  assert.equal(orgUntouched.profile.organization_name, 'SMK Nusantara (sintetis)');
+  assert.equal(orgUntouched.profile.organization_name, 'SMK Nusantara (contoh)');
 
   const stored = new Client({ connectionString: databaseUrl });
   await stored.connect();

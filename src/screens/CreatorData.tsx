@@ -29,7 +29,7 @@ import { StateView, SuccessBanner, ValidationSummary } from '../components/State
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
-import { formatWIB } from '../lib/summary';
+import { formatInvitationExpiry, formatWIB } from '../lib/summary';
 import { getSummary, getResponses, downloadExport, printPublicLinkToken, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
 import { useToast } from '../components/Toast';
 import {
@@ -51,6 +51,7 @@ import {
 import { MissingSurvey, SurveyNav } from './CreatorCore';
 import {
   AGE_CATEGORY_LABEL,
+  COLLECTION_MODE_LABEL,
   CONSENT_MODE_LABEL,
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
@@ -82,6 +83,19 @@ export function SharePage({ id }: { id: string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [printedLink, setPrintedLink] = useState<string | null>(null);
   const [printBusy, setPrintBusy] = useState(false);
+  const [tokenConfirm, setTokenConfirm] = useState(false);
+
+  function revealToken() {
+    setPrintBusy(true);
+    void printPublicLinkToken(id)
+      .then((issued) => {
+        setPrintedLink(issued.token);
+        notify('Token tautan umum baru diterbitkan; tautan lama tidak berlaku lagi.');
+        return refreshBootstrap();
+      })
+      .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Token gagal diterbitkan.', 'danger'))
+      .finally(() => setPrintBusy(false));
+  }
 
   async function copyLink(url: string, key: string) {
     try {
@@ -137,7 +151,7 @@ export function SharePage({ id }: { id: string }) {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Tautan umum</SectionTitle>
             <Banner tone="info" title="Tautan umum tidak menjamin satu respons per orang">
-              Jalur umum menjamin idempotensi kiriman, bukan identitas unik manusia.
+              Kiriman ganda dari orang yang sama dicegah, tetapi tautan umum tidak memastikan satu orang hanya mengisi sekali.
             </Banner>
             {links.length === 0 ? (
               <Muted>Belum ada tautan umum untuk survei ini. Terbitkan versi untuk membuatnya.</Muted>
@@ -158,15 +172,8 @@ export function SharePage({ id }: { id: string }) {
                       <Button
                         variant="secondary"
                         onClick={() => {
-                          setPrintBusy(true);
-                          void printPublicLinkToken(id)
-                            .then((issued) => {
-                              setPrintedLink(issued.token);
-                              notify('Token tautan umum baru diterbitkan; tautan lama tidak berlaku lagi.');
-                              return refreshBootstrap();
-                            })
-                            .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Token gagal diterbitkan.', 'danger'))
-                            .finally(() => setPrintBusy(false));
+                          setShareError(null);
+                          setTokenConfirm(true);
                         }}
                         loading={printBusy}
                         disabled={state === 'loading' || state === 'closed' || l.status !== 'active'}
@@ -231,7 +238,7 @@ export function SharePage({ id }: { id: string }) {
                     <span className="mt-1 block font-mono text-caption text-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
                   </Td>
                   <Td><Badge tone={INVITATION_STATUS_TONE[i.status]}>{INVITATION_STATUS_LABEL[i.status]}</Badge></Td>
-                  <Td>{i.expires_at ? formatWIB(i.expires_at) : 'Belum ada'}</Td>
+                  <Td>{i.expires_at ? formatInvitationExpiry(i.expires_at) : 'Belum ada'}</Td>
                   <Td>{i.used_at ? formatWIB(i.used_at) : 'Belum ada'}</Td>
                   <Td>{i.revoked_at ? formatWIB(i.revoked_at) : 'Belum ada'}</Td>
                   <Td>
@@ -300,6 +307,18 @@ export function SharePage({ id }: { id: string }) {
   return (
     <>
       {shareBody}
+      <ConfirmDialog
+        open={tokenConfirm}
+        title="Terbitkan token tautan umum baru?"
+        detail="Tautan umum yang lama langsung berhenti berlaku dan tidak bisa dipulihkan. Salin dan simpan tautan baru setelah token ditampilkan."
+        confirmLabel="Tampilkan token"
+        tone="primary"
+        onClose={() => setTokenConfirm(false)}
+        onConfirm={() => {
+          setTokenConfirm(false);
+          revealToken();
+        }}
+      />
       <ConfirmDialog
         open={Boolean(revokeTarget)}
         title="Cabut kode undangan ini?"
@@ -587,7 +606,7 @@ export function ResultsPage({ id }: { id: string }) {
                 {responses.map((response) => (
                   <li key={response.id} className="rounded-md border border-n200 p-3">
                     <p className="font-mono text-caption text-muted">
-                      {response.id} · {formatWIB(response.submitted_at)} · {response.collection_mode}
+                      {response.id} · {formatWIB(response.submitted_at)} · {COLLECTION_MODE_LABEL[response.collection_mode] ?? response.collection_mode}
                     </p>
                     <ul className="mt-2 flex flex-col gap-1">
                       {response.answers.map((answer) => (
@@ -741,7 +760,7 @@ export function SettingsPage({ id }: { id: string }) {
           {state === 'validation' && <ValidationSummary items={['Kontak permintaan data tidak boleh kosong.', 'Masa retensi harus ditetapkan.']} />}
 
           <Card className="flex flex-col gap-4">
-            <SectionTitle>Profil deployment</SectionTitle>
+            <SectionTitle>Kebijakan yang berlaku</SectionTitle>
             {profile ? (
               <Table head={['Bagian', 'Nilai']}>
                 <tr><Th>Nama organisasi</Th><Td>{profile.organization_name}</Td></tr>
@@ -767,11 +786,11 @@ export function SettingsPage({ id }: { id: string }) {
             <SectionTitle>Pemberitahuan per survei</SectionTitle>
             {notice ? (
               <>
-                <p className="font-mono text-caption tracking-mono text-muted">Versi notice: {notice.version}</p>
+                <p className="font-mono text-caption tracking-mono text-muted">Versi pemberitahuan: {notice.version}</p>
                 <Table head={['Bagian', 'Isi']}>
                   <tr><Th>Tujuan</Th><Td>{notice.purpose}</Td></tr>
                   <tr><Th>Jenis data</Th><Td>{notice.data_categories}</Td></tr>
-                  <tr><Th>Penggunaan Modul 15</Th><Td>{notice.module15_usage}</Td></tr>
+                  <tr><Th>Penerusan data ke pihak lain</Th><Td>{notice.module15_usage}</Td></tr>
                   <tr><Th>Retensi</Th><Td>{notice.retention_text}</Td></tr>
                   <tr><Th>Penerima</Th><Td>{notice.recipients}</Td></tr>
                   <tr><Th>Kontak</Th><Td>{notice.contact}</Td></tr>

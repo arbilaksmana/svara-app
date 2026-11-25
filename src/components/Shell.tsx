@@ -41,7 +41,7 @@ const NAV: Record<ShellKind, NavEntry[]> = {
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
     { to: ROUTES.adminRequests, label: 'Permintaan data' },
   ],
-  respondent: GUEST_NAV,
+  respondent: [],
 };
 
 /* Sama dengan referensi: sudut atas rata menempel tepi, sudut bawah membulat. */
@@ -57,8 +57,18 @@ const DESKTOP_NAV = {
   long: { fit: 'min-[60rem]:w-fit', gap: 'min-[60rem]:gap-5', row: 'min-[60rem]:w-auto min-[60rem]:justify-start', block: 'min-[60rem]:block', flex: 'min-[60rem]:flex', inlineFlex: 'min-[60rem]:inline-flex', hidden: 'min-[60rem]:hidden' },
 };
 
-function Wordmark({ to }: { to: string }) {
+function Wordmark({ to }: { to: string | null }) {
   const guard = useNavigationGuard();
+  const brand = (
+    <>
+      <BrandMark />
+      <span className="hidden sm:inline">Svara</span>
+    </>
+  );
+  // Alur responden tanpa tautan keluar: merek tampil sebagai penanda, bukan jalan pintas ke landing.
+  if (to === null) {
+    return <span className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 ${INNER}`}>{brand}</span>;
+  }
   return (
     <Link
       href={to}
@@ -66,8 +76,7 @@ function Wordmark({ to }: { to: string }) {
       aria-label="Svara"
       className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 px-2 text-body font-semibold text-n0 no-underline ${INNER} ${PRESS_LINK}`}
     >
-      <BrandMark />
-      <span className="hidden sm:inline">Svara</span>
+      {brand}
     </Link>
   );
 }
@@ -88,7 +97,7 @@ function NavItem({ to, label, active }: NavEntry & { active: boolean }) {
   );
 }
 
-function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; guestActions?: boolean; homeTo: string }) {
+function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, homeTo }: { nav: NavEntry[]; activePath: string; guestOnly?: boolean; guestActions?: boolean; homeTo: string | null }) {
   const router = useRouter();
   const pathname = usePathname() ?? '';
   const notify = useToast();
@@ -144,7 +153,8 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
           <div className={`flex w-full min-w-0 items-center justify-between gap-5 ${bp.row}`}>
             <Wordmark to={homeTo} />
 
-          {/* Desktop: deretan tautan seperti referensi. */}
+          {/* Desktop: deretan tautan seperti referensi. Alur responden tanpa tautan tidak merender nav kosong. */}
+          {nav.length > 0 && (
             <nav aria-label="Navigasi utama" className={`hidden ${bp.block}`}>
               <ul className="flex items-center gap-1">
                 {nav.map((item) => (
@@ -154,6 +164,7 @@ function PillNavbar({ nav, activePath, guestOnly = false, guestActions = true, h
                 ))}
               </ul>
             </nav>
+          )}
 
             {/* Mobile: satu pemicu menu, jadi tidak ada tautan yang terpotong. */}
             {(nav.length > 0 || current || guestActions) && (
@@ -314,15 +325,18 @@ export function Shell({
         : ROUTES.creator;
   const isOrgAdmin = activeSession?.role === 'org_admin';
   // Ruang kerja hanya diisi setelah sesi klien dikenal; tamu tidak pernah melihat nav tamu di sana.
-  const topNav = activeSession
-    ? isOrgAdmin
-      ? ORG_NAV
-      : activeSession.role === 'admin'
-        ? NAV.admin
-        : NAV.creator
-    : inWorkspace
-      ? []
-      : GUEST_NAV;
+  // Alur responden selalu minimal: tanpa tautan marketing agar pengisian tidak terputus.
+  const topNav = kind === 'respondent'
+    ? []
+    : activeSession
+      ? isOrgAdmin
+        ? ORG_NAV
+        : activeSession.role === 'admin'
+          ? NAV.admin
+          : NAV.creator
+      : inWorkspace
+        ? []
+        : GUEST_NAV;
   // Sidebar: org_admin hanya melihat entri Organisasi, meski halaman dirender sebagai admin.
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const activePath = kind === 'respondent' ? ROUTES.home : pathname;
@@ -336,7 +350,15 @@ export function Shell({
         Lewati ke konten utama
       </a>
 
-      {!chromeless && <PillNavbar nav={topNav} activePath={activePath} guestOnly={guestOnly || kind === 'respondent'} guestActions={!inWorkspace} homeTo={homeTo} />}
+      {!chromeless && (
+        <PillNavbar
+          nav={topNav}
+          activePath={activePath}
+          guestOnly={guestOnly || kind === 'respondent'}
+          guestActions={!inWorkspace && kind !== 'respondent'}
+          homeTo={kind === 'respondent' ? null : homeTo}
+        />
+      )}
 
       {chromeless ? (
         <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">

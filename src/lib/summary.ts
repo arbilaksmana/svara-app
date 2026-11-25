@@ -83,6 +83,21 @@ export function formatWIB(iso: string): string {
   return `${WIB.format(new Date(iso))} WIB`;
 }
 
+const UTC_DATE = new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'UTC' });
+/** Server menormalkan tanggal saja (`YYYY-MM-DD`) menjadi akhir hari UTC. */
+const END_OF_DAY_UTC = /T23:59:59(?:\.\d{1,3})?Z$/;
+
+/**
+ * Batas waktu undangan diisi perancang sebagai tanggal saja, dan server menyimpannya sebagai
+ * akhir hari UTC. Konversi ke WIB menggesernya ke pagi hari berikutnya sehingga pengguna
+ * melihat tanggal yang tidak pernah dipilihnya; tampilkan tanggal pilihannya, sedangkan
+ * nilai berwaktu eksplisit tetap ditampilkan lengkap dalam WIB.
+ */
+export function formatInvitationExpiry(iso: string): string {
+  if (END_OF_DAY_UTC.test(iso)) return `${UTC_DATE.format(new Date(iso))} (akhir hari)`;
+  return formatWIB(iso);
+}
+
 /** Ukuran berkas untuk unggahan bukti wali; server menolak di atas 5 MB. */
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
