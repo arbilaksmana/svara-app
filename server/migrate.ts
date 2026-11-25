@@ -29,6 +29,33 @@ export function migrationFiles(): MigrationFile[] {
     });
 }
 
+const FOREIGN_SCHEMA_HINT =
+  'Kemungkinan DATABASE_URL menunjuk basis data lain. Periksa DATABASE_URL; bila tabel di atas memang milik ' +
+  'deployment ini, pulihkan database (restore backup) atau kosongkan skema sebelum start.';
+
+/**
+ * Tolak start bila basis data berisi tabel tetapi bukan milik Svara (tanpa `schema_migrations`).
+ * Tanpa pemeriksaan ini, DB default Postgres atau DB aplikasi lain akan dipasangi migrasi di atasnya.
+ * Skema kosong tetap dianggap instalasi baru dan dilanjutkan.
+ */
+async function assertDatabaseMatchesMigrationState(): Promise<void> {
+  const tables = await pool.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'
+     ORDER BY table_name`,
+  );
+  const names = tables.rows.map((row) => row.table_name);
+  if (names.includes('schema_migrations')) return;
+  if (names.length === 0) return;
+  const shown = names.slice(0, 10).map((name) => `"${name}"`).join(', ');
+  const more = names.length > 10 ? ` dan ${names.length - 10} tabel lain` : '';
+  throw new Error(
+    `Basis data tidak memuat schema_migrations tetapi berisi ${names.length} tabel lain: ${shown}${more}. ` +
+      'Migrasi tidak diterapkan agar data yang bukan milik Svara tidak ditimpa. ' +
+      FOREIGN_SCHEMA_HINT,
+  );
+}
+
 async function ensureMigrationsTable(): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -50,6 +77,7 @@ export async function migrate(options: { to?: string } = {}): Promise<string[]> 
     throw new Error(`Migrasi target ${options.to} tidak ditemukan.`);
   }
   const selected = files.slice(0, targetIndex + 1);
+  await assertDatabaseMatchesMigrationState();
   await ensureMigrationsTable();
   const client = await pool.connect();
   const applied: string[] = [];
@@ -63,7 +91,10 @@ export async function migrate(options: { to?: string } = {}): Promise<string[]> 
       const previous = known.get(file.version);
       if (previous) {
         if (previous !== file.checksum) {
-          throw new Error(`Migrasi ${file.version} sudah diterapkan dengan isi berbeda. Buat migrasi baru.`);
+          throw new Error(
+            `Migrasi ${file.version} sudah diterapkan dengan isi berbeda. Buat migrasi baru. Bila tidak ada file ` +
+              'migrasi yang diedit, DATABASE_URL kemungkinan menunjuk deployment lain atau versi aplikasi yang berbeda.',
+          );
         }
         continue;
       }
