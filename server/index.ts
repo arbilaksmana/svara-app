@@ -7,12 +7,14 @@ import { seedDemoIfEmpty } from './seed-data.ts';
 import { demoSeedEnabled } from './seed-policy.ts';
 import { placeholderSecretsProblem } from './placeholder-secrets.ts';
 import { abortRunningExports } from './routes/surveys.ts';
+import { shutdownForceExitMs } from './shutdown-policy.ts';
 
 const placeholderSecrets = placeholderSecretsProblem(process.env);
 if (placeholderSecrets) throw new Error(placeholderSecrets);
 const demoSeed = demoSeedEnabled();
 const httpsWarning = productionWithoutHttpsWarning();
 if (httpsWarning) console.warn(httpsWarning);
+const forceExitMs = shutdownForceExitMs();
 // OPS-07: kegagalan migrasi berarti start harus berhenti dengan pesan yang bisa dibaca operator,
 // bukan stack trace. Penolakan karena DB berisi tabel asing / checksum berbeda sampai di sini.
 try {
@@ -63,7 +65,7 @@ const server = app.listen(port, host, () => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     // PERF-12: `server.close` menunggu respons yang masih mengalir; ekspor CSV yang dipotong harus
-    // dibatalkan dan dicatat 'gagal' lebih dulu agar shutdown selesai jauh di bawah batas paksa 5 s.
+    // dibatalkan dan dicatat 'gagal' lebih dulu agar shutdown selesai di bawah batas paksa (OPS-08).
     void abortRunningExports()
       .catch((error) => console.error('[api] gagal mencatat ekspor yang terpotong', error))
       .then(() => {
@@ -74,6 +76,6 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
         });
         server.closeIdleConnections();
       });
-    setTimeout(() => process.exit(1), 5_000).unref();
+    setTimeout(() => process.exit(1), forceExitMs).unref();
   });
 }

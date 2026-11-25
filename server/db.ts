@@ -39,11 +39,17 @@ function intEnv(name: string, fallback: number, min: number, max: number): numbe
 // COUNT(*) dan agregat lain kembali sebagai int8; kontrak API memakai number.
 pg.types.setTypeParser(20, (value: string) => Number(value));
 
+// PERF-08: tanpa batas, satu query lambat menahan koneksi pool tanpa akhir. statement_timeout
+// membatalkan query di server (57014); query_timeout adalah jaring klien bila pembatalan tak sampai.
+const statementTimeoutMs = intEnv('PG_STATEMENT_TIMEOUT_MS', 30_000, 100, 300_000);
+
 export const pool = new pg.Pool({
   connectionString,
   max: intEnv('PG_POOL_MAX', 10, 1, 50),
   idleTimeoutMillis: intEnv('PG_IDLE_TIMEOUT_MS', 10_000, 1_000, 120_000),
   connectionTimeoutMillis: intEnv('PG_CONNECTION_TIMEOUT_MS', 5_000, 500, 60_000),
+  statement_timeout: statementTimeoutMs,
+  query_timeout: statementTimeoutMs + 5_000,
   application_name: 'svara',
 });
 
