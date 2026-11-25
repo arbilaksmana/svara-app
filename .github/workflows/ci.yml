@@ -49,6 +49,8 @@ jobs:
       - run: pnpm lint
       - name: API and migration tests
         run: pnpm test
+      - name: Performance budget (PERF-13)
+        run: pnpm exec tsx --test server/test/perf-budget.test.ts
       - name: Production web build
         run: pnpm build
       - name: Build containers
