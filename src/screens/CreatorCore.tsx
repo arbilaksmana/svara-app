@@ -31,7 +31,7 @@ import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { findSurvey, questionsFor, optionsFor, surveys, versionsFor, editorVersionFor, draftVersionFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { formatWIB } from '../lib/summary';
-import { CONSENT_MODE_LABEL, STATUS_LABEL } from '../lib/labels';
+import { CONSENT_REQUIRED_LABEL, STATUS_LABEL } from '../lib/labels';
 import { useToast } from '../components/Toast';
 import { ApiError, previewSurveyChange, type SurveyPayload, type SurveyScope } from '../lib/api';
 import { NavigationGuardProvider } from '../lib/navigation-guard';
@@ -742,7 +742,8 @@ export function EditorPage({ id }: { id: string }) {
                 <SectionTitle>Kebijakan yang berlaku</SectionTitle>
                 <p className="mt-2 text-body-sm text-ink">{profile?.organization_name ?? 'Belum dimuat'}</p>
                 <p className="mt-2 text-caption text-muted">
-                  Mode persetujuan: {profile?.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}
+                  Bukti pendukung persetujuan:{' '}
+                  {CONSENT_REQUIRED_LABEL[survey.consent_required ?? 'tidak']}
                 </p>
                 <p className="mt-1 text-annotation text-muted">
                   {profile?.source === 'organization'

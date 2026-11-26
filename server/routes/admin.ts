@@ -154,8 +154,6 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ORGANIZATION_TYPE: Record<string, true> = { school: true, organization: true };
-const AGE_CATEGORY: Record<string, true> = { adult: true, minor: true, mixed: true };
-const CONSENT_MODE: Record<string, true> = { self: true, guardian: true };
 
 /**
  * Onboarding satu langkah: organisasi baru langsung dengan admin pertamanya.
@@ -170,22 +168,6 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
     const organizationType = asString(body.organization_type ?? '', 'organization_type', 50);
     if (!ORGANIZATION_TYPE[organizationType]) {
       fail(422, 'validation_error', 'organization_type harus school atau organization.');
-    }
-    const ageCategory =
-      body.respondent_age_category === undefined
-        ? 'adult'
-        : asString(body.respondent_age_category, 'respondent_age_category', 20);
-    if (!AGE_CATEGORY[ageCategory]) {
-      fail(422, 'validation_error', 'respondent_age_category harus adult, minor, atau mixed.');
-    }
-    const consentMode =
-      body.consent_mode === undefined ? 'self' : asString(body.consent_mode, 'consent_mode', 20);
-    if (!CONSENT_MODE[consentMode]) {
-      fail(422, 'validation_error', 'consent_mode harus self atau guardian.');
-    }
-    // PRD §1.2: responden minor/mixed mewajibkan persetujuan wali.
-    if ((ageCategory === 'minor' || ageCategory === 'mixed') && consentMode === 'self') {
-      fail(422, 'consent_mode_mismatch', 'respondent_age_category minor/mixed mewajibkan consent_mode guardian.');
     }
     const policyUrl =
       body.policy_url === undefined ? '/kebijakan-privasi' : asString(body.policy_url, 'policy_url', 500);
@@ -246,9 +228,8 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
     const provisioned = await withTx(async () => {
       await run(
         `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days,
-                                    data_request_contact, cross_border_transfer, notice_version, created_at,
-                                    respondent_age_category, consent_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                    data_request_contact, cross_border_transfer, notice_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         organizationId,
         name,
         organizationType,
@@ -259,8 +240,6 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
         crossBorder,
         noticeVersion,
         createdAt,
-        ageCategory,
-        consentMode,
       );
       await run(
         `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at,

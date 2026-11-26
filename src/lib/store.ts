@@ -26,6 +26,7 @@ import type {
   Assignment,
   AuditLog,
   DeploymentProfile,
+  ConsentRequired,
   EventStatus,
   SurveyNotice,
   SurveyProfile,
@@ -59,6 +60,8 @@ export interface Session {
 export interface SettingsState {
   allowResults: boolean;
   allowIndividual: boolean;
+  /** `tidak` | `wajib_upload`; hanya survei organisasi boleh `wajib_upload`. */
+  consentRequired: ConsentRequired;
   savedAt: string | null;
 }
 
@@ -266,7 +269,12 @@ function hydrate(data: api.BootstrapData): void {
   settings = Object.fromEntries(
     Object.entries(data.settings).map(([surveyId, value]) => [
       surveyId,
-      { allowResults: value.allowResults, allowIndividual: value.allowIndividual, savedAt: data.serverTime },
+      {
+        allowResults: value.allowResults,
+        allowIndividual: value.allowIndividual,
+        consentRequired: value.consentRequired,
+        savedAt: data.serverTime,
+      },
     ]),
   );
   grants = Object.fromEntries(
@@ -408,11 +416,12 @@ export async function saveSettings(
   surveyId: string,
   allowResults: boolean,
   allowIndividual: boolean,
+  consentRequired: ConsentRequired,
 ): Promise<void> {
-  await api.saveSettings(surveyId, allowResults, allowIndividual);
+  await api.saveSettings(surveyId, allowResults, allowIndividual, consentRequired);
   settings = {
     ...settings,
-    [surveyId]: { allowResults, allowIndividual, savedAt: new Date().toISOString() },
+    [surveyId]: { allowResults, allowIndividual, consentRequired, savedAt: new Date().toISOString() },
   };
   emit();
 }

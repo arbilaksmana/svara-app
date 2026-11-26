@@ -2,6 +2,7 @@ import type {
   AccessGrant,
   Account,
   AccountStatus,
+  ConsentRequired,
   OrgAuditRow,
   OrgGuardianEvidence,
   OrgInvitation,
@@ -96,7 +97,7 @@ export interface BootstrapData {
   /** SEC-10: `token`/`url` kosong dan `token_hash` tidak dikirim; token hanya dari respons penerbitan. */
   publicLinks: Array<PublicLink & { token?: string | null; url?: string | null; token_hash?: string }>;
   assignments: Array<{ id: string; survey_id: string; version_id: string; label: string; participant_ref: string }>;
-  settings: Record<string, { allowResults: boolean; allowIndividual: boolean }>;
+  settings: Record<string, { allowResults: boolean; allowIndividual: boolean; consentRequired: ConsentRequired }>;
   grants: AccessGrant[];
   accounts: Account[];
   organizations: OrganizationSummary[];
@@ -244,10 +245,10 @@ export async function revokeInvitation(id: string): Promise<void> {
   await call(`/invitations/${encodeURIComponent(id)}/revoke`, { method: 'POST' });
 }
 
-export async function saveSettings(id: string, allowResults: boolean, allowIndividual: boolean): Promise<void> {
+export async function saveSettings(id: string, allowResults: boolean, allowIndividual: boolean, consentRequired: ConsentRequired): Promise<void> {
   await call(`/surveys/${encodeURIComponent(id)}/settings`, {
     method: 'PUT',
-    body: { allowResults, allowIndividual },
+    body: { allowResults, allowIndividual, consent_required: consentRequired },
   });
 }
 
@@ -492,7 +493,7 @@ export interface ConsentRecord {
 }
 
 /**
- * Konversi berkas ke base64 untuk unggahan bukti wali. Server membatasi 5 MB dan
+ * Konversi berkas ke base64 untuk unggahan bukti pendukung. Server membatasi 5 MB dan
  * memeriksa isi berkas; fungsi ini hanya mengubah bentuk, bukan memvalidasi.
  */
 export async function fileToBase64(file: Blob): Promise<string> {
@@ -608,8 +609,6 @@ export type OrgProfileInput = Partial<
     | 'terms_url'
     | 'retention_days'
     | 'data_request_contact'
-    | 'respondent_age_category'
-    | 'consent_mode'
   >
 > & { cross_border_transfer?: boolean | null };
 
@@ -661,7 +660,7 @@ export async function getOrgAudit(limit = 100): Promise<OrgAuditRow[]> {
   return (await call<{ rows: OrgAuditRow[] }>(`/org/audit?limit=${limit}`)).rows;
 }
 
-/* ---------- Moderasi bukti wali (org_admin) ---------- */
+/* ---------- Moderasi bukti pendukung (org_admin) ---------- */
 
 export async function listOrgGuardianEvidence(status = 'self_attested'): Promise<OrgGuardianEvidence[]> {
   return (await call<{ evidence: OrgGuardianEvidence[] }>(

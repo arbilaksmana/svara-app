@@ -529,9 +529,9 @@ test('Upgrade main → kini: survei yang ditutup/diarsipkan main dan permintaan 
   const org = 'org_3b8e1d0c5a7f4926';
   await run(
     `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
-       cross_border_transfer, notice_version, created_at, respondent_age_category, consent_mode)
+       cross_border_transfer, notice_version, created_at)
      VALUES (?, 'Yayasan Pendidikan Lembah Hijau', 'school', '/kebijakan', '/ketentuan', NULL, NULL, NULL, '1.0',
-             '2026-08-01T01:00:00.000Z', 'adult', 'self')`,
+             '2026-08-01T01:00:00.000Z')`,
     org,
   );
   await run(

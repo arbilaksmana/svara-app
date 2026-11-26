@@ -386,6 +386,26 @@ async function currentOrDraft(
   };
 }
 
+/**
+ * Kebutuhan bukti persetujuan milik survei (`surveys.consent_required`). Hanya survei organisasi
+ * (`organization_id` terisi) yang boleh 'wajib_upload'; survei personal selalu 'tidak'.
+ */
+const CONSENT_REQUIRED: Record<string, true> = { tidak: true, wajib_upload: true };
+
+function consentRequiredInput(raw: unknown, organizationId: string | null): string {
+  if (raw === undefined || raw === null) return 'tidak';
+  const value = asString(raw, 'consent_required', 20);
+  if (!CONSENT_REQUIRED[value]) {
+    fail(422, 'validation_error', "consent_required harus 'tidak' atau 'wajib_upload'.", { field: 'consent_required' });
+  }
+  if (value === 'wajib_upload' && !organizationId) {
+    fail(422, 'consent_required_personal', 'Survei personal selalu tanpa bukti; bukti pendukung hanya untuk survei organisasi.', {
+      field: 'consent_required',
+    });
+  }
+  return value;
+}
+
 surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
   try {
     if (!req.account) fail(401, 'unauthenticated', 'Masuk kembali untuk melanjutkan.');
@@ -399,8 +419,6 @@ surveysRouter.get('/surveys', async (req: AuthedRequest, res: Response) => {
 interface DerivedProfileRow {
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string;
-  consent_mode: string;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -428,15 +446,14 @@ async function surveyProfileIdFor(organizationId: string | null, requestedProfil
   // pernah menjadi alasan survei boleh dibuat, jadi instalasi yang sudah lama berjalan pun wajib punya sumbernya.
   const source = organizationId
     ? await get<DerivedProfileRow>(
-        `SELECT name AS organization_name, organization_type, respondent_age_category, consent_mode, policy_url,
+        `SELECT name AS organization_name, organization_type, policy_url,
                 terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
            FROM organizations WHERE id = ?`,
         organizationId,
       )
     : await get<DerivedProfileRow>(
-        `SELECT organization_name, organization_type, 'adult'::text AS respondent_age_category,
-                'self'::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
-                cross_border_transfer, notice_version
+        `SELECT organization_name, organization_type, policy_url, terms_url, retention_days,
+                data_request_contact, cross_border_transfer, notice_version
            FROM platform_profile WHERE id = 'platform'`,
       );
   if (!source) {
@@ -461,17 +478,17 @@ async function surveyProfileIdFor(organizationId: string | null, requestedProfil
   );
   if (legacy) return legacy.id;
   // `synthetic_placeholder = 1` menandai baris turunan: nilai profil efektif tetap dibaca dari sumber lingkup.
+  // `profiles.respondent_age_category`/`consent_mode` bukan lagi data hidup: ditulis netral agar kolom
+  // NOT NULL warisan tetap terisi, dan tidak pernah dibaca.
   await run(
     `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
        policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version,
        synthetic_placeholder)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+     VALUES (?, ?, ?, 'adult', 'self', ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (id) DO NOTHING`,
     id,
     source.organization_name,
     source.organization_type,
-    source.respondent_age_category,
-    source.consent_mode,
     source.policy_url,
     source.terms_url,
     source.retention_days,
@@ -497,6 +514,7 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
       fail(403, 'forbidden_scope', 'Akun ini tidak terikat organisasi.');
     }
     const organizationId = ownerScope === 'organization' ? req.account.organization_id : null;
+    const consentRequired = consentRequiredInput(req.body?.consent_required, organizationId);
     const requestedProfileId = typeof req.body?.profile_id === 'string' && req.body.profile_id
       ? req.body.profile_id
       : null;
@@ -508,8 +526,8 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
     const now = nowIso();
     await withTx(async () => {
       await run(
-        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id)
-         VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL, ?)`,
+        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id, consent_required)
+         VALUES (?, ?, ?, ?, '', '', '', 'draft', ?, ?, NULL, ?, ?)`,
         id,
         req.account!.id,
         profileId,
@@ -517,6 +535,7 @@ surveysRouter.post('/surveys', async (req: AuthedRequest, res: Response) => {
         now,
         now,
         organizationId,
+        consentRequired,
       );
       await run('INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 0)', id);
       await createDraft(id, notice.notice_version);
@@ -896,7 +915,13 @@ surveysRouter.get('/surveys/:id/settings', async (req: AuthedRequest, res: Respo
       'SELECT allow_results, allow_individual FROM survey_settings WHERE survey_id = ?',
       survey.id,
     );
-    res.json({ data: { allowResults: Boolean(settings?.allow_results), allowIndividual: Boolean(settings?.allow_individual) } });
+    res.json({
+      data: {
+        allowResults: Boolean(settings?.allow_results),
+        allowIndividual: Boolean(settings?.allow_individual),
+        consentRequired: survey.consent_required,
+      },
+    });
   } catch (error) {
     sendError(res, error);
   }
@@ -908,15 +933,23 @@ surveysRouter.put('/surveys/:id/settings', async (req: AuthedRequest, res: Respo
     const survey = await requireManageSurvey(req.account, req.params.id);
     const allowResults = asBoolean(req.body?.allowResults, true);
     const allowIndividual = asBoolean(req.body?.allowIndividual, false);
-    await run(
-      `INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, ?, ?)
-       ON CONFLICT(survey_id) DO UPDATE SET allow_results = excluded.allow_results, allow_individual = excluded.allow_individual`,
-      survey.id,
-      allowResults ? 1 : 0,
-      allowIndividual ? 1 : 0,
-    );
-    await audit(req, 'Ubah pengaturan hasil', survey.id, 'berhasil', { allowResults, allowIndividual });
-    res.json({ data: { allowResults, allowIndividual } });
+    // Field yang tidak dikirim mempertahankan nilai tersimpan, sama seperti pengaturan izin hasil.
+    const consentRequired =
+      req.body?.consent_required === undefined
+        ? survey.consent_required
+        : consentRequiredInput(req.body.consent_required, survey.organization_id);
+    await withTx(async () => {
+      await run(
+        `INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, ?, ?)
+         ON CONFLICT(survey_id) DO UPDATE SET allow_results = excluded.allow_results, allow_individual = excluded.allow_individual`,
+        survey.id,
+        allowResults ? 1 : 0,
+        allowIndividual ? 1 : 0,
+      );
+      await run('UPDATE surveys SET consent_required = ?, updated_at = ? WHERE id = ?', consentRequired, nowIso(), survey.id);
+    });
+    await audit(req, 'Ubah pengaturan hasil', survey.id, 'berhasil', { allowResults, allowIndividual, consentRequired });
+    res.json({ data: { allowResults, allowIndividual, consentRequired } });
   } catch (error) {
     sendError(res, error);
   }
@@ -1165,6 +1198,9 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
     }
     const textQuestions = new Set(questions.filter((question) => question.type === 'short_text').map((question) => question.code));
     const exportQuestions = includeText ? questions : questions.filter((question) => !textQuestions.has(question.code));
+    // `surveys` dibaca sekali per ekspor; batch berikutnya hanya membaca `responses`.
+    // `organisasi` = id organisasi pemilik survei atau literal `publik`, `cara_masuk` = asal kiriman.
+    const organisasi = survey.organization_id ?? 'publik';
     const header = [
       'response_id',
       'respondent_id',
@@ -1174,6 +1210,8 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
       'collection_mode',
       'identity_source',
       'submitted_at',
+      'organisasi',
+      'cara_masuk',
       ...exportQuestions.map((question) => question.code),
     ];
     const object = `${survey.id} · v${version.number}`;
@@ -1228,6 +1266,8 @@ surveysRouter.get('/surveys/:id/export', async (req: AuthedRequest, res: Respons
             response.collection_mode,
             response.identity_source,
             response.submitted_at,
+            organisasi,
+            response.assignment_id === null ? 'tautan_umum' : 'undangan',
             ...exportQuestions.map((question) => {
               const answer = byCode.get(question.code);
               if (!answer || answer.skipped === 1) return '';

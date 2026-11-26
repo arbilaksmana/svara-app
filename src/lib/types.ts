@@ -1,15 +1,13 @@
 /** Tipe domain Modul 14. Mengikuti PRD §6 dan §1.2. Semua data bersifat sintetis. */
 
 export type OrganizationType = 'school' | 'organization';
-export type AgeCategory = 'adult' | 'minor' | 'mixed';
-export type ConsentMode = 'self' | 'guardian';
+/** `wajib_upload` hanya berlaku untuk survei organisasi; survei personal selalu `tidak`. */
+export type ConsentRequired = 'tidak' | 'wajib_upload';
 
 export interface DeploymentProfile {
   id: string;
   organization_name: string;
   organization_type: OrganizationType;
-  respondent_age_category: AgeCategory;
-  consent_mode: ConsentMode;
   policy_url: string;
   terms_url: string;
   /** null berarti menunggu keputusan pengendali (PRD §1.2 / §14). */
@@ -26,8 +24,6 @@ export interface SurveyProfile {
   id: string;
   organization_name: string;
   organization_type: OrganizationType;
-  respondent_age_category: AgeCategory | null;
-  consent_mode: ConsentMode | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -52,6 +48,7 @@ export interface Survey {
   created_at: string;
   updated_at: string;
   current_version_id: string | null;
+  consent_required: ConsentRequired;
 }
 
 export type VersionStatus = 'draft' | 'published' | 'closed' | 'archived';
@@ -216,8 +213,6 @@ export interface OrgProfile {
   id: string;
   organization_name: string;
   organization_type: OrganizationType;
-  respondent_age_category: AgeCategory;
-  consent_mode: ConsentMode;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -271,7 +266,7 @@ export interface OrgAuditRow {
   outcome: string;
 }
 
-/** Bukti wali yang diunggah responden; diputuskan operator lewat PATCH /org/guardian-evidence/:id. */
+/** Bukti pendukung yang diunggah responden; diputuskan operator lewat PATCH /org/guardian-evidence/:id. */
 export interface OrgGuardianEvidence {
   consent_id: string;
   survey_id: string;

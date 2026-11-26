@@ -1,4 +1,4 @@
-import type { AccountStatus, AgeCategory, ConsentMode, InvitationStatus, OrganizationType, Role, SurveyStatus, VersionStatus } from './types';
+import type { AccountStatus, ConsentRequired, InvitationStatus, OrganizationType, Role, SurveyStatus, VersionStatus } from './types';
 
 export const STATUS_LABEL: Record<SurveyStatus | VersionStatus, string> = {
   draft: 'Draf',
@@ -12,15 +12,9 @@ export const ORGANIZATION_TYPE_LABEL: Record<OrganizationType, string> = {
   organization: 'Organisasi',
 };
 
-export const AGE_CATEGORY_LABEL: Record<AgeCategory, string> = {
-  adult: 'Dewasa',
-  minor: 'Di bawah umur',
-  mixed: 'Campuran',
-};
-
-export const CONSENT_MODE_LABEL: Record<ConsentMode, string> = {
-  self: 'Persetujuan sendiri',
-  guardian: 'Persetujuan orang tua/wali',
+export const CONSENT_REQUIRED_LABEL: Record<ConsentRequired, string> = {
+  tidak: 'Persetujuan diri',
+  wajib_upload: 'Dengan bukti pendukung',
 };
 
 /** Dipakai undangan survei dan kode undangan organisasi; dua permukaan, satu kosakata status. */
@@ -38,7 +32,7 @@ export const COLLECTION_MODE_LABEL: Partial<Record<string, string>> = {
   integrated: 'Integrasi sistem',
 };
 
-/** Status bukti wali pada layar moderasi; tiga status ini yang dapat diputuskan operator. */
+/** Status bukti pendukung pada layar moderasi; tiga status ini yang dapat diputuskan operator. */
 export const GUARDIAN_EVIDENCE_STATUS_LABEL: Record<string, string> = {
   self_attested: 'Menunggu tinjauan',
   verified: 'Terverifikasi',

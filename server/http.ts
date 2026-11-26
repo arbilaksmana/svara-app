@@ -72,6 +72,8 @@ export interface SurveyRow {
   created_at: string;
   updated_at: string;
   current_version_id: string | null;
+  /** 'tidak' | 'wajib_upload'; hanya survei organisasi boleh 'wajib_upload'. */
+  consent_required: string;
 }
 
 export interface VersionRow {
@@ -264,8 +266,6 @@ export interface SurveyProfile {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string | null;
-  consent_mode: string | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -286,7 +286,7 @@ export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<st
   const rows = new Map<string, Omit<SurveyProfile, 'source'>>();
   if (organizationIds.length > 0) {
     const organizations = await all<Omit<SurveyProfile, 'source'>>(
-      `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+      `SELECT id, name AS organization_name, organization_type,
               policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
          FROM organizations WHERE id IN (${organizationIds.map(() => '?').join(',')})`,
       ...organizationIds,
@@ -295,9 +295,8 @@ export async function surveyProfilesFor(surveys: SurveyRow[]): Promise<Record<st
   }
   if (surveys.some((survey) => !survey.organization_id)) {
     const platform = await get<Omit<SurveyProfile, 'source'>>(
-      `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
-              NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
-              cross_border_transfer, notice_version
+      `SELECT id, organization_name, organization_type, policy_url, terms_url, retention_days,
+              data_request_contact, cross_border_transfer, notice_version
          FROM platform_profile WHERE id = 'platform'`,
     );
     if (platform) rows.set(platform.id, platform);

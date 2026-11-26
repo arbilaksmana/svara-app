@@ -18,7 +18,7 @@ import {
 } from '../components/ui';
 import { StateView } from '../components/StateView';
 import { useScreenState } from '../lib/state';
-import { ROUTES } from '../lib/routes';
+import { ROUTES, homeForRole } from '../lib/routes';
 import { useStore } from '../lib/store';
 import { versionsFor, questionsFor } from '../lib/fixtures/surveys';
 
@@ -121,7 +121,7 @@ export function HomePage() {
                 lalu baca ringkasan per versi. Tanpa mengubah kode untuk tiap topik.
               </p>
               <div className="flex flex-wrap items-center gap-3">
-                <ActionLink to={session ? (session.role === 'admin' ? ROUTES.admin : ROUTES.creator) : ROUTES.login}>
+                <ActionLink to={session ? homeForRole(session.role) : ROUTES.login}>
                   {session ? 'Buka workspace' : 'Masuk sebagai pengelola'}
                 </ActionLink>
                 <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">
@@ -196,9 +196,9 @@ export function HomePage() {
           {/* Jalur data dan persetujuan */}
           <section aria-labelledby="persetujuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti kebijakan organisasi</h2>
+              <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti kebutuhan survei</h2>
               <p className="max-w-[65ch] text-body text-muted">
-                Satu profil organisasi menentukan teks pemberitahuan dan syarat persetujuan. Tidak ada asumsi sektor di dalam kode.
+                Pemberitahuan dibaca dari profil organisasi atau platform pemilik survei; kebutuhan bukti pendukung ditetapkan per survei. Tidak ada asumsi sektor di dalam kode.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
@@ -209,10 +209,10 @@ export function HomePage() {
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
-                <p className="text-body font-bold text-ink">Persetujuan sesuai kebijakan organisasi</p>
+                <p className="text-body font-bold text-ink">Persetujuan sesuai kebutuhan survei</p>
                 <p className="text-body-sm text-muted">
-                  Bila organisasi mewajibkan persetujuan orang tua atau wali, kiriman ditolak sampai pernyataan wali dan referensi
-                  buktinya diisi. Referensi dicatat apa adanya, tidak diverifikasi aplikasi.
+                  Bila survei organisasi mewajibkan bukti pendukung, kiriman ditolak sampai pernyataan persetujuan dan referensi
+                  buktinya diisi. Referensi dan berkas dicatat apa adanya, tidak diverifikasi aplikasi.
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
@@ -311,7 +311,7 @@ export function HomePage() {
               Masuk sebagai pengelola untuk membuat draf, atau isi contoh formulir lebih dulu untuk melihat alur responden.
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <ActionLink to={session ? (session.role === 'admin' ? ROUTES.admin : ROUTES.creator) : ROUTES.login}>
+              <ActionLink to={session ? homeForRole(session.role) : ROUTES.login}>
                   {session ? 'Buka workspace' : 'Masuk sebagai pengelola'}
                 </ActionLink>
               <ActionLink to={ROUTES.respondentIntro('link-umum-demo')} variant="secondary">

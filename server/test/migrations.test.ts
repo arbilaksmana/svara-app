@@ -50,6 +50,7 @@ const VERSIONS = [
   '021_access_grant_provenance.sql',
   '022_drop_plaintext_link_tokens.sql',
   '023_integration_token_expiry.sql',
+  '024_survey_consent_requirement.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -154,6 +155,57 @@ test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari la
       ),
       (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23502',
       'expires_at NOT NULL menolak undangan tanpa masa berlaku',
+    );
+  } finally {
+    await verify.end();
+  }
+});
+
+test('024: kebutuhan bukti persetujuan pindah ke survei, mode profil organisasi dibuang', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '023' });
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    // Bentuk baris main: mode persetujuan di profil organisasi, survei belum punya kolom sendiri.
+    await client.query(
+      `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at)
+       VALUES ('u_c24', 'c24@example.org', 'C24', 'creator', 'active', 'scrypt$x$y', '2026-11-01T00:00:00Z')`,
+    );
+    await client.query(
+      `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, created_at, respondent_age_category, consent_mode)
+       VALUES ('org_c24', 'Org C24', 'organization', '/p', '/t', '2026-11-01T00:00:00Z', 'minor', 'guardian')`,
+    );
+    await client.query(
+      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode, policy_url, terms_url, notice_version)
+       VALUES ('p_c24', 'Org C24', 'organization', 'minor', 'guardian', '/p', '/t', '1.0')`,
+    );
+    await client.query(
+      `INSERT INTO surveys (id, owner_id, profile_id, organization_id, title, purpose, object_label, instructions, status, created_at, updated_at)
+       VALUES ('s_c24', 'u_c24', 'p_c24', 'org_c24', 'Survei', '', '', '', 'draft', 'now', 'now')`,
+    );
+  } finally {
+    await client.end();
+  }
+
+  assert.deepEqual(await migrate(), VERSIONS.slice(VERSIONS.indexOf('024_survey_consent_requirement.sql')));
+
+  const verify = new Client({ connectionString: databaseUrl });
+  await verify.connect();
+  try {
+    const column = await verify.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'organizations' AND column_name = 'consent_mode'",
+    );
+    assert.deepEqual(column.rows, [], 'organizations.consent_mode dibuang');
+    const survey = await verify.query<{ consent_required: string }>("SELECT consent_required FROM surveys WHERE id = 's_c24'");
+    assert.equal(survey.rows[0]?.consent_required, 'tidak', 'survei lama mulai tanpa kewajiban bukti');
+    await verify.query("UPDATE surveys SET consent_required = 'wajib_upload' WHERE id = 's_c24'");
+    await assert.rejects(
+      verify.query("UPDATE surveys SET consent_required = 'wajib' WHERE id = 's_c24'"),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23514',
+      'CHECK menolak nilai di luar tidak/wajib_upload',
     );
   } finally {
     await verify.end();

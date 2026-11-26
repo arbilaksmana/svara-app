@@ -31,8 +31,6 @@ import {
 } from '../lib/api';
 import {
   ACCOUNT_STATUS_LABEL,
-  AGE_CATEGORY_LABEL,
-  CONSENT_MODE_LABEL,
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
   ORGANIZATION_TYPE_LABEL,
@@ -41,17 +39,14 @@ import {
 import { cancelOrgWorkspaceLoad, loadOrgWorkspace, useStore } from '../lib/store';
 import { AuditActor } from './Admin';
 import { formatWIB } from '../lib/summary';
-import type { AgeCategory, ConsentMode, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
+import type { OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
 
 /** Pesan field per kode validasi server (PRD §1.2). */
-const FIELD_FOR_CODE: Record<string, 'respondent_age_category' | 'consent_mode' | 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact'> = {
-  consent_mode_mismatch: 'consent_mode',
-  validation_error: 'respondent_age_category',
+const FIELD_FOR_CODE: Record<string, 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact'> = {
+  validation_error: 'organization_name',
 };
 
 const ORG_TYPES: OrganizationType[] = ['school', 'organization'];
-const AGE_CATEGORIES: AgeCategory[] = ['adult', 'minor', 'mixed'];
-const CONSENT_MODES: ConsentMode[] = ['self', 'guardian'];
 
 interface FormState {
   organization_name: string;
@@ -61,8 +56,6 @@ interface FormState {
   retention_days: string;
   data_request_contact: string;
   cross_border_transfer: boolean;
-  respondent_age_category: AgeCategory;
-  consent_mode: ConsentMode;
 }
 
 function formFrom(profile: OrgProfile): FormState {
@@ -74,8 +67,6 @@ function formFrom(profile: OrgProfile): FormState {
     retention_days: profile.retention_days === null ? '' : String(profile.retention_days),
     data_request_contact: profile.data_request_contact ?? '',
     cross_border_transfer: profile.cross_border_transfer === 1,
-    respondent_age_category: profile.respondent_age_category,
-    consent_mode: profile.consent_mode,
   };
 }
 
@@ -89,8 +80,6 @@ function payloadFrom(form: FormState): OrgProfileInput {
     retention_days: retention === '' ? null : Number(retention),
     data_request_contact: form.data_request_contact.trim() || null,
     cross_border_transfer: form.cross_border_transfer,
-    respondent_age_category: form.respondent_age_category,
-    consent_mode: form.consent_mode,
   };
 }
 
@@ -188,9 +177,6 @@ export function AdminOrgPage() {
       .finally(() => setInvitationBusy(false));
   };
 
-  const consentMismatch = (form?.respondent_age_category === 'minor' || form?.respondent_age_category === 'mixed')
-    && form?.consent_mode === 'self';
-
   // Galat, memuat, dan data saling eksklusif: kegagalan tidak boleh tampil sebagai organisasi kosong.
   if (orgError || !org) {
     return (
@@ -219,7 +205,7 @@ export function AdminOrgPage() {
       >
         <div className="flex flex-col gap-5">
           {state === 'success' && <SuccessBanner title="Profil tersimpan">Profil organisasi diperbarui.</SuccessBanner>}
-          {state === 'validation' && <ValidationSummary items={['Responden minor wajib memakai persetujuan orang tua atau wali.', 'Nama organisasi tidak boleh kosong.']} />}
+          {state === 'validation' && <ValidationSummary items={['Nama organisasi tidak boleh kosong.', 'Kontak permintaan data tidak boleh kosong.']} />}
 
           <Card className="flex flex-col gap-4">
             <SectionTitle>Profil organisasi</SectionTitle>
@@ -289,40 +275,6 @@ export function AdminOrgPage() {
                       value={form.data_request_contact}
                       onChange={(event) => setField('data_request_contact', event.target.value)}
                     />
-                  )}
-                </Field>
-                <Field id="org-age" label="Kategori usia responden" required error={fieldErrors.respondent_age_category}>
-                  {(aria) => (
-                    <select
-                      {...aria}
-                      value={form.respondent_age_category}
-                      onChange={(event) => setField('respondent_age_category', event.target.value as AgeCategory)}
-                      className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
-                    >
-                      {AGE_CATEGORIES.map((value) => (
-                        <option key={value} value={value}>{AGE_CATEGORY_LABEL[value]}</option>
-                      ))}
-                    </select>
-                  )}
-                </Field>
-                <Field
-                  id="org-consent"
-                  label="Mode persetujuan"
-                  required
-                  hint={consentMismatch ? 'Kategori minor atau campuran wajib memakai persetujuan orang tua atau wali.' : undefined}
-                  error={fieldErrors.consent_mode ?? (consentMismatch ? 'Responden minor wajib memakai persetujuan orang tua atau wali.' : undefined)}
-                >
-                  {(aria) => (
-                    <select
-                      {...aria}
-                      value={form.consent_mode}
-                      onChange={(event) => setField('consent_mode', event.target.value as ConsentMode)}
-                      className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
-                    >
-                      {CONSENT_MODES.map((value) => (
-                        <option key={value} value={value}>{CONSENT_MODE_LABEL[value]}</option>
-                      ))}
-                    </select>
                   )}
                 </Field>
                 <div className="md:col-span-2">

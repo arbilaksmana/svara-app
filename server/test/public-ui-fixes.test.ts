@@ -104,6 +104,7 @@ test('UIX-09: panel riwayat versi tetap tampil bila sesi benar-benar memuat vers
     surveys: [{
       id: 's_demo1', owner_id: 'u_pemilik_demo', profile_id: 'p_org', title: 'Umpan balik kantin', purpose: 'Evaluasi menu', object_label: 'Kantin',
       instructions: '', status: 'published', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-20T00:00:00Z', current_version_id: 'v_kantin_1',
+      consent_required: 'tidak',
     }],
     versions: [
       { id: 'v_kantin_1', survey_id: 's_demo1', number: 1, status: 'published', notice_version: 'N-7', published_at: '2026-11-02T00:00:00Z', closed_at: null, question_ids: ['q_k1', 'q_k2', 'q_k3', 'q_k4'] },
@@ -134,8 +135,8 @@ const PUBLIC_CTX: PublicContextData = {
   questions: [],
   options: [],
   profile: {
-    id: 'p_smp', organization_name: 'SMP Harapan', organization_type: 'school', respondent_age_category: 'minor',
-    consent_mode: 'guardian', policy_url: '/privacy', terms_url: '/terms', retention_days: 180, data_request_contact: 'tu@smpharapan.test',
+    id: 'p_smp', organization_name: 'SMP Harapan', organization_type: 'school',
+    policy_url: '/privacy', terms_url: '/terms', retention_days: 180, data_request_contact: 'tu@smpharapan.test',
     cross_border_transfer: false, notice_version: 'N-2', synthetic_placeholder: false,
   },
   notice: {
@@ -197,6 +198,7 @@ test('NEW-UX-E: pratinjau isian singkat wajib sama dengan formulir responden (la
     surveys: [{
       id: 's_baca', owner_id: owner.id, profile_id: 'p_smp', title: 'Survei Kebiasaan Membaca', purpose: 'Memahami kebiasaan membaca',
       object_label: 'Siswa', instructions: '', status: 'draft', created_at: '2026-11-20T00:00:00Z', updated_at: '2026-11-21T00:00:00Z', current_version_id: null,
+      consent_required: 'tidak',
     }],
     versions: [{ id: 'v_baca_draf', survey_id: 's_baca', number: 1, status: 'draft', notice_version: 'N-2', published_at: null, closed_at: null, question_ids: questions.map((q) => q.id) }],
     questions: questions.map((q) => ({
@@ -413,8 +415,14 @@ test('UIX-04/NR-06: pengantar mode wali meminta unggahan dan tidak mengklaim ver
   assert.match(text, /Catatan tambahan \(opsional\)/, 'Teks bebas disebut catatan tambahan, bukan bukti');
 });
 
-test('UIX-04/NR-06: kebijakan privasi tidak mewajibkan "bukti verifikasi" wali yang tidak ada', () => {
+test('UIX-04/NR-06: kebijakan privasi tidak mewajibkan "bukti verifikasi" yang tidak ada', () => {
   const text = visibleText(mainOf(render(createElement(PrivacyPage), '/privacy')));
-  assert.doesNotMatch(text, GUARDIAN_CLAIMS, 'Entri data anak tidak boleh mengklaim bukti wali diverifikasi');
-  assert.match(text, /Data anak.*tidak diverifikasi aplikasi/, 'Entri data anak menyatakan referensi wali dicatat apa adanya');
+  assert.doesNotMatch(text, GUARDIAN_CLAIMS, 'Entri persetujuan dengan bukti tidak boleh mengklaim verifikasi');
+  assert.match(
+    text,
+    /Persetujuan dengan bukti pendukung.*tidak diverifikasi aplikasi/,
+    'Entri persetujuan menyatakan referensi dan berkas dicatat apa adanya',
+  );
+  // Notice generik: tidak menyebut umur atau wali responden.
+  assert.doesNotMatch(text, /kategori usia|responden anak|orang tua/i);
 });

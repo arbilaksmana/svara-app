@@ -260,7 +260,7 @@ async function hydrateResults(
     surveys: [{ ...baseSurvey, id: SURVEY_ID, owner_id: OWNER.id, title: 'Survei hasil', status: 'published', current_version_id: 'v_hasil_1' }],
     versions: [{ ...baseVersion, id: 'v_hasil_1', survey_id: SURVEY_ID, number: 1, status: 'published', question_ids: [], published_at: '2026-11-03T03:00:00Z' }],
     profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [], invitations: [], publicLinks: [], assignments: [],
-    settings: { [SURVEY_ID]: { allowResults: true, allowIndividual } },
+    settings: { [SURVEY_ID]: { allowResults: true, allowIndividual, consentRequired: 'tidak' } },
     grants, accounts: [], organizations: [], auditLogs: [], integrationEvents: [], dataRequests: [], serverTime: '2026-11-21T00:00:00Z',
   };
   mock.method(globalThis, 'fetch', async () => Response.json({ data: payload }));

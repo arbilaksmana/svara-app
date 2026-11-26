@@ -154,7 +154,7 @@ scripts/         Smoke test web
 
 Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
 
-- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `respondent_age_category`, `consent_mode`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/006_organization_profile.sql`).
+- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/024_survey_consent_requirement.sql`). Kolom warisan `respondent_age_category` tetap ada di skema tetapi tidak dibaca/ditulis.
 - `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql`).
 - `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql`).
 
@@ -197,9 +197,11 @@ Daftar creator memberi label "Diberikan akses" pada survei bukan miliknya. Baris
 
 Editor memeriksa dampak lebih dahulu dengan `PUT /surveys/:id?preview=true`, yang tidak menyimpan metadata, pertanyaan, draf, atau audit penyimpanan. Jika jumlah terdampak lebih dari nol, dialog menyebut jumlah jawaban dan ketidaksebandingan jawaban lama dengan versi baru. **Batal** mempertahankan edit lokal tanpa menyimpan; **Tetap simpan draf** menyimpan lewat `PUT` biasa. Perubahan tanpa jawaban tidak memerlukan konfirmasi. Pemeriksaan dan penyimpanan merupakan dua permintaan; jumlah dapat bertambah bila ada submission di antaranya, dan respons penyimpanan menghitung ulang dampaknya.
 
-### Bukti persetujuan wali
+### Bukti persetujuan per survei
 
-Survei dengan `organizations.consent_mode = 'guardian'` meminta responden mengunggah berkas bukti wali pada pengantar. `POST /public/surveys/:token/consent` menerima `guardian_evidence_file` (base64) hanya untuk mode wali, dengan batas 5 MB dan jenis JPG, PNG, WebP, atau PDF. Panjang base64 diperiksa sebelum dekode dan isi berkas dicocokkan dengan penanda berkasnya, bukan hanya nama atau MIME kiriman. Validasi gagal menghasilkan `422 invalid_evidence` tanpa satu berkas pun ditulis.
+Kebutuhan bukti persetujuan milik survei (`surveys.consent_required`): `tidak` (default, persetujuan diri cukup) atau `wajib_upload` (persetujuan harus disertai bukti pendukung). Hanya survei organisasi yang boleh `wajib_upload`; `POST /surveys` dan `PUT /surveys/:id/settings` menolak `422 consent_required_personal` untuk survei personal. Pilihan ini ada di layar pengaturan survei creator, dan `GET /surveys/:id/settings` mengembalikan `consentRequired`. Profil organisasi tidak lagi menyimpan mode persetujuan (migrasi 024 membuang `organizations.consent_mode`).
+
+Survei `wajib_upload` meminta responden mengunggah berkas bukti pada pengantar. `POST /public/surveys/:token/consent` menerima `guardian_evidence_file` (base64) hanya untuk survei itu, dengan batas 5 MB dan jenis JPG, PNG, WebP, atau PDF; survei `tidak` menolak berkas dengan `422 invalid_evidence`, dan survei `wajib_upload` tanpa bukti ditolak `422 guardian_evidence_required` ("Untuk survei ini, persetujuan perlu disertai bukti pendukung."). Panjang base64 diperiksa sebelum dekode dan isi berkas dicocokkan dengan penanda berkasnya, bukan hanya nama atau MIME kiriman. Validasi gagal menghasilkan `422 invalid_evidence` tanpa satu berkas pun ditulis.
 
 Berkas disimpan di direktori `GUARDIAN_EVIDENCE_DIR` (default `./var/guardian-evidence`, diabaikan git dan Docker build) dengan nama acak `<consent_id>.bin` dan mode `0600`; nama asli hanya dicatat di `consent_records.guardian_evidence_file`. Di Docker Compose, direktori itu adalah volume bernama `svara_guardian_evidence`, sehingga berkas bertahan saat image API dibangun ulang; pada deployment lain, pasang direktori itu sebagai volume persisten. Tidak ada URL publik untuk berkas: unduhan memakai `GET /org/guardian-evidence/:consentId/file`, yang memeriksa sesi `org_admin` dan organisasi pemilik survei (organisasi lain menerima `404`).
 
@@ -238,7 +240,7 @@ Batas yang belum tertutup: tabel `responses` tidak merujuk `consent_records`, se
 | Endpoint | Perilaku |
 | --- | --- |
 | `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` |
-| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan, dan `respondent_age_category` minor/mixed dengan `consent_mode=self` ditolak `422 consent_mode_mismatch` |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan. `respondent_age_category`/`consent_mode` sudah bukan bagian profil: nilai yang dikirim diabaikan, tidak divalidasi, dan tidak tersimpan |
 | `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` |
 | `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota |
 | `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan |
@@ -272,7 +274,6 @@ Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.
 
 - `organization_type` selain dua nilai itu ditolak `422 validation_error`; `admin.password` mengikuti kebijakan yang sama dengan pendaftaran (`422 weak_password`).
 - Email yang sudah terdaftar ditolak `409 email_taken`; untuk akun lama, tautkan lewat `PATCH /admin/accounts/:id`.
-- `respondent_age_category`/`consent_mode` opsional dengan default `adult`/`self`; kombinasi minor/mixed dengan `self` ditolak `422 consent_mode_mismatch` (PRD §1.2).
 - `policy_url`/`terms_url` default ke halaman `/kebijakan-privasi` dan `/ketentuan-layanan`, lalu dapat diubah `org_admin` lewat `PUT /org/profile`.
 - Akun admin hasil onboarding belum mencatat persetujuan kebijakan (`consent_version` NULL) karena belum ada yang menyetujui.
 - Notice awal organisasi disediakan eksplisit dalam transaksi yang sama (`provisionNoticesForNewOrganization` di `server/notice-provisioning.ts`), bukan fallback saat dibaca: tanpa `notice_profile_name` (payload UI), notice platform untuk `notice_version` organisasi disalin ke `organization_notices` (sumber `platform`); dengan `notice_profile_name`, notice profil legacy bernama itu yang disalin (sumber `legacy`). Nama organisasi tidak dicocokkan ke profil legacy.
@@ -291,7 +292,7 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 | `GET /admin/platform-profile` | Membaca satu baris `id='platform'` dengan cache `no-store`; 404 `profile_missing` bila baris tidak ada |
 | `PUT /admin/platform-profile` | Field yang tidak dikirim mempertahankan nilai tersimpan; `organization_name`, `organization_type`, `policy_url`, `terms_url` wajib; `retention_days` bilangan bulat >= 0 atau null; `cross_border_transfer` hanya `boolean` (null "belum diputuskan" berasal dari seed dan tidak dapat dikembalikan lewat API); setiap perubahan diaudit `Ubah profil platform` |
 
-`notice_version` dan `updated_at` tidak dapat diubah dari sini: `notice_version` naik saat teks kebijakan berubah, `updated_at` diisi server. Profil ini tidak memiliki `respondent_age_category` maupun `consent_mode`, karena aturan persetujuan hanya didefinisikan per organisasi. Perubahan di sini tidak menyentuh baris `organizations`; `GET /org/profile` untuk akun berorganisasi tetap membaca organisasinya.
+`notice_version` dan `updated_at` tidak dapat diubah dari sini: `notice_version` naik saat teks kebijakan berubah, `updated_at` diisi server. Profil ini tidak memiliki `respondent_age_category` maupun `consent_mode`; kebutuhan bukti persetujuan didefinisikan per survei (`surveys.consent_required`). Perubahan di sini tidak menyentuh baris `organizations`; `GET /org/profile` untuk akun berorganisasi tetap membaca organisasinya.
 
 ### Belum tersedia
 
@@ -475,10 +476,12 @@ Dibuat hanya oleh `SEED_DEMO=1 pnpm db:reset` atau `SEED_DEMO=1 pnpm db:seed`. S
 
 Organisasi sintetis (`seedDemoIfEmpty` di `server/seed-data.ts`):
 
-| ID | Nama | Tipe | Kategori usia | Mode persetujuan | Notice |
-| --- | --- | --- | --- | --- | --- |
-| `org_smk` | SMK Nusantara (contoh) | `school` | `minor` | `guardian` | `1.2` |
-| `org_perpus` | Perpustakaan Kota (contoh) | `organization` | `adult` | `self` | `1.2` |
+| ID | Nama | Tipe | Notice |
+| --- | --- | --- | --- |
+| `org_smk` | SMK Nusantara (contoh) | `school` | `1.2` |
+| `org_perpus` | Perpustakaan Kota (contoh) | `organization` | `1.2` |
+
+Survei seed `s_demo1` (organisasi `org_smk`) memakai `consent_required='wajib_upload'`; survei seed lain `'tidak'`.
 
 `platform_profile` berisi satu baris `id='platform'` bernama "Svara (contoh)" dengan `notice_version='2.0'`. Notice organisasi sengaja berbeda dari notice platform agar sumber notice dapat dibuktikan. Semua survei seed berada di `org_smk` atau `org_perpus`, jadi akun tanpa organisasi (super admin) hanya melihat platform profile pada `GET /org/profile`.
 

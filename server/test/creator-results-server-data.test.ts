@@ -41,7 +41,7 @@ async function hydrateOfficer(mock: TestContext['mock'], canReadFreeText: boolea
     surveys: [grantedSurvey],
     versions: [grantedVersion],
     profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [], invitations: [], publicLinks: [], assignments: [],
-    settings: { [grantedSurvey.id]: { allowResults: true, allowIndividual: true } },
+    settings: { [grantedSurvey.id]: { allowResults: true, allowIndividual: true, consentRequired: 'tidak' } },
     grants: [{
       id: 'g_free_text',
       account_id: 'u_petugas',

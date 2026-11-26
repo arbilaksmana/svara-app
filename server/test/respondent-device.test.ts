@@ -69,8 +69,8 @@ const CTX: PublicContextData = {
   questions: [],
   options: [],
   profile: {
-    id: 'platform', organization_name: 'Platform Uji', organization_type: 'organization', respondent_age_category: 'adult',
-    consent_mode: 'self', policy_url: '/privacy', terms_url: '/terms', retention_days: 365, data_request_contact: 'privasi@uji.test',
+    id: 'platform', organization_name: 'Platform Uji', organization_type: 'organization',
+    policy_url: '/privacy', terms_url: '/terms', retention_days: 365, data_request_contact: 'privasi@uji.test',
     cross_border_transfer: false, notice_version: 'N-1', synthetic_placeholder: false,
   },
   notice: {

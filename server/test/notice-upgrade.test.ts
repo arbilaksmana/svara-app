@@ -130,13 +130,13 @@ async function seedMainDeployment(): Promise<void> {
     `);
     await client.query(
       `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
-         cross_border_transfer, notice_version, created_at, respondent_age_category, consent_mode)
+         cross_border_transfer, notice_version, created_at)
        VALUES ($1, 'Yayasan Pilot Nyata', 'organization', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, '1.0',
-               '2026-11-05T02:00:00.000Z', 'adult', 'self'),
+               '2026-11-05T02:00:00.000Z'),
               ($2, 'Komunitas Arsip Warga', 'organization', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, '1.0',
-               '2026-11-06T02:00:00.000Z', 'adult', 'self'),
+               '2026-11-06T02:00:00.000Z'),
               ($3, 'Lembaga Belum Bersurvei', 'organization', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, '1.0',
-               '2026-11-09T02:00:00.000Z', 'adult', 'self')`,
+               '2026-11-09T02:00:00.000Z')`,
       [MAIN.orgPilot, MAIN.orgArsip, MAIN.orgBelum],
     );
     await client.query(

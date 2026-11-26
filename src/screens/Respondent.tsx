@@ -67,7 +67,7 @@ const INVITE_LABEL_ID: Record<string, string> = {
   active: 'Aktif', used: 'Terpakai', revoked: 'Dicabut', expired: 'Kedaluwarsa',
 };
 
-/** Batas unggahan bukti wali sama dengan server: 5 MB dan empat jenis berkas. */
+/** Batas unggahan bukti pendukung sama dengan server: 5 MB dan empat jenis berkas. */
 const GUARDIAN_FILE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const GUARDIAN_FILE_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -425,7 +425,7 @@ export function IntroView({
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="info">Versi {version.number}</Badge>
               <Badge tone={isPublicLink ? 'neutral' : 'info'}>{isPublicLink ? 'Tautan umum' : 'Undangan individual'}</Badge>
-              <Badge tone={guardianRequired ? 'warning' : 'neutral'}>{guardianRequired ? 'Mode wali' : 'Persetujuan diri'}</Badge>
+              <Badge tone={guardianRequired ? 'warning' : 'neutral'}>{guardianRequired ? 'Dengan bukti pendukung' : 'Persetujuan diri'}</Badge>
             </div>
             <p className="text-body-sm text-ink"><span className="font-bold">Tujuan survei:</span> {survey.purpose}</p>
             <p className="text-caption text-muted">Objek: {survey.object_label}</p>
@@ -442,7 +442,7 @@ export function IntroView({
                 ['Retensi', notice.retention_text],
                 ['Penerima', notice.recipients],
                 ['Hak Anda', notice.rights],
-                ['Data anak', notice.child_data_text],
+                ['Persetujuan dengan bukti pendukung', notice.child_data_text],
                 ['Transfer lintas negara', notice.cross_border_text],
               ].map(([term, detail]) => (
                 <div key={term} className="border-b border-n200 pb-3 last:border-0 last:pb-0">
@@ -490,21 +490,21 @@ export function IntroView({
                 />
                 {guardianRequired && (
                   <div className="rounded-md border border-warning-soft bg-n50 p-3">
-                    <p className="text-body-sm font-bold text-ink">Bukti wali wajib</p>
+                    <p className="text-body-sm font-bold text-ink">Bukti pendukung wajib</p>
                     <p className="mt-1 text-body-sm text-muted">
-                      Survei ini ditujukan untuk responden anak. Unggah surat izin orang tua atau wali. Penyelenggara menyimpan
+                      Survei ini mewajibkan persetujuan disertai bukti pendukung. Unggah berkas bukti persetujuan Anda. Penyelenggara menyimpan
                       berkas apa adanya dan tidak memeriksa keasliannya; pengelola organisasi meninjau berkas setelah persetujuan dicatat.
                     </p>
                     <div className="mt-2 flex flex-col gap-2">
                       <Checkbox
-                        id="consent-wali"
-                        label="Saya menyatakan memiliki berkas persetujuan wali. Statusnya dinyatakan wali dan belum diverifikasi pengelola."
+                        id="consent-evidence"
+                        label="Saya menyatakan memiliki berkas bukti persetujuan. Statusnya dinyatakan sendiri dan belum diverifikasi pengelola."
                         checked={guardianEvidence}
                         onChange={setGuardianEvidence}
                       />
                       <Field
                         id="guardian-file"
-                        label="Berkas bukti persetujuan wali"
+                        label="Berkas bukti pendukung"
                         hint="JPG, PNG, WebP, atau PDF, maksimal 5 MB."
                         error={guardianFileError ?? undefined}
                         required
@@ -534,7 +534,7 @@ export function IntroView({
                       <Field
                         id="guardian-ref"
                         label="Catatan tambahan (opsional)"
-                        hint="Misalnya nama wali atau nomor surat untuk memudahkan peninjauan."
+                        hint="Misalnya nomor surat atau keterangan singkat untuk memudahkan peninjauan."
                       >
                         {(aria) => (
                           <TextInput
@@ -607,7 +607,7 @@ export function IntroView({
                 </Button>
                 {!consentComplete && !blocked && (
                   <p role="status" className="text-caption font-bold text-danger">
-                    Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ', pernyataan wali dicentang, dan berkas bukti dipilih' : ''}.
+                    Tombol dinonaktifkan sampai persetujuan lengkap{guardianRequired ? ', pernyataan bukti dicentang, dan referensi atau berkas bukti diisi' : ''}.
                   </p>
                 )}
                 <PolicyLinks className="mt-2" />
