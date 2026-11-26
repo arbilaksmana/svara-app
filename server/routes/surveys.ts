@@ -478,13 +478,11 @@ async function surveyProfileIdFor(organizationId: string | null, requestedProfil
   );
   if (legacy) return legacy.id;
   // `synthetic_placeholder = 1` menandai baris turunan: nilai profil efektif tetap dibaca dari sumber lingkup.
-  // `profiles.respondent_age_category`/`consent_mode` bukan lagi data hidup: ditulis netral agar kolom
-  // NOT NULL warisan tetap terisi, dan tidak pernah dibaca.
   await run(
-    `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+    `INSERT INTO profiles (id, organization_name, organization_type,
        policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version,
        synthetic_placeholder)
-     VALUES (?, ?, ?, 'adult', 'self', ?, ?, ?, ?, ?, ?, 1)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (id) DO NOTHING`,
     id,
     source.organization_name,

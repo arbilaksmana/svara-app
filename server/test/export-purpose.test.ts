@@ -25,7 +25,7 @@ before(async () => {
   await resetTestDatabase();
   const now = new Date().toISOString();
   await run(
-    "INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode, policy_url, terms_url, notice_version) VALUES ('p_kp03', 'Organisasi KP-03', 'organization', 'adult', 'self', 'https://contoh.local/privasi', 'https://contoh.local/ketentuan', '1')",
+    "INSERT INTO profiles (id, organization_name, organization_type, policy_url, terms_url, notice_version) VALUES ('p_kp03', 'Organisasi KP-03', 'organization', 'https://contoh.local/privasi', 'https://contoh.local/ketentuan', '1')",
   );
   await run(
     "INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at) VALUES ('u_kp03', 'owner.kp03@svara.local', 'Pemilik KP-03', 'creator', 'active', ?, ?)",

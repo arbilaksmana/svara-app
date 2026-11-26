@@ -82,15 +82,12 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     }
 
     await run(
-      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+      `INSERT INTO profiles (id, organization_name, organization_type,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_smk',
       'SMK Nusantara (contoh)',
       'school',
-      // Kolom warisan `profiles.respondent_age_category`/`consent_mode` tidak lagi dibaca; diisi netral.
-      'adult',
-      'self',
       '/privacy',
       '/terms',
       null,
@@ -100,14 +97,12 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       1,
     );
     await run(
-      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+      `INSERT INTO profiles (id, organization_name, organization_type,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_perpus',
       'Perpustakaan Kota (contoh)',
       'organization',
-      'adult',
-      'self',
       '/privacy',
       '/terms',
       90,

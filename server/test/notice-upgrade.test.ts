@@ -113,6 +113,7 @@ async function seedMainDeployment(): Promise<void> {
          data_request_contact, cross_border_transfer, notice_version, updated_at)
        VALUES ('platform', 'Svara', 'platform', '/privacy', '/terms', NULL, 'privasi@svara.id', 0, '2.0', '2026-09-01T00:00:00.000Z')`,
     );
+    // Skema berhenti di 009: kolom warisan persetujuan/usia masih NOT NULL (dibuang oleh 025).
     await client.query(`
       INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)

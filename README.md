@@ -154,7 +154,7 @@ scripts/         Smoke test web
 
 Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
 
-- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/024_survey_consent_requirement.sql`). Kolom warisan `respondent_age_category` tetap ada di skema tetapi tidak dibaca/ditulis.
+- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/024_survey_consent_requirement.sql`). Kolom warisan `respondent_age_category`/`consent_mode` dibuang lewat `server/migrations/025_drop_profile_legacy_consent_columns.sql`.
 - `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql`).
 - `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql`).
 
@@ -240,7 +240,7 @@ Batas yang belum tertutup: tabel `responses` tidak merujuk `consent_records`, se
 | Endpoint | Perilaku |
 | --- | --- |
 | `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` |
-| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan. `respondent_age_category`/`consent_mode` sudah bukan bagian profil: nilai yang dikirim diabaikan, tidak divalidasi, dan tidak tersimpan |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan. `respondent_age_category`/`consent_mode` bukan bagian profil dan tidak dibaca dari body |
 | `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` |
 | `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota |
 | `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan |

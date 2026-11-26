@@ -2240,24 +2240,24 @@ test('GET/PUT /org/profile menghormati lingkup organisasi; mode persetujuan buka
   assert.equal(own.source, 'organization');
   assert.equal(own.profile.id, 'org_smk');
   // Profil organisasi hanya memuat kebijakan; kebutuhan bukti persetujuan hidup pada survei.
-  assert.equal('consent_mode' in own.profile, false);
-  assert.equal('respondent_age_category' in own.profile, false);
+  assert.equal('consent_mode' in own.profile, false, 'profil tidak membawa mode persetujuan');
+  assert.equal('respondent_age_category' in own.profile, false, 'profil tidak membawa kategori usia');
 
   const othersProfile = data<{ source: string; profile: { id: string } }>(
     await call('/org/profile', { cookie: await session('creator.a@svara.local') }),
   );
   assert.equal(othersProfile.profile.id, 'org_smk', 'creator membaca profil organisasinya');
 
-  // Field lama diabaikan: tidak lagi divalidasi, tidak lagi tersimpan, tidak mengubah profil.
-  const ignored = await call('/org/profile', {
+  // PUT biasa tetap mengembalikan profil tanpa kedua kolom warisan.
+  const saved = await call('/org/profile', {
     method: 'PUT',
     cookie: orgAdmin,
-    body: { respondent_age_category: 'minor', consent_mode: 'guardian' },
+    body: { data_request_contact: 'privasi@smk.local' },
   });
-  assert.equal(ignored.status, 200, ignored.text);
-  const ignoredProfile = (ignored.json as { data: { profile: Record<string, unknown> } }).data.profile;
-  assert.equal('consent_mode' in ignoredProfile, false);
-  assert.equal('respondent_age_category' in ignoredProfile, false);
+  assert.equal(saved.status, 200, saved.text);
+  const savedProfile = (saved.json as { data: { profile: Record<string, unknown> } }).data.profile;
+  assert.equal('consent_mode' in savedProfile, false);
+  assert.equal('respondent_age_category' in savedProfile, false);
 
   // BF-06: memperpendek retention_days menghapus data pada run retensi berikutnya -> wajib konfirmasi.
   await call('/org/profile', { method: 'PUT', cookie: orgAdmin, body: { retention_days: 365 } });
