@@ -3,9 +3,9 @@ import { OrgEvidencePage } from '../../../../screens/OrgEvidence';
 import { AccessDenied } from '../../../../components/AccessDenied';
 import { requireOrgAdmin } from '../../../../lib/server/guards';
 
-export const metadata: Metadata = { title: 'Bukti wali' };
+export const metadata: Metadata = { title: 'Bukti pendukung' };
 
-/** Guard server: hanya org_admin yang terikat organisasi dapat meninjau bukti wali. */
+/** Guard server: hanya org_admin yang terikat organisasi dapat meninjau bukti pendukung. */
 export default async function Page() {
   const account = await requireOrgAdmin();
   if (!account) {

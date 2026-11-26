@@ -27,20 +27,18 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     const createdAt = '2026-11-01T00:00:00Z';
     // Dua organisasi sintetis agar isolasi lingkup org_admin dapat dibuktikan.
     // notice_version organisasi sengaja berbeda dari platform agar sumber notice dapat dibuktikan.
-    const organizations: Array<[string, string, string, string, string, string]> = [
-      ['org_smk', 'SMK Nusantara (contoh)', 'school', 'minor', 'guardian', '1.2'],
-      ['org_perpus', 'Perpustakaan Kota (contoh)', 'organization', 'adult', 'self', '1.2'],
+    const organizations: Array<[string, string, string, string]> = [
+      ['org_smk', 'SMK Nusantara (contoh)', 'school', '1.2'],
+      ['org_perpus', 'Perpustakaan Kota (contoh)', 'organization', '1.2'],
     ];
-    for (const [id, name, type, ageCategory, consentMode, noticeVersion] of organizations) {
+    for (const [id, name, type, noticeVersion] of organizations) {
       await run(
-        `INSERT INTO organizations (id, name, organization_type, respondent_age_category, consent_mode,
+        `INSERT INTO organizations (id, name, organization_type,
           policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, created_at)
-         VALUES (?, ?, ?, ?, ?, '/privacy', '/terms', NULL, 'privasi@organisasi.contoh', 0, ?, ?)`,
+         VALUES (?, ?, ?, '/privacy', '/terms', NULL, 'privasi@organisasi.contoh', 0, ?, ?)`,
         id,
         name,
         type,
-        ageCategory,
-        consentMode,
         noticeVersion,
         createdAt,
       );
@@ -84,14 +82,12 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
     }
 
     await run(
-      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+      `INSERT INTO profiles (id, organization_name, organization_type,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_smk',
       'SMK Nusantara (contoh)',
       'school',
-      'minor',
-      'guardian',
       '/privacy',
       '/terms',
       null,
@@ -101,14 +97,12 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       1,
     );
     await run(
-      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+      `INSERT INTO profiles (id, organization_name, organization_type,
         policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'p_perpus',
       'Perpustakaan Kota (contoh)',
       'organization',
-      'adult',
-      'self',
       '/privacy',
       '/terms',
       90,
@@ -159,8 +153,8 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         profile === 'p_smk' ? 'Lihat pemberitahuan survei' : 'privasi@organisasi.contoh',
         'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali.',
         profile === 'p_smk'
-          ? 'Persetujuan orang tua atau wali dan bukti verifikasi wajib sebelum pengiriman baru.'
-          : 'Profil ini ditujukan untuk responden dewasa dengan persetujuan diri.',
+          ? 'Persetujuan disertai bukti pendukung dicatat apa adanya dan tidak diverifikasi otomatis, kecuali pengelola survei meninjau berkasnya.'
+          : 'Persetujuan diri cukup untuk pengiriman jawaban pada survei ini.',
         'Tidak ada transfer lintas negara.',
       );
     }
@@ -172,19 +166,19 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       org_smk: {
         text: 'Jawaban pada skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Penyelenggara adalah sekolah pada profil organisasi.',
         recipients: 'Pembuat survei, petugas berizin, dan penerima integrasi sesuai cakupan pengendali.',
-        childData: 'Responden berusia di bawah usia dewasa; persetujuan orang tua atau wali wajib sebelum pengiriman.',
+        childData: 'Persetujuan disertai bukti pendukung wajib pada survei yang menetapkannya; berkas dicatat apa adanya dan ditinjau pengelola organisasi.',
         contact: 'privasi@organisasi.contoh',
       },
       org_perpus: {
         text: 'Jawaban pada skala, komentar singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Penyelenggara adalah organisasi pada profil organisasi.',
         recipients: 'Pembuat survei dan petugas berizin pada survei ini.',
-        childData: 'Profil ini ditujukan untuk responden dewasa dengan persetujuan diri.',
+        childData: 'Persetujuan diri cukup untuk pengiriman jawaban pada survei ini.',
         contact: 'privasi@organisasi.contoh',
       },
       platform: {
         text: 'Jawaban pada skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Survei mandiri dikelola pembuatnya di bawah kebijakan platform.',
         recipients: 'Pembuat survei dan petugas berizin pada survei ini.',
-        childData: 'Persetujuan wali wajib bila penyelenggara menetapkan mode wali.',
+        childData: 'Persetujuan diri cukup; bukti pendukung hanya bila survei organisasi menetapkannya.',
         contact: 'privasi@organisasi.contoh',
       },
     };
@@ -240,7 +234,8 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
       );
     }
 
-    const surveys: Array<[string, string, string, string, string, string, string, string, string, string]> = [
+    // Kebutuhan bukti persetujuan milik survei: s_demo1 (organisasi SMK) mewajibkan bukti pendukung.
+    const surveys: Array<[string, string, string, string, string, string, string, string, string, string, 'tidak' | 'wajib_upload']> = [
       [
         's_demo1',
         'u_creator_a',
@@ -252,6 +247,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         'published',
         '2026-11-02T02:00:00Z',
         '2026-11-12T07:30:00Z',
+        'wajib_upload',
       ],
       [
         's_demo2',
@@ -264,6 +260,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         'published',
         '2026-11-05T04:00:00Z',
         '2026-11-10T03:00:00Z',
+        'tidak',
       ],
       [
         's_demo3',
@@ -276,6 +273,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         'draft',
         '2026-11-14T09:00:00Z',
         '2026-11-14T09:00:00Z',
+        'tidak',
       ],
       [
         's_demo4',
@@ -288,12 +286,13 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         'archived',
         '2026-10-01T01:00:00Z',
         '2026-11-01T01:00:00Z',
+        'tidak',
       ],
     ];
-    for (const [id, owner, profile, title, purpose, objectLabel, instructions, status, created, updated] of surveys) {
+    for (const [id, owner, profile, title, purpose, objectLabel, instructions, status, created, updated, consentRequired] of surveys) {
       await run(
-        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at, current_version_id, organization_id, consent_required)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         owner,
         profile,
@@ -306,6 +305,7 @@ export async function seedDemoIfEmpty(): Promise<boolean> {
         updated,
         null,
         owner === 'u_creator_b' ? 'org_perpus' : 'org_smk',
+        consentRequired,
       );
       await run(
         'INSERT INTO survey_settings (survey_id, allow_results, allow_individual) VALUES (?, 1, 1)',

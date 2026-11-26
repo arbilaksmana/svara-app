@@ -86,8 +86,8 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 const ORG_EMPTY_COPY = /Belum ada anggota|Belum ada kode undangan|Belum ada aktivitas organisasi|Profil organisasi belum dimuat/;
 
 const ORG_PROFILE: OrgProfile = {
-  id: 'org_smk', organization_name: 'SMK Contoh', organization_type: 'school', respondent_age_category: 'adult',
-  consent_mode: 'self', policy_url: 'https://contoh.test/privasi', terms_url: 'https://contoh.test/ketentuan',
+  id: 'org_smk', organization_name: 'SMK Contoh', organization_type: 'school',
+  policy_url: 'https://contoh.test/privasi', terms_url: 'https://contoh.test/ketentuan',
   retention_days: 365, data_request_contact: 'dpo@contoh.test', cross_border_transfer: 0, notice_version: '1.0',
 };
 const ORG_MEMBERS: OrgMember[] = [

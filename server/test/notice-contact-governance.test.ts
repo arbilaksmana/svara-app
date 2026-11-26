@@ -199,9 +199,9 @@ async function seedGovernanceOrg(): Promise<void> {
   const hash = await hashPassword(PASSWORD);
   await run(
     `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
-       cross_border_transfer, notice_version, created_at, respondent_age_category, consent_mode)
+       cross_border_transfer, notice_version, created_at)
      VALUES (?, 'Yayasan Tata Kelola', 'organization', '/privacy', '/terms', 90, 'dpo@tata-kelola.test', 0, '1.1',
-             '2026-11-20T00:00:00.000Z', 'adult', 'self')
+             '2026-11-20T00:00:00.000Z')
      ON CONFLICT (id) DO NOTHING`,
     GOV_ORG,
   );

@@ -66,6 +66,18 @@ export const ROUTES = {
   terms: '/terms',
 } as const;
 
+/**
+ * Rumah per peran; satu-satunya peta "sesudah masuk mendarat di mana". `org_admin` mengelola
+ * organisasinya di `/admin/org` dan survei organisasinya di `/creator` (tautan sidebar).
+ */
+export type HomeRole = 'admin' | 'org_admin' | 'creator';
+
+export function homeForRole(role: HomeRole | null | undefined): string {
+  if (role === 'admin') return ROUTES.admin;
+  if (role === 'org_admin') return ROUTES.adminOrg;
+  return ROUTES.creator;
+}
+
 /** Simpan ?state= saat berpindah halaman agar satu skenario bisa diikuti. */
 export function withState(to: string, state: string | null): string {
   if (!state || state === 'default') return to;

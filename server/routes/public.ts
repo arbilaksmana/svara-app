@@ -82,8 +82,6 @@ interface ProfileRow {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string | null;
-  consent_mode: string | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -127,6 +125,7 @@ interface PublicContext {
   options: PublicOption[];
   state: 'active' | 'closed' | 'expired' | 'revoked' | 'used';
   canSubmit: boolean;
+  /** `surveys.consent_required = 'wajib_upload'`: persetujuan harus disertai bukti pendukung. */
   guardianRequired: boolean;
 }
 
@@ -218,8 +217,6 @@ interface NoticeSource {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string | null;
-  consent_mode: string | null;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -247,15 +244,14 @@ interface PolicyNotice {
 async function noticeSourceFor(survey: SurveyRow): Promise<NoticeSource> {
   let row = survey.organization_id
     ? await get<Omit<NoticeSource, 'source'>>(
-        `SELECT id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+        `SELECT id, name AS organization_name, organization_type,
                 policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version
            FROM organizations WHERE id = ?`,
         survey.organization_id,
       )
     : await get<Omit<NoticeSource, 'source'>>(
-        `SELECT id, organization_name, organization_type, NULL::text AS respondent_age_category,
-                NULL::text AS consent_mode, policy_url, terms_url, retention_days, data_request_contact,
-                cross_border_transfer, notice_version
+        `SELECT id, organization_name, organization_type, policy_url, terms_url, retention_days,
+                data_request_contact, cross_border_transfer, notice_version
            FROM platform_profile WHERE id = 'platform'`,
       );
   if (!row) fail(409, 'policy_source_missing', 'Profil kebijakan survei ini belum dikonfigurasi.');
@@ -378,7 +374,7 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
       options,
       state,
       canSubmit: state === 'active',
-      guardianRequired: profile.consent_mode === 'guardian',
+      guardianRequired: survey.consent_required === 'wajib_upload',
     };
   }
   const link = await linkForToken(token);
@@ -437,7 +433,7 @@ export async function resolvePublicContext(token: string): Promise<PublicContext
     options,
     state,
     canSubmit: state === 'active',
-    guardianRequired: profile.consent_mode === 'guardian',
+    guardianRequired: survey.consent_required === 'wajib_upload',
   };
 }
 
@@ -621,7 +617,7 @@ function requireUnusedConsent(context: PublicContext, consent: ConsentRow): void
     !['self_attested', 'verified'].includes(consent.guardian_evidence_status)
     || !(consent.guardian_evidence_file || consent.guardian_evidence_ref?.trim())
   )) {
-    fail(409, 'guardian_evidence_required', 'Buka kembali pengantar dan lengkapi bukti wali.');
+    fail(409, 'guardian_evidence_required', 'Untuk survei ini, persetujuan perlu disertai bukti pendukung. Buka kembali pengantar dan lengkapi bukti.');
   }
 }
 
@@ -676,12 +672,12 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     if (!click || !eligibility) {
       fail(422, 'consent_incomplete', 'Konfirmasi kelayakan dan persetujuan wajib dicentang.');
     }
-    // Berkas hanya bermakna pada survei bermode wali; jangan menerimanya diam-diam sebagai data yatim.
+    // Berkas hanya bermakna pada survei yang mewajibkan bukti; jangan menerimanya diam-diam sebagai data yatim.
     if (hasEvidenceFile && !context.guardianRequired) {
-      fail(422, 'invalid_evidence', 'Berkas bukti wali hanya diterima untuk survei yang mewajibkan wali.');
+      fail(422, 'invalid_evidence', 'Berkas bukti pendukung hanya diterima untuk survei yang mewajibkan bukti pendukung.');
     }
     if (context.guardianRequired && !evidenceRef && !hasEvidenceFile) {
-      fail(422, 'guardian_evidence_required', 'Bukti verifikasi wali wajib tersedia sebelum pengisian.');
+      fail(422, 'guardian_evidence_required', 'Untuk survei ini, persetujuan perlu disertai bukti pendukung.');
     }
     // Batas ukuran, MIME, dan isi diperiksa seluruhnya di memori sebelum satu byte pun ditulis.
     const upload: GuardianEvidenceUpload | null = hasEvidenceFile
@@ -696,8 +692,8 @@ publicRouter.post('/public/surveys/:token/consent', async (req: AuthedRequest, r
     const consentId = newId('c');
     const existingSession = respondentSession(req);
     const session = existingSession ?? randomBytes(32).toString('base64url');
-    const basis = context.guardianRequired ? 'Persetujuan wali' : 'Persetujuan diri';
-    // SEC-04/BF-03: bukti dari wali adalah pernyataan yang belum dimoderasi; status baru berubah lewat
+    const basis = context.guardianRequired ? 'Persetujuan dengan bukti pendukung' : 'Persetujuan diri';
+    // SEC-04/BF-03: bukti adalah pernyataan yang belum dimoderasi; status baru berubah lewat
     // keputusan operator organisasi pada PATCH /org/guardian-evidence/:consentId.
     const guardianStatus = context.guardianRequired ? 'self_attested' : 'not_required';
     const recordedAt = nowIso();

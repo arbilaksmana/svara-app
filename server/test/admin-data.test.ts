@@ -210,8 +210,8 @@ test('NEW-UX-A/D: bootstrap berhasil hanya merender baris server dan aktor audit
 /* ---------- 4. Log organisasi (NEW-UX-D) ---------- */
 
 const ORG_PROFILE: OrgProfile = {
-  id: 'org_ead8ad625f808fcc', organization_name: 'SMP Negeri 4 Sukamaju', organization_type: 'school', respondent_age_category: 'minor',
-  consent_mode: 'guardian', policy_url: 'https://smpn4.example/privasi', terms_url: 'https://smpn4.example/ketentuan',
+  id: 'org_ead8ad625f808fcc', organization_name: 'SMP Negeri 4 Sukamaju', organization_type: 'school',
+  policy_url: 'https://smpn4.example/privasi', terms_url: 'https://smpn4.example/ketentuan',
   retention_days: 365, data_request_contact: 'privasi@smpn4.example', cross_border_transfer: 0, notice_version: '1.0',
 };
 const ORG_MEMBERS: OrgMember[] = [

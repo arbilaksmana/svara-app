@@ -7,7 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { BrandMark } from './Brand';
 import { PlainLink, PolicyLinks } from './ui';
 import { useToast } from './Toast';
-import { ROUTES } from '../lib/routes';
+import { ROUTES, homeForRole } from '../lib/routes';
 import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
 
@@ -25,8 +25,30 @@ const GUEST_NAV: NavEntry[] = [
 /* Ruang organisasi: hanya org_admin yang melihat entri ini. */
 const ORG_NAV: NavEntry[] = [
   { to: ROUTES.adminOrg, label: 'Organisasi' },
-  { to: ROUTES.adminOrgEvidence, label: 'Bukti wali' },
+  { to: ROUTES.adminOrgEvidence, label: 'Bukti pendukung' },
+  { to: ROUTES.creator, label: 'Daftar survei' },
 ];
+
+/**
+ * Entri yang sorot: kecocokan path sama persis, atau awalan path utuh (`/admin/org` juga menaungi
+ * `/admin/org/evidence`). Bila beberapa cocok, yang terpanjang menang agar tidak ada sorot ganda.
+ */
+function navPath(value: string): string {
+  const path = value.split(/[?#]/u)[0] ?? '';
+  return path.length > 1 ? path.replace(/\/+$/u, '') : path;
+}
+
+function activeNavTo(entries: NavEntry[], pathname: string): string | undefined {
+  const path = navPath(pathname);
+  let best: NavEntry | undefined;
+  for (const entry of entries) {
+    const to = navPath(entry.to);
+    if (path === to || path.startsWith(to === '/' ? '/' : `${to}/`)) {
+      if (!best || to.length > navPath(best.to).length) best = entry;
+    }
+  }
+  return best?.to;
+}
 
 const NAV: Record<ShellKind, NavEntry[]> = {
   public: GUEST_NAV,
@@ -316,13 +338,7 @@ export function Shell({
   const inWorkspace = kind === 'creator' || kind === 'admin';
   // Tamu melihat tautan bagian landing; pengguna masuk melihat menu sesuai perannya.
   const activeSession = guestOnly || kind === 'respondent' ? null : session;
-  const homeTo = !activeSession
-    ? ROUTES.home
-    : activeSession.role === 'admin'
-      ? ROUTES.admin
-      : activeSession.role === 'org_admin'
-        ? ROUTES.adminOrg
-        : ROUTES.creator;
+  const homeTo = !activeSession ? ROUTES.home : homeForRole(activeSession.role);
   const isOrgAdmin = activeSession?.role === 'org_admin';
   // Ruang kerja hanya diisi setelah sesi klien dikenal; tamu tidak pernah melihat nav tamu di sana.
   // Alur responden selalu minimal: tanpa tautan marketing agar pengisian tidak terputus.
@@ -337,9 +353,11 @@ export function Shell({
       : inWorkspace
         ? []
         : GUEST_NAV;
-  // Sidebar: org_admin hanya melihat entri Organisasi, meski halaman dirender sebagai admin.
+  // Sidebar: org_admin melihat ruang organisasi (profil, bukti pendukung) dan daftar survei
+  // organisasinya, meski halaman dirender sebagai admin.
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
-  const activePath = kind === 'respondent' ? ROUTES.home : pathname;
+  const sidebarActiveTo = activeNavTo(sectionNav, pathname);
+  const activePath = kind === 'respondent' ? ROUTES.home : sidebarActiveTo ?? pathname;
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
@@ -374,9 +392,9 @@ export function Shell({
                 <PlainLink
                   key={item.to}
                   to={item.to}
-                  aria-current={pathname === item.to ? 'page' : undefined}
+                  aria-current={item.to === sidebarActiveTo ? 'page' : undefined}
                   className={`min-h-[44px] shrink-0 rounded-sm px-3 py-2 text-body-sm font-bold no-underline ${
-                    pathname === item.to ? 'bg-n100 text-action' : 'text-n600 hover:bg-n50'
+                    item.to === sidebarActiveTo ? 'bg-n100 text-action' : 'text-n600 hover:bg-n50'
                   }`}
                 >
                   {item.label}

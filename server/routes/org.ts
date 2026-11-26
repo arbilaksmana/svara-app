@@ -13,15 +13,13 @@ import {
   type OrganizationInvitationRow,
 } from '../organization-invitations.ts';
 
-/** Profil deployment milik organisasi; tanpa UI dan tanpa perubahan skema survei (PRD §1.2). */
+/** Profil kebijakan organisasi (nama, kontak, retensi, notice). Kebutuhan bukti persetujuan bukan bagian profil: itu milik survei (`surveys.consent_required`). */
 export const orgRouter = Router();
 
 interface OrgProfileRow {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string;
-  consent_mode: string;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -43,7 +41,7 @@ interface PlatformProfileRow {
   updated_at: string;
 }
 
-const ORG_COLUMNS = `id, name AS organization_name, organization_type, respondent_age_category, consent_mode,
+const ORG_COLUMNS = `id, name AS organization_name, organization_type,
   policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version`;
 const PLATFORM_COLUMNS = `id, organization_name, organization_type, policy_url, terms_url, retention_days,
   data_request_contact, cross_border_transfer, notice_version, updated_at`;
@@ -61,9 +59,6 @@ orgRouter.get('/org/profile', async (req: AuthedRequest, res: Response) => {
     sendError(res, error);
   }
 });
-
-const AGE_CATEGORY: Record<string, true> = { adult: true, minor: true, mixed: true };
-const CONSENT_MODE: Record<string, true> = { self: true, guardian: true };
 
 orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
   try {
@@ -84,19 +79,6 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       if (!value) fail(422, 'validation_error', `${key} wajib diisi.`);
       return value;
     };
-
-    const ageCategory = merged('respondent_age_category', current.respondent_age_category, 20);
-    if (!AGE_CATEGORY[ageCategory]) {
-      fail(422, 'validation_error', 'respondent_age_category harus adult, minor, atau mixed.');
-    }
-    const consentMode = merged('consent_mode', current.consent_mode, 20);
-    if (!CONSENT_MODE[consentMode]) {
-      fail(422, 'validation_error', 'consent_mode harus self atau guardian.');
-    }
-    // PRD §1.2: responden minor/mixed mewajibkan persetujuan wali.
-    if ((ageCategory === 'minor' || ageCategory === 'mixed') && consentMode === 'self') {
-      fail(422, 'consent_mode_mismatch', 'respondent_age_category minor/mixed mewajibkan consent_mode guardian.');
-    }
 
     let retentionDays: number | null = current.retention_days;
     if (body.retention_days !== undefined) {
@@ -145,14 +127,11 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
     const noticeChange = await withTx(async () => {
       await run(
         `UPDATE organizations
-            SET name = ?, organization_type = ?, respondent_age_category = ?, consent_mode = ?,
-                policy_url = ?, terms_url = ?, retention_days = ?, data_request_contact = ?,
-                cross_border_transfer = ?, notice_version = ?
+            SET name = ?, organization_type = ?, policy_url = ?, terms_url = ?, retention_days = ?,
+                data_request_contact = ?, cross_border_transfer = ?, notice_version = ?
           WHERE id = ?`,
         required('organization_name', current.organization_name, 200),
         required('organization_type', current.organization_type, 50),
-        ageCategory,
-        consentMode,
         required('policy_url', current.policy_url, 500),
         required('terms_url', current.terms_url, 500),
         retentionDays,
@@ -185,8 +164,6 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       return { from: current.notice_version, to: noticeVersion, drafts_followed: followed, drafts_kept: kept };
     });
     await audit(req, 'Ubah profil organisasi', organizationId, 'berhasil', {
-      respondent_age_category: ageCategory,
-      consent_mode: consentMode,
       notice_version: noticeVersion,
       drafts_followed: noticeChange?.drafts_followed.length ?? 0,
       drafts_kept: noticeChange?.drafts_kept.length ?? 0,

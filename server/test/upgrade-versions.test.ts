@@ -15,6 +15,8 @@ const MIGRATION_020 = '020_guardian_evidence_moderation.sql';
 const MIGRATION_021 = '021_access_grant_provenance.sql';
 const MIGRATION_022 = '022_drop_plaintext_link_tokens.sql';
 const MIGRATION_023 = '023_integration_token_expiry.sql';
+const MIGRATION_024 = '024_survey_consent_requirement.sql';
+const MIGRATION_025 = '025_drop_profile_legacy_consent_columns.sql';
 
 let server: Server;
 let origin: string;
@@ -230,9 +232,9 @@ async function seedMainDeployment(): Promise<void> {
     `);
     await client.query(
       `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, retention_days, data_request_contact,
-         cross_border_transfer, notice_version, created_at, respondent_age_category, consent_mode)
+         cross_border_transfer, notice_version, created_at)
        VALUES ($1, 'Lembaga Riset Tepian', 'organization', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, '1.0',
-               '2026-09-02T02:00:00.000Z', 'adult', 'self')`,
+               '2026-09-02T02:00:00.000Z')`,
       [ORG],
     );
     await client.query(
@@ -339,7 +341,12 @@ async function historical() {
     ),
     questions: await sql('SELECT * FROM questions ORDER BY id'),
     options: await sql('SELECT * FROM question_options ORDER BY id'),
-    surveys: await sql('SELECT * FROM surveys ORDER BY id'),
+    // 024 menambah `consent_required` (default 'tidak'); yang dibandingkan adalah kolom yang sudah ada di 018.
+    surveys: await sql(
+      `SELECT id, owner_id, profile_id, organization_id, title, purpose, object_label, instructions, status,
+              created_at, updated_at, current_version_id
+         FROM surveys ORDER BY id`,
+    ),
   };
 }
 
@@ -511,8 +518,8 @@ test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', asyn
   await sql('UPDATE public_links SET expires_at = $1 WHERE token_hash = $2', ['', hash(TOKENS.layananV1)]);
   assert.deepEqual(
     await migrate(),
-    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022, MIGRATION_023],
-    'migrasi 019-023 tetap berjalan',
+    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022, MIGRATION_023, MIGRATION_024, MIGRATION_025],
+    'migrasi 019-025 tetap berjalan',
   );
   assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
   // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.

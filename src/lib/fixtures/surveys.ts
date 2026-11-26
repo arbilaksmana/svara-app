@@ -23,6 +23,7 @@ export const surveys: Survey[] = [
     created_at: '2026-11-02T02:00:00Z',
     updated_at: '2026-11-12T07:30:00Z',
     current_version_id: 'v_demo1_1',
+    consent_required: 'tidak',
   },
   {
     id: 's_demo2',
@@ -36,6 +37,7 @@ export const surveys: Survey[] = [
     created_at: '2026-11-05T04:00:00Z',
     updated_at: '2026-11-10T03:00:00Z',
     current_version_id: 'v_demo2_1',
+    consent_required: 'tidak',
   },
   {
     id: 's_demo3',
@@ -49,6 +51,7 @@ export const surveys: Survey[] = [
     created_at: '2026-11-14T09:00:00Z',
     updated_at: '2026-11-14T09:00:00Z',
     current_version_id: null,
+    consent_required: 'tidak',
   },
   {
     id: 's_demo4',
@@ -62,6 +65,7 @@ export const surveys: Survey[] = [
     created_at: '2026-10-01T01:00:00Z',
     updated_at: '2026-11-01T01:00:00Z',
     current_version_id: 'v_demo4_1',
+    consent_required: 'tidak',
   },
 ];
 

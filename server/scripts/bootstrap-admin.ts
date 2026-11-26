@@ -56,9 +56,9 @@ async function ensuredOrganizationId(name: string): Promise<string> {
   // notice_version mengikuti notice platform yang dibuat pada transaksi pemanggil.
   const noticeVersion = await noticeVersionForNewOrganization(null);
   await run(
-    `INSERT INTO organizations (id, name, organization_type, respondent_age_category, consent_mode, policy_url,
+    `INSERT INTO organizations (id, name, organization_type, policy_url,
        terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, created_at)
-     VALUES (?, ?, 'organization', 'adult', 'self', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, ?, ?)`,
+     VALUES (?, ?, 'organization', '/kebijakan-privasi', '/ketentuan-layanan', NULL, NULL, NULL, ?, ?)`,
     id,
     name,
     noticeVersion,

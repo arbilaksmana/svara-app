@@ -28,6 +28,7 @@ import {
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
+import type { ConsentRequired } from '../lib/types';
 import { findSurvey, versionsFor, questionsFor, publishedVersionFor } from '../lib/fixtures/surveys';
 import { formatInvitationExpiry, formatWIB } from '../lib/summary';
 import { getSummary, getResponses, downloadExport, printPublicLinkToken, ApiError, type VersionSummary, type IndividualResponse } from '../lib/api';
@@ -50,9 +51,8 @@ import {
 } from '../lib/store';
 import { MissingSurvey, SurveyNav } from './CreatorCore';
 import {
-  AGE_CATEGORY_LABEL,
   COLLECTION_MODE_LABEL,
-  CONSENT_MODE_LABEL,
+  CONSENT_REQUIRED_LABEL,
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
   ORGANIZATION_TYPE_LABEL,
@@ -730,12 +730,16 @@ export function SettingsPage({ id }: { id: string }) {
   const canManage = canManageAs(session, survey);
   const [allowResults, setAllowResults] = useState(settings[id]?.allowResults ?? true);
   const [allowIndividual, setAllowIndividual] = useState(settings[id]?.allowIndividual ?? false);
+  const [consentRequired, setConsentRequired] = useState<ConsentRequired>(settings[id]?.consentRequired ?? 'tidak');
   const [busy, setBusy] = useState(false);
+  // Bukti pendukung hanya untuk survei organisasi; survei personal selalu persetujuan diri.
+  const organizationSurvey = Boolean(survey?.organization_id);
 
   // Sinkronkan dari server setelah bootstrap; perubahan lokal sesudahnya tetap dipakai.
   useEffect(() => {
     setAllowResults(settings[id]?.allowResults ?? true);
     setAllowIndividual(settings[id]?.allowIndividual ?? false);
+    setConsentRequired(settings[id]?.consentRequired ?? 'tidak');
   }, [id, settings]);
 
   if (!survey || !canManage) {
@@ -756,7 +760,7 @@ export function SettingsPage({ id }: { id: string }) {
         <div className="flex flex-col gap-5">
           
           <SurveyNav id={id} />
-          {state === 'success' && <SuccessBanner title="Pengaturan tersimpan">Hak akses hasil diperbarui.</SuccessBanner>}
+          {state === 'success' && <SuccessBanner title="Pengaturan tersimpan">Hak akses hasil dan kebutuhan bukti persetujuan diperbarui.</SuccessBanner>}
           {state === 'validation' && <ValidationSummary items={['Kontak permintaan data tidak boleh kosong.', 'Masa retensi harus ditetapkan.']} />}
 
           <Card className="flex flex-col gap-4">
@@ -765,8 +769,7 @@ export function SettingsPage({ id }: { id: string }) {
               <Table head={['Bagian', 'Nilai']}>
                 <tr><Th>Nama organisasi</Th><Td>{profile.organization_name}</Td></tr>
                 <tr><Th>Tipe organisasi</Th><Td>{ORGANIZATION_TYPE_LABEL[profile.organization_type]}</Td></tr>
-                <tr><Th>Kategori usia responden</Th><Td>{profile.respondent_age_category ? AGE_CATEGORY_LABEL[profile.respondent_age_category] : 'Belum ditetapkan'}</Td></tr>
-                <tr><Th>Mode persetujuan</Th><Td>{profile.consent_mode ? CONSENT_MODE_LABEL[profile.consent_mode] : 'Belum ditetapkan'}</Td></tr>
+                <tr><Th>Kebutuhan bukti persetujuan</Th><Td>{CONSENT_REQUIRED_LABEL[consentRequired]}</Td></tr>
                 <tr><Th>Masa retensi</Th><Td>{profile.retention_days === null ? 'Mengikuti kebijakan pengendali' : `${profile.retention_days} hari`}</Td></tr>
                 <tr><Th>Kontak permintaan data</Th><Td><ContactChannel contact={profile.data_request_contact} empty="Belum ditetapkan pengendali." /></Td></tr>
                 <tr><Th>Transfer data lintas negara</Th><Td>{profile.cross_border_transfer === null ? 'Belum ditinjau' : profile.cross_border_transfer ? 'Ya' : 'Tidak'}</Td></tr>
@@ -795,7 +798,7 @@ export function SettingsPage({ id }: { id: string }) {
                   <tr><Th>Penerima</Th><Td>{notice.recipients}</Td></tr>
                   <tr><Th>Kontak</Th><Td>{notice.contact}</Td></tr>
                   <tr><Th>Hak peserta</Th><Td>{notice.rights}</Td></tr>
-                  <tr><Th>Data anak</Th><Td>{notice.child_data_text}</Td></tr>
+                  <tr><Th>Persetujuan dengan bukti pendukung</Th><Td>{notice.child_data_text}</Td></tr>
                 </Table>
               </>
             ) : (
@@ -805,16 +808,46 @@ export function SettingsPage({ id }: { id: string }) {
           </Card>
 
           <Card className="flex flex-col gap-3">
+            <SectionTitle>Persetujuan pada survei ini</SectionTitle>
+            <Field
+              id="consent-required"
+              label="Kebutuhan bukti persetujuan"
+              hint={
+                organizationSurvey
+                  ? 'Persetujuan diri cukup untuk sebagian besar survei. Pilih bukti pendukung bila organisasi perlu menyimpan berkas persetujuan di samping pernyataan responden.'
+                  : 'Survei personal selalu memakai persetujuan diri. Buat survei lingkup organisasi untuk mewajibkan bukti pendukung.'
+              }
+            >
+              {(aria) => (
+                <select
+                  {...aria}
+                  value={consentRequired}
+                  disabled={!organizationSurvey || state === 'loading' || state === 'closed'}
+                  onChange={(event) => setConsentRequired(event.target.value as ConsentRequired)}
+                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink disabled:bg-n50 disabled:text-muted"
+                >
+                  <option value="tidak">{CONSENT_REQUIRED_LABEL.tidak}</option>
+                  {organizationSurvey && <option value="wajib_upload">{CONSENT_REQUIRED_LABEL.wajib_upload}</option>}
+                </select>
+              )}
+            </Field>
+            <p className="text-caption text-muted">
+              Bukti yang diunggah dicatat sebagai pernyataan responden, bukan verifikasi otomatis. Tanpa bukti, kiriman pada
+              survei yang mewajibkannya ditolak server.
+            </p>
+          </Card>
+
+          <Card className="flex flex-col gap-3">
             <SectionTitle>Akses hasil</SectionTitle>
-            <Checkbox id="izin-agregat" label="Petugas berizin boleh melihat ringkasan agregat" checked={allowResults} onChange={setAllowResults} />
-            <Checkbox id="izin-individual" label="Petugas berizin boleh membaca jawaban individual" checked={allowIndividual} onChange={setAllowIndividual} />
+            <Checkbox id="izin-agregat" label="Pembuat survei boleh melihat ringkasan agregat" checked={allowResults} onChange={setAllowResults} />
+            <Checkbox id="izin-individual" label="Pembuat survei boleh membaca jawaban individual" checked={allowIndividual} onChange={setAllowIndividual} />
             <p className="text-caption text-muted">
               Izin baca individual, izin ekspor, dan izin teks bebas adalah tiga izin terpisah.
             </p>
             <div className="flex flex-wrap gap-3">
               <Button disabled={state === 'loading' || state === 'closed' || busy} loading={busy} onClick={() => {
                 setBusy(true);
-                void saveSettings(id, allowResults, allowIndividual)
+                void saveSettings(id, allowResults, allowIndividual, organizationSurvey ? consentRequired : 'tidak')
                   .then(() => notify('Pengaturan berhasil disimpan.'))
                   .catch((error: unknown) => notify(error instanceof Error ? error.message : 'Pengaturan gagal disimpan.', 'danger'))
                   .finally(() => setBusy(false));

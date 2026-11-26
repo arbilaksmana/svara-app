@@ -203,8 +203,8 @@ test('KP-10: tanpa seed, organisasi terkonfigurasi → survei organisasi memakai
   assert.equal(rows[0]!.organization_id, (await sql<{ id: string }>('SELECT id FROM organizations'))[0]!.id);
   assert.equal(rows[0]!.profile_id, `p_org_${rows[0]!.organization_id}`);
   assert.deepEqual(
-    await sql('SELECT organization_name, policy_url, respondent_age_category FROM profiles WHERE id = $1', [rows[0]!.profile_id]),
-    [{ organization_name: 'Yayasan Tanpa Seed', policy_url: 'https://yayasan.test/privasi', respondent_age_category: 'adult' }],
+    await sql('SELECT organization_name, policy_url FROM profiles WHERE id = $1', [rows[0]!.profile_id]),
+    [{ organization_name: 'Yayasan Tanpa Seed', policy_url: 'https://yayasan.test/privasi' }],
     'profil turunan organisasi diambil dari organizations',
   );
 });
@@ -262,9 +262,9 @@ test('KP-10: profil legacy bernama sama tetap dipakai tanpa menggandakan baris',
   await platformProfile();
   await createOrganization(true);
   await sql(
-    `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+    `INSERT INTO profiles (id, organization_name, organization_type,
        policy_url, terms_url, notice_version)
-     VALUES ('p_legacy', 'Yayasan Tanpa Seed', 'organization', 'adult', 'self', '/p', '/t', '1.0')`,
+     VALUES ('p_legacy', 'Yayasan Tanpa Seed', 'organization', '/p', '/t', '1.0')`,
   );
   const cookie = await creatorSession(await organizationId());
 
@@ -288,9 +288,9 @@ test('KP-10: baris profiles turunan lama untuk organisasi yang sama tidak ditimp
   await createOrganization(true);
   const org = await organizationId();
   await sql(
-    `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+    `INSERT INTO profiles (id, organization_name, organization_type,
        policy_url, terms_url, notice_version, synthetic_placeholder)
-     VALUES ($1, 'Salinan lama', 'organization', 'adult', 'self', '/p', '/t', '1.0', 1)`,
+     VALUES ($1, 'Salinan lama', 'organization', '/p', '/t', '1.0', 1)`,
     [`p_org_${org}`],
   );
   const cookie = await creatorSession(org);
@@ -319,9 +319,9 @@ test('KP-10: profile_id eksplisit tidak valid tetap ditolak 409 dan tidak membua
 test('KP-10: profile_id eksplisit valid tetap dipakai apa adanya', async () => {
   await platformProfile();
   await sql(
-    `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode,
+    `INSERT INTO profiles (id, organization_name, organization_type,
        policy_url, terms_url, notice_version)
-     VALUES ('p_pilihan', 'Profil Pilihan', 'organization', 'adult', 'self', '/p', '/t', '1.0')`,
+     VALUES ('p_pilihan', 'Profil Pilihan', 'organization', '/p', '/t', '1.0')`,
   );
   const cookie = await creatorSession(null);
 

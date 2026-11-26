@@ -208,6 +208,8 @@ async function legacyCsv(includeText: boolean): Promise<string> {
     'collection_mode',
     'identity_source',
     'submitted_at',
+    'organisasi',
+    'cara_masuk',
     ...exportQuestions.map((question) => question.code),
   ];
   const rows = responses.map((response) => {
@@ -221,6 +223,10 @@ async function legacyCsv(includeText: boolean): Promise<string> {
       response.collection_mode,
       response.identity_source,
       response.submitted_at,
+      // Survei uji ini personal (lingkup platform). `assignment_id` terisi di bawah; asal kiriman
+      // tetap tanpanya: CSV MVP selalu `standalone`/`local` (PRD §8.2).
+      'publik',
+      response.assignment_id === null ? 'tautan_umum' : 'undangan',
       ...exportQuestions.map((question) => {
         const answer = byCode.get(question.code);
         if (!answer || answer.skipped === 1) return '';
@@ -236,6 +242,7 @@ async function legacyCsv(includeText: boolean): Promise<string> {
 function exportColumns(includeText: boolean): string[] {
   return [
     'response_id', 'respondent_id', 'survey_id', 'survey_version', 'assignment_id', 'collection_mode', 'identity_source', 'submitted_at',
+    'organisasi', 'cara_masuk',
     'L01', 'C01', ...(includeText ? ['T01', 'T02'] : []),
   ];
 }

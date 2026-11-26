@@ -22,7 +22,7 @@ import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
 import { signIn } from '../lib/store';
 import { ApiError, getPublicPolicy, submitDataRequest } from '../lib/api';
-import { ROUTES } from '../lib/routes';
+import { ROUTES, homeForRole } from '../lib/routes';
 
 /* ---------------- Login ---------------- */
 
@@ -80,7 +80,7 @@ export function LoginPage() {
                 void signIn(email, password)
                   .then((session) => {
                     notify('Berhasil masuk. Selamat datang kembali.');
-                    router.push(session.role === 'admin' ? ROUTES.admin : ROUTES.creator);
+                    router.push(homeForRole(session.role));
                   })
                   .catch((error: unknown) => {
                     setAuthError(
@@ -178,13 +178,13 @@ export function NotFoundPage() {
 
 const PRIVACY_SECTIONS = [
   { title: 'Identitas dan kontak', body: 'Pengendali data adalah organisasi yang menerbitkan survei. Kanal permintaan datanya ditampilkan pada kartu kanal di halaman ini; pemberitahuan tiap survei mencatat kanal organisasi yang sama.' },
-  { title: 'Tujuan dan dasar pemrosesan', body: 'Mengumpulkan tanggapan survei untuk diringkas per versi. Dasar pemrosesan, termasuk persetujuan wali bila responden anak, ditetapkan pengendali sebelum data nyata.' },
+  { title: 'Tujuan dan dasar pemrosesan', body: 'Mengumpulkan tanggapan survei untuk diringkas per versi. Dasar pemrosesan, termasuk persetujuan disertai bukti pendukung bila diwajibkan survei, ditetapkan pengendali sebelum data nyata.' },
   { title: 'Kategori data', body: 'Jawaban skala, isian teks singkat, kode acak peserta, waktu pengiriman, dan catatan persetujuan. Tidak meminta nama, tanggal lahir, atau nomor identitas secara default.' },
   { title: 'Penerima', body: 'Pembuat survei, petugas berizin, dan sistem mitra yang terhubung sesuai cakupan dan izin terpisah.' },
   { title: 'Retensi', body: 'Masa simpan mengikuti kebijakan retensi pengendali dan ditampilkan pada pemberitahuan tiap survei.' },
   { title: 'Hak subjek dan prosedur permintaan', body: 'Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal resmi pengendali dengan verifikasi pemohon. Tindak lanjut dicatat tanpa memuat jawaban atau token.' },
   { title: 'Transfer lintas negara', body: 'Data diproses di dalam wilayah yang ditetapkan pengendali.' },
-  { title: 'Data anak', body: 'Bila profil menetapkan responden anak, kiriman baru ditolak sampai pernyataan persetujuan orang tua atau wali dan referensi buktinya diisi. Referensi dicatat apa adanya dan tidak diverifikasi aplikasi.' },
+  { title: 'Persetujuan dengan bukti pendukung', body: 'Bila survei mewajibkan bukti pendukung, kiriman baru ditolak sampai pernyataan persetujuan dan referensi buktinya diisi. Referensi dan berkas dicatat apa adanya dan tidak diverifikasi aplikasi.' },
 ];
 
 const TERMS_SECTIONS = [

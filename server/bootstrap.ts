@@ -12,8 +12,6 @@ interface ProfileRow {
   id: string;
   organization_name: string;
   organization_type: string;
-  respondent_age_category: string;
-  consent_mode: string;
   policy_url: string;
   terms_url: string;
   retention_days: number | null;
@@ -191,7 +189,7 @@ export interface BootstrapPayload {
   invitations: unknown[];
   publicLinks: unknown[];
   assignments: unknown[];
-  settings: Record<string, { allowResults: boolean; allowIndividual: boolean }>;
+  settings: Record<string, { allowResults: boolean; allowIndividual: boolean; consentRequired: string }>;
   grants: unknown[];
   accounts: unknown[];
   organizations: Array<{ id: string; name: string; organization_type: string }>;
@@ -356,6 +354,7 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
       ? await all<DataRequestRow>('SELECT * FROM data_requests ORDER BY created_at DESC LIMIT 250')
       : [];
 
+  const surveyConsentRequired = new Map(surveys.map((survey) => [survey.id, survey.consent_required]));
   const settingsRows = surveyIds.length
     ? await all<{ survey_id: string; allow_results: number; allow_individual: number }>(
         `SELECT * FROM survey_settings WHERE survey_id IN (${placeholders(surveyIds)})`,
@@ -365,7 +364,11 @@ export async function buildBootstrap(account: AccountRow | undefined): Promise<B
   const settings = Object.fromEntries(
     settingsRows.map((row) => [
       row.survey_id,
-      { allowResults: boolean(row.allow_results), allowIndividual: boolean(row.allow_individual) },
+      {
+        allowResults: boolean(row.allow_results),
+        allowIndividual: boolean(row.allow_individual),
+        consentRequired: surveyConsentRequired.get(row.survey_id) ?? 'tidak',
+      },
     ]),
   );
 

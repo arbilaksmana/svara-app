@@ -45,9 +45,10 @@ test('SEC-04: layar moderasi bukti wali merender antrean dan filter status', () 
         createElement(SearchParamsContext.Provider, { value: new URLSearchParams() },
           createElement(ToastProvider, null, createElement(OrgEvidencePage))))),
   );
-  assert.match(html, /Bukti wali/);
+  assert.match(html, /Bukti pendukung/);
   assert.match(html, /Antrean tinjauan/);
   assert.match(html, /Status bukti/);
-  assert.match(html, /Memuat bukti wali/);
-  assert.doesNotMatch(html, /verifikasi wali|bukti wali sah|bukti yang sah/i);
+  assert.match(html, /Memuat bukti pendukung/);
+  // Istilah netral: layar tidak menyebut umur, anak, atau wali.
+  assert.doesNotMatch(html, /wali|anak|orang tua/i);
 });

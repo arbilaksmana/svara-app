@@ -41,13 +41,13 @@ Produk adalah pembuat survei generik. Studi kasus di SMK Lugina Rancaekek menila
 
 Web ini adalah produk generik: creator dapat mengganti topik, objek, item, skala, jumlah opsi, dan identitas visual tanpa mengubah kode, skema data, atau format ekspor. Tidak ada kolom, rute, label, atau kode item khusus Figma di model data, API, editor, atau ekspor.
 
-Studi kasus SMK Lugina Rancaekek adalah deployment pertama, bukan default produk. Yang bersifat contoh: topik Figma/UI-UX/technostress, item AD01/TS01/K02, dan skala 1–5 pada fixture. Yang mengikat untuk pilot ini: kewajiban data anak, bukti wali, kebijakan sekolah, dan prosedur UU PDP. Deployment lain memakai aturan persetujuan dan retensi yang setara tanpa mewarisi istilah sekolah.
+Studi kasus SMK Lugina Rancaekek adalah deployment pertama, bukan default produk. Yang bersifat contoh: topik Figma/UI-UX/technostress, item AD01/TS01/K02, dan skala 1–5 pada fixture. Yang mengikat untuk pilot ini: kebutuhan persetujuan disertai bukti pendukung per survei, kebijakan sekolah, dan prosedur UU PDP. Deployment lain memakai aturan persetujuan dan retensi yang setara tanpa mewarisi istilah sekolah. Aplikasi tidak menyimpan kategori umur responden dan tidak menurunkan kebutuhan bukti dari umur.
 
 | Lapisan | Sifat | Contoh |
 | --- | --- | --- |
 | **Inti produk** | Wajib generik | Editor, versi, undangan, respons, dashboard, ekspor, API |
 | **Konfigurasi studi kasus** | Contoh yang dapat diganti | Topik Figma, AD01/TS01/K02, skala 1–5 |
-| **Kewajiban deployment SMK** | Mengikat untuk pilot ini | Data anak, bukti wali, kebijakan sekolah, UU PDP |
+| **Kewajiban deployment SMK** | Mengikat untuk pilot ini | `consent_required='wajib_upload'` pada survei yang dipilih, kebijakan sekolah, UU PDP |
 
 ### 1.2 Profil kebijakan per lingkup
 
@@ -59,8 +59,6 @@ Field minimal dan lokasinya:
 | --- | --- | --- | --- |
 | `organization_name` | `name` | `organization_name` | Teks bebas |
 | `organization_type` | Ya | Ya | `organization` |
-| `respondent_age_category` | Ya | Tidak ada | `adult` |
-| `consent_mode` | Ya | Tidak ada | `self` |
 | `policy_url` | Ya | Ya | `/privacy` |
 | `terms_url` | Ya | Ya | `/terms` |
 | `retention_days` | Ya | Ya | Wajib diisi sebelum data nyata |
@@ -69,8 +67,8 @@ Field minimal dan lokasinya:
 | `notice_version` | Ya | Ya | Mengikuti template notice yang berlaku |
 
 Aturan:
-- `respondent_age_category=minor` atau `mixed` mewajibkan `consent_mode=guardian`. `consent_mode=self` hanya untuk responden dewasa. Aturan ini ditegakkan di `PUT /org/profile` dengan galat `422 consent_mode_mismatch`, sehingga profil organisasi tidak dapat tersimpan dalam kombinasi yang tidak sah.
-- `consent_mode=guardian` mengaktifkan bukti wali dan penolakan kiriman bila bukti belum sah. `consent_mode=self` tetap mencatat `ConsentRecord` dan versi notice.
+- Profil kebijakan (organisasi atau platform) hanya menyimpan teks dan kanal kebijakan. Kebutuhan bukti persetujuan **bukan** bagian profil; nilainya milik survei (`surveys.consent_required`, lihat §5 dan §6).
+- Profil tidak menyimpan kategori umur responden maupun mode persetujuan. Migrasi 024 membuang `organizations.consent_mode`; migrasi 025 membuang `profiles.consent_mode`, `profiles.respondent_age_category`, dan `organizations.respondent_age_category`.
 - `policy_url` dan `terms_url` harus dapat diakses tanpa login.
 - Profil hanya mengubah policy, consent, dan teks UI; tidak mengubah skema respons atau format ekspor.
 - Development memakai organisasi dan profil platform sintetis. Profil produksi diisi pengendali sebelum data nyata. `platform_profile` hanya boleh berisi satu baris (`CHECK (id = 'platform')`).
@@ -99,17 +97,28 @@ Aturan:
 | --- | --- | --- |
 | **Super admin** | Kelola akun dan peran, pantau jumlah survei dan respons, baca log operasional sesuai tugas | Role tidak otomatis memberikan akses ke jawaban individual |
 | **Creator** | Buat/salin survei, kelola versi, publikasi, tutup, arsip, lihat agregat milik sendiri | Periksa kepemilikan objek pada setiap permintaan |
-| **Admin organisasi** | Kelola profil organisasinya, anggota dan suspend, kode undangan creator, log audit organisasi; mengelola survei ber-`organization_id` organisasinya dan membaca jawaban individualnya | Hanya `org_admin` yang terikat organisasi; survei tanpa organisasi (NULL) tidak pernah jatuh kepadanya (keputusan produk 2026-11-23) |
-| **Petugas berizin** | Akses atau ekspor jawaban individual sesuai penugasan | Pisahkan izin baca individual, izin ekspor, dan izin teks bebas; periksa cakupan survei |
+| **Admin organisasi** | Kelola profil organisasinya, anggota dan suspend, kode undangan creator, log audit organisasi, tinjau bukti pendukung; mengelola survei ber-`organization_id` organisasinya dan membaca jawaban individualnya | Hanya `org_admin` yang terikat organisasi; survei tanpa organisasi (NULL) tidak pernah jatuh kepadanya (keputusan produk 2026-11-23) |
 | **Responden mandiri** | Buka tautan atau undangan, baca pemberitahuan, jawab, tinjau, kirim, dan terima bukti | Token/versi harus aktif untuk pengiriman baru. Jalur umum menjamin idempotensi kiriman, bukan identitas unik manusia |
 | **Layanan Modul 13** | Berikan identitas dan penugasan terverifikasi; terima status pengiriman | Autentikasi layanan, cakupan minimum, ID stabil |
 | **Layanan Modul 15** | Ambil data yang diizinkan melalui API atau konsumsi CSV | Filter cakupan dan kolom di server; catat akses dan penerima |
+
+### 3.1 Peta rumah per peran
+
+| Peran | Rumah setelah masuk | Halaman lain yang boleh dibuka |
+| --- | --- | --- |
+| Super admin (`admin` di UI) | `/admin` | Seluruh `/admin/*` |
+| Admin organisasi (`org_admin`) | `/admin/org` | `/admin/org/evidence` dan `/creator` (daftar survei organisasinya, editor, publikasi, hasil) |
+| Creator | `/creator` | Survei miliknya atau yang memberinya izin |
+
+Peta rumah ditetapkan satu kali di `homeForRole` (`src/lib/routes.ts`) dan dipakai layar masuk, landing, serta tautan beranda `Shell`. `org_admin` **boleh** membuka `/creator` untuk mengelola survei organisasinya; sidebar organisasi memuat entri `Organisasi`, `Bukti pendukung`, dan `Daftar survei`, dan sorot menu mengikuti path halaman (tidak menyorot dua entri sekaligus).
+
+**Pemberian izin.** Izin baca jawaban individual, izin ekspor, dan izin teks bebas adalah tiga izin terpisah yang diberikan **per akun dan per survei** (`access_grants`, dengan penerima, tujuan, dan masa berlaku). Satu-satunya pemberi izin hari ini adalah **Super Admin**: seluruh rute `/admin/*` dijaga `requireRole(['super_admin'])` (`server/routes/admin.ts`), termasuk `PUT /admin/grants/:accountId`. Creator dan admin organisasi tidak dapat memberikan izin kepada akun lain.
 
 **Pembacaan jawaban individual (keputusan 2026-11-24).** Pemilik survei dan `org_admin` organisasi survei itu membaca jawaban individual sebagai pengendali, tanpa grant: keduanya sudah memegang kendali atas survei dan kebijakan organisasinya, sehingga grant kepada diri sendiri tidak menegakkan batas apa pun. Grant tetap wajib bagi pihak lain (petugas berizin, creator rekan, layanan Modul 15), terikat pengaturan survei dan dipisah per izin baca, ekspor, serta teks bebas. Super admin tetap tidak otomatis; akses individualnya diperiksa terpisah.
 
 Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti ID objek. Identitas yang dikirim oleh browser tidak menentukan peran atau kepemilikan.
 
-**Tanggung jawab antarmodul.** Creator memiliki dan mengelola beberapa survei. Responden mengisi melalui tautan umum, undangan individual, atau identitas terintegrasi; mode mandiri tidak mensyaratkan akun. Modul 13 adalah sumber identitas dan konteks penugasan jika tersedia; aturan milestone dan kelulusan berada pada sistem pembelajaran. Modul 15 menerima data yang diizinkan, menggabungkannya dengan hasil asesmen Modul 13 (pada studi kasus: asesmen UI/UX), dan melakukan analitik profil serta rekomendasi.
+**Tanggung jawab antarmodul.** Creator memiliki dan mengelola beberapa survei. Responden mengisi melalui tautan umum atau undangan individual; mode mandiri tidak mensyaratkan akun. Alur identitas terintegrasi Modul 13 disiapkan sebagai kontrak (lihat §8.1), belum menjadi jalur MVP. Modul 13 adalah sumber identitas dan konteks penugasan jika tersedia; aturan milestone dan kelulusan berada pada sistem pembelajaran. Modul 15 menerima data yang diizinkan, menggabungkannya dengan hasil asesmen Modul 13 (pada studi kasus: asesmen UI/UX), dan melakukan analitik profil serta rekomendasi.
 
 ---
 
@@ -121,7 +130,7 @@ Uji izin melalui akses langsung ke URL/API, termasuk ketika seseorang mengganti 
 | F-05–07 | P1 untuk Likert dan teks; P2 untuk pilihan tunggal | Skala Likert numerik 1–N dengan label dan nilai per opsi yang dapat diatur per pertanyaan; jawaban singkat opsional/wajib; pilihan tunggal kategorikal (contoh MVP cukup memakai isian kendala opsional) |
 | F-08–10 | P1 | Pratinjau tanpa data/respons produksi, publikasi versi tetap, tautan, pemberitahuan, tinjau, dan kirim |
 | F-11–13 | P1 | Validasi versi, undangan, item, dan nilai; respons final per transaksi; dashboard menampilkan total kiriman, frekuensi, dan jumlah yang menjawab tiap item per versi |
-| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual pihak selain pemilik dan `org_admin` organisasi membutuhkan izin khusus; XLSX opsional |
+| F-14, F-17 | P1 | CSV UTF-8 per versi dan kodebook yang dapat dibaca Modul 15; unduhan individual pihak selain pemilik dan `org_admin` organisasi membutuhkan izin khusus yang hanya dapat diberikan Super Admin; XLSX opsional |
 | F-15, F-16 | P1 mode mandiri; P2 integrasi nyata | Alur mandiri lengkap dan identitas lokal; kontrak serta uji simulasi Modul 13 tersedia untuk pengembangan paralel |
 | F-18–19 | P1 | Catat dasar pemrosesan dan bukti persetujuan sesuai konteks; audit perubahan izin/status, akses individual, publikasi, penolakan akses, dan ekspor |
 | F-20 | P2 | Pembaruan otomatis dashboard; pada MVP ringkasan yang dimuat ulang sudah akurat setelah transaksi tersimpan |
@@ -141,7 +150,8 @@ P1 merupakan prioritas penerimaan MVP. P2 dapat dilaksanakan setelah alur inti s
 | Formulir ponsel | Baca tujuan dan pemberitahuan, konfirmasi kelayakan konteks, isi, tinjau, kirim | Item wajib kosong, opsi tak sah, undangan dicabut, versi ditutup, koneksi putus |
 | Bukti pengiriman | Tampilkan ID bukti dan waktu server setelah transaksi final | Retry setelah waktu tunggu habis dapat memulihkan bukti yang sama |
 | Hasil dan ekspor | Pilih versi, lihat jumlah kiriman dan distribusi tiap item; unduh sesuai izin | Nol respons, item dilewati, ekspor terbatas hak akses |
-| Panel super admin | Pantau metrik per creator, kelola peran, dan audit | Akses jawaban individual diperiksa terpisah |
+| Panel super admin | Pantau metrik per creator, kelola peran, beri izin per akun/survei, dan audit | Akses jawaban individual diperiksa terpisah |
+| Pengaturan survei | Pilih kebutuhan bukti persetujuan (`tidak`/`wajib_upload`, hanya untuk survei organisasi) dan izin hasil | Survei personal selalu `tidak`; perubahan berlaku pada pengantar berikutnya |
 
 Pada seluler, gunakan satu kolom, label opsi terbaca, pesan kesalahan dekat item, fokus keyboard jelas, dan penanda wajib dalam teks. Pertahankan nilai formulir setelah validasi gagal selama halaman masih terbuka. Sediakan tinjauan sebelum kirim. Respons final terkunci. Gaya visual dapat mengikuti sistem desain Modul 13 bila sudah tersedia.
 
@@ -151,6 +161,8 @@ Creator menyusun draf atau menyalin survei, lalu mengisi tujuan, objek, petunjuk
 
 Responden membuka formulir, membaca pemberitahuan, mengikuti mekanisme persetujuan yang berlaku, menjawab, dan meninjau. Sistem memeriksa versi yang ditampilkan, periode, izin, dan item wajib. Setelah transaksi berhasil, responden menerima bukti dan respons final terkunci. Waktu server dicatat dalam UTC dan ditampilkan dalam WIB.
 
+**Kebutuhan bukti persetujuan per survei.** `surveys.consent_required` bernilai `tidak` (default; persetujuan diri cukup) atau `wajib_upload` (persetujuan harus disertai bukti pendukung). Nilai dibaca dari survei saat pengantar dibuka, bukan dari profil organisasi. Hanya survei organisasi (`organization_id` terisi) yang boleh `wajib_upload`; permintaan untuk survei personal ditolak `422 consent_required_personal`. Pada survei `wajib_upload` tanpa bukti, `POST /public/surveys/{token}/consent` ditolak `422 guardian_evidence_required` dengan pesan generik "Untuk survei ini, persetujuan perlu disertai bukti pendukung."; bukti yang dikirim untuk survei `tidak` ditolak `422 invalid_evidence`. Bukti tetap dicatat sebagai pernyataan sendiri (`self_attested`); **tidak ada verifikasi wajib**, dan layar `/admin/org/evidence` bersifat tinjauan, bukan gerbang pemblokir. Badge pengantar memakai istilah netral: "Persetujuan diri" atau "Dengan bukti pendukung".
+
 Pada gangguan API, antarmuka menjelaskan statusnya. Undangan mandiri hanya dapat digunakan jika mode itu diaktifkan. Respons lokal tidak dipadankan dengan peserta LMS berdasarkan nama. Gangguan setelah penyimpanan tidak membatalkan respons.
 
 ### 5.2 Siklus hidup
@@ -158,7 +170,7 @@ Pada gangguan API, antarmuka menjelaskan statusnya. Undangan mandiri hanya dapat
 - **Draf → terbit.** Publikasi memerlukan konfigurasi item valid dan menghasilkan snapshot tetap beserta tautan yang mengarah ke versi tersebut.
 - **Terbit → versi berikutnya.** Edit substansial membuat draf baru tanpa menutup versi terbit. Publikasi versi baru menutup versi terbit sebelumnya, sehingga hanya versi terbaru yang menerima kiriman baru. Formulir lama tidak dialihkan ke versi baru.
 - **Terbit → ditutup → arsip.** Penutupan survei menutup semua versi terbit dan tautan umum yang masih aktif untuk versi tersebut. Rekam waktu penutupan dan pertahankan riwayat sesuai retensi. Pengarsipan mengatur visibilitas pengelolaan.
-- **Salin survei.** Salin konfigurasi ke draf baru. Respons, identitas, izin khusus, bukti persetujuan/verifikasi (pada studi kasus: bukti wali), dan undangan tidak ikut disalin.
+- **Salin survei.** Salin konfigurasi ke draf baru. Respons, identitas, izin khusus, bukti persetujuan/verifikasi (pada studi kasus: bukti pendukung), dan undangan tidak ikut disalin.
 - **Gangguan integrasi.** Tampilkan status yang dapat dipahami responden. Sediakan akses mandiri hanya jika diaktifkan untuk survei tersebut. Catat mode dan sumber identitas; hindari membuat identitas kedua otomatis.
 
 ---
@@ -168,12 +180,12 @@ Pada gangguan API, antarmuka menjelaskan statusnya. Undangan mandiri hanya dapat
 | Entitas | Isi minimum | Aturan |
 | --- | --- | --- |
 | **UserProfile, AccessGrant** | ID akun, role, status; jenis izin, lingkup survei/penugasan | Akun pengelola berbeda dari identitas responden |
-| **Survey, SurveyVersion** | Pemilik, judul, tujuan, status; ID/nomor versi, konfigurasi tetap, waktu terbit/tutup | Nomor versi unik per survei; formulir selalu merujuk ID versi pasti |
+| **Survey, SurveyVersion** | Pemilik, judul, tujuan, status, `organization_id`, `consent_required`; ID/nomor versi, konfigurasi tetap, waktu terbit/tutup | Nomor versi unik per survei; formulir selalu merujuk ID versi pasti. `consent_required ∈ {tidak, wajib_upload}`, dan `wajib_upload` hanya untuk survei ber-`organization_id` |
 | **Question, QuestionOption** | Versi, kode, urutan, tipe, wajib, bagian, `group_code` dan `dimension_code` opsional; label dan nilai pilihan | Kode unik per versi. Opsi dan skala terikat ke item versi itu; opsi harus milik item yang dijawab |
 | **PublicLink, Assignment, Invitation** | Versi, periode aktif; penugasan, peserta, hash token, kedaluwarsa, pencabutan, dan pemakaian | Tautan umum dapat dipakai banyak responden. Undangan individual hanya dapat dipakai untuk peserta dan penugasan terkait. Konsumsi token saat transaksi berhasil |
 | **Respondent, IdentityMap** | ID internal acak/stabil; sumber identitas, ID eksternal opsional | Batasi akses tabel pemetaan. ID eksternal hanya diisi dari sumber terverifikasi. Tautan umum tidak menjamin satu respons per orang |
-| **ConsentRecord** | Peserta/konteks versi, versi pemberitahuan, dasar, status, waktu, referensi bukti persetujuan/verifikasi pihak berwenang bila diperlukan (pada studi kasus: bukti wali) | Pertahankan riwayat perubahan status. Pisahkan klik responden dari bukti persetujuan/verifikasi |
-| **Response, Answer** | ID bukti, versi, peserta/penugasan bila ada, mode, sumber identitas, waktu UTC; nilai numerik asli atau teks | Satu jawaban per item per respons. Versi pertanyaan dan opsi harus konsisten. Respons final terkunci |
+| **ConsentRecord** | Peserta/konteks versi, versi pemberitahuan, dasar, status, waktu, referensi/berkas bukti persetujuan bila diwajibkan survei | Pertahankan riwayat perubahan status. Pisahkan klik responden dari bukti persetujuan. Status bukti awal `self_attested`; `verified`/`rejected` hanya hasil tinjauan, bukan syarat kiriman |
+| **Response, Answer** | ID bukti, versi, peserta/penugasan bila ada, `collection_mode`, `identity_source`, waktu UTC; nilai numerik asli atau teks | Satu jawaban per item per respons. Versi pertanyaan dan opsi harus konsisten. Respons final terkunci. `assignment_id` terisi = masuk lewat undangan |
 | **SubmissionAttempt** | Kunci retry, lingkup pengiriman, sidik isi, ID bukti | Kunci yang sama dan isi sama mengembalikan bukti lama. Kunci sama dengan isi berbeda ditolak |
 | **IntegrationEvent, AuditLog** | ID kejadian, tujuan, status, percobaan ulang; aktor, aksi, objek, hasil, waktu | Event selesai hanya untuk respons tersimpan. Log tidak memuat token, kredensial, atau jawaban |
 
@@ -197,11 +209,16 @@ Hitung distribusi per kombinasi versi, item, dan nilai opsi. Simpan nilai opsi y
 
 ### 7.1 CSV standar
 
-UTF-8, satu baris per respons, satu ekspor per versi. Urutkan item sesuai instrumen. Kolom minimum dan satu baris sintetis:
+UTF-8, satu baris per respons, satu ekspor per versi. Urutkan item sesuai instrumen. Kolom tetap lalu kolom jawaban; dua kolom pembeda ditambahkan **di akhir daftar kolom tetap**, sebelum kolom jawaban:
+
+- `organisasi` — `surveys.organization_id` bila survei milik organisasi, selain itu literal `publik`. Nilai dibaca sekali per ekspor dari baris survei; batch respons tidak membaca `surveys` lagi.
+- `cara_masuk` — `undangan` bila `assignment_id` terisi, `tautan_umum` bila kosong.
+
+Kolom minimum dan satu baris sintetis:
 
 ```csv
-response_id,respondent_id,survey_id,survey_version,assignment_id,collection_mode,identity_source,submitted_at,AD01,TS01,K02
-r_demo01,p_demo01,s_demo,1,a_demo,standalone,local,2026-11-09T05:00:00Z,4,2,""
+response_id,respondent_id,survey_id,survey_version,assignment_id,collection_mode,identity_source,submitted_at,organisasi,cara_masuk,AD01,TS01,K02
+r_demo01,p_demo01,s_demo,1,a_demo,standalone,local,2026-11-09T05:00:00Z,org_demo,undangan,4,2,""
 ```
 
 Kolom K02 kosong ditulis sebagai field kosong. Nama tidak masuk ekspor standar. Jangan mengekspor token pada keluaran standar.
@@ -220,13 +237,14 @@ Gunakan awalan `/api/v1`. Klien menerima pesan yang dapat ditindaklanjuti tanpa 
 
 | Metode dan rute | Otorisasi | Perilaku |
 | --- | --- | --- |
-| GET/POST `/surveys` | Creator | Daftar sendiri atau buat draf |
+| GET/POST `/surveys` | Creator | Daftar sendiri atau buat draf. Badan boleh memuat `owner_scope` (`individual`/`organization`) dan `consent_required`; `wajib_upload` pada survei personal ditolak `422 consent_required_personal` |
 | PUT `/surveys/{id}` | Creator pemilik | Simpan metadata dan konfigurasi draf; pertahankan versi terbit |
 | POST `/surveys/{id}/publish` | Creator pemilik | Validasi, bekukan versi, terbitkan tautan |
 | POST `/surveys/{id}/close` atau `/surveys/{id}/archive` | Creator pemilik | Ubah status dengan validasi dan audit |
 | POST `/surveys/{id}/assignments` | Creator berwenang | Buat penugasan dan undangan individual |
 | GET `/public/surveys/{token}` | Responden dengan akses | Kembalikan formulir versi aktif dan pemberitahuan |
 | POST `/public/surveys/{token}/responses` | Responden; `Idempotency-Key` | Validasi dan simpan atomik, kembalikan bukti |
+| GET/PUT `/surveys/{id}/settings` | Pemilik/`org_admin` | Izin hasil (`allowResults`, `allowIndividual`) dan `consent_required`; field yang tidak dikirim mempertahankan nilai tersimpan |
 | GET `/surveys/{id}/summary` | Pemilik berizin | Distribusi agregat per versi |
 | GET `/surveys/{id}/export` | Izin ekspor pada objek | CSV/kodebook per versi, catat ekspor dan filter kolom |
 | GET `/integration/survey-data` | Layanan Modul 15 berizin | Skema berversi, filter versi, pembatasan kolom, paginasi jika perlu |
@@ -253,19 +271,26 @@ Simulasikan identitas peserta, penugasan, dan penerimaan event pada adapter laya
 
 ### 8.2 Kontrak Modul 15
 
-CSV merupakan jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung rancangan. Sediakan fixture konsumen dengan `schema_version`, versi survei, kode item, nilai atau teks sesuai izin, serta ID peserta yang dapat dipadankan melalui kontrak. Gunakan `collection_mode` berupa `standalone` atau `integrated`, dan `identity_source` berupa `local` atau `module_13`. Pisahkan hasil uji fixture dari hasil integrasi nyata. Kontrak diuji dengan simulasi sampai antartim menyepakati format nyata. Format eksternal final masih terbuka.
+CSV merupakan jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung rancangan. Sediakan fixture konsumen dengan `schema_version`, versi survei, kode item, nilai atau teks sesuai izin, serta ID peserta yang dapat dipadankan melalui kontrak.
+
+**Arti `collection_mode` dan `identity_source`.** Kedua kolom menjelaskan **cara proses kiriman berjalan** dan **asal identitas responden**, bukan hubungan responden dengan organisasi:
+
+- `collection_mode` — `standalone` bila kiriman diproses oleh Modul 14 sendiri (tautan umum atau undangan yang dibuat di Modul 14); `integrated` disiapkan untuk kiriman yang diproses lewat layanan Modul 13.
+- `identity_source` — `local` bila identitas peserta dibuat Modul 14; `module_13` bila identitas datang dari layanan terverifikasi Modul 13.
+
+MVP hanya menghasilkan `standalone`/`local`. Asal kiriman per baris ditandai kolom CSV `cara_masuk` (`undangan`/`tautan_umum`, lihat §7.1). Relasi responden–organisasi (misalnya keanggotaan, kelas, atau unit kerja responden) **tidak** dicatat pada MVP; ia menjadi roadmap dan, bila disepakati, memerlukan skema tersendiri. Pisahkan hasil uji fixture dari hasil integrasi nyata. Kontrak diuji dengan simulasi sampai antartim menyepakati format nyata. Format eksternal final masih terbuka.
 
 ---
 
 ## 9. Keamanan dan pelindungan data
 
 1. **Tujuan dan minimisasi.** Dokumentasikan data yang diperlukan untuk undangan, persetujuan, pengisian, audit, dan ekspor. Gunakan ID internal. Jangan meminta nama, tanggal lahir, nomor identitas, atau salinan dokumen identitas pihak berwenang secara default hanya karena tersedia kolom; pada studi kasus, contohnya NIS dan identitas wali.
-2. **Data anak (bila berlaku).** Bila responden mencakup anak, pengendali menetapkan mekanisme verifikasi orang tua/wali dan status kelayakan; pada pilot SMK ini mengikat. Server menolak kiriman baru saat bukti yang diwajibkan tidak tersedia, dicabut, atau tidak sah. Rute publik juga mengikuti aturan ini jika melibatkan data anak.
+2. **Persetujuan dengan bukti pendukung (per survei).** Pengendali memutuskan survei mana yang memerlukan bukti pendukung (`surveys.consent_required='wajib_upload'`; hanya untuk survei organisasi). Server menolak persetujuan baru pada survei itu bila bukti belum diisi. Aplikasi tidak mencatat kategori umur responden dan tidak menurunkan kebutuhan bukti dari umur; dasar pemrosesan tetap tanggung jawab pengendali per instrumen.
 3. **Hak dan retensi.** Tampilkan tujuan, penerima, kontak, kebijakan retensi, dan mekanisme permintaan. Sediakan proses terotorisasi untuk akses, koreksi data pribadi, penarikan, dan penghapusan. Catat tindak lanjut terhadap ekspor dan cadangan. Respons terkunci bagi responden tetap memungkinkan penanganan permintaan oleh pihak berwenang.
 4. **Operasi.** Gunakan HTTPS, penyimpanan dan cadangan terenkripsi, akses server per objek, rahasia layanan di luar klien, serta log akses/penolakan. Terapkan pembatasan percobaan pada endpoint publik. Hindari token pada log aplikasi, proxy, dan analitik; jangan mengirim jawaban melalui broadcast umum.
 5. **Agregasi.** Untuk kelompok kecil, terapkan pembatasan tampilan sesuai kebijakan pengendali. Ringkasan per versi (total dan hitungan per pertanyaan, termasuk isian teks) ditahan sampai versi itu menerima 5 respons (SEC-16, `SUMMARY_MIN_RESPONSES`); parameter keluaran per kelompok (pada studi kasus: sekolah) belum ditetapkan, dan ambang 5 belum menggantikannya. Jangan menggunakan filter sempit untuk mengungkap satu responden.
 6. **Insiden.** Isolasi akses terdampak, cabut kredensial, pertahankan bukti minimum, eskalasi ke pengendali, dan catat pemulihan. Ikuti prosedur pemberitahuan pada §9.2 dan Pasal 46 UU PDP.
-7. **Sebelum pilot.** Tetapkan pengendali/prosesor, kontak, alur bukti persetujuan/verifikasi (pada studi kasus: bukti wali), penilaian dampak, penerima individual, masa simpan, prosedur hak subjek, lokasi pemrosesan, dan persetujuan instrumen. Jangan mengisi pengaturan yang belum disepakati dengan kebijakan organisasi rekaan (pada studi kasus: sekolah). Gunakan data sintetis untuk development dan pengujian.
+7. **Sebelum pilot.** Tetapkan pengendali/prosesor, kontak, alur bukti persetujuan (pada studi kasus: bukti pendukung pada survei yang dipilih), penilaian dampak, penerima individual, masa simpan, prosedur hak subjek, lokasi pemrosesan, dan persetujuan instrumen. Jangan mengisi pengaturan yang belum disepakati dengan kebijakan organisasi rekaan (pada studi kasus: sekolah). Gunakan data sintetis untuk development dan pengujian.
 
 **Dasar hukum data anak.** Pengendali menetapkan tujuan, dasar pemrosesan, penerima, penanggung jawab, dan jadwal retensi sebelum uji lapangan. UU 27/2022 Pasal 4 dan 25 menggolongkan data pribadi anak sebagai data pribadi spesifik dan mensyaratkan persetujuan orang tua dan/atau wali. Pasal 34 mengatur penilaian dampak untuk pemrosesan berisiko tinggi, termasuk data pribadi spesifik dan pencocokan kelompok data. Rencanakan penilaian dampak sebelum pilot.
 
@@ -273,7 +298,7 @@ CSV merupakan jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung
 
 | Tahap | Kontrol yang dibangun dan diuji |
 | --- | --- |
-| **Pengumpulan** | Tampilkan tujuan, jenis data, penggunaan oleh Modul 15, retensi, kontak, dan hak peserta. Pada studi kasus, sekolah memverifikasi status anak dan referensi bukti wali; untuk deployment lain, verifikasi dilakukan pihak yang berwenang. Jika syarat belum terpenuhi, server menolak kiriman. Hindari salinan identitas wali jika referensi bukti memadai. |
+| **Pengumpulan** | Tampilkan tujuan, jenis data, penggunaan oleh Modul 15, retensi, kontak, dan hak peserta. Pada survei `wajib_upload`, persetujuan baru ditolak sampai referensi atau berkas bukti diisi; berkas hanya disimpan bila survei mewajibkannya. Tinjauan pengelola (`/admin/org/evidence`) bersifat opsional dan tidak memblokir kiriman. Hindari salinan identitas pihak lain jika referensi bukti memadai. |
 | **Identitas** | Gunakan kode acak untuk undangan dan ID peserta terpisah untuk pencocokan. Rahasiakan pemetaan dan batasi aksesnya. Data berkode tetap dapat mengidentifikasi responden selama pemetaan tersedia. |
 | **Penyimpanan** | Terapkan HTTPS, enkripsi penyimpanan dan cadangan, kredensial layanan di server, pembatasan per pemilik dan penugasan, serta pencatatan akses. Pisahkan lingkungan uji sintetis dari produksi. |
 | **Pemakaian** | Super admin melihat metrik operasional; creator melihat agregat sendiri. Jawaban individu, teks bebas, dan unduhan memerlukan izin terpisah. Batasi tampilan kelompok kecil bila kombinasi kelompok dan jawaban dapat mengungkap responden. |
@@ -300,7 +325,7 @@ Isi minimum `/terms`: aturan penggunaan, tanggung jawab akun creator/admin, kepe
 
 **Versi dan perubahan.** Perubahan material membuat versi notice baru. Persetujuan lama tetap merujuk versi yang disetujui; halaman global menampilkan tanggal berlaku. Jangan mengubah teks notice secara retroaktif.
 
-**Konteks SMK.** Notice ramah anak; bukti wali mengikat untuk pilot; kebijakan sekolah harus disetujui pengendali. Gunakan placeholder berlabel sintetis sampai teks disahkan.
+**Konteks SMK.** Notice ramah anak; kebutuhan bukti pendukung ditetapkan per survei pada pilot; kebijakan sekolah harus disetujui pengendali. Notice tidak menyebut kategori umur responden. Gunakan placeholder berlabel sintetis sampai teks disahkan.
 
 ---
 
@@ -316,7 +341,7 @@ Prioritas awal merupakan penilaian desain. Tim meninjau register setiap iterasi 
 | **R2 • tinggi** | Identitas tertukar atau kode bocor; peserta salah dipadankan | Dua peserta bernama sama tidak dipadankan otomatis; kode dicabut ditolak; uji dua pengiriman serentak dengan satu kode | ID stabil, token sekali pakai, masa berlaku, pencabutan; jangan cocokkan berdasarkan nama | Backend |
 | **R3 • tinggi** | Kiriman ganda atau hilang | Percobaan serentak dan timeout sebelum/sesudah commit; cocokkan bukti dan jumlah jawaban; pulihkan bukti yang sama | Transaksi atomik, kunci unik per peserta/penugasan, idempotensi | Backend/QA |
 | **R4 • tinggi** | Akses di luar izin atau CSV tersebar | Uji dua akun, endpoint langsung, cakupan layanan, dan catatan penerima; creator lain tidak dapat mengunduh hasil di luar penugasannya | Periksa izin server pada ringkasan, jawaban, unduhan, dan API; catat penerima ekspor | Backend/QA |
-| **R5 • tinggi** | Pemrosesan anak tanpa bukti (studi kasus) | Simulasi bukti wali belum terverifikasi/ditarik; kiriman baru ditolak | Pisahkan mode simulasi; verifikasi bukti dan pemberitahuan sebelum pengisian; uji penolakan bukti tidak sah | Pengendali/sekolah |
+| **R5 • tinggi** | Persetujuan tanpa bukti yang diwajibkan survei | Uji `wajib_upload` menolak persetujuan tanpa bukti dan menolak berkas pada survei `tidak`; bukti berstatus `rejected` tetap tidak memblokir respons karena tinjauan bukan gate | Pilih `wajib_upload` hanya pada survei organisasi yang membutuhkan bukti; pemberitahuan sebelum pengisian; tinjauan pengelola dengan audit | Pengendali/sekolah |
 | **R6 • tinggi** | Identifikasi melalui komentar atau kelompok kecil | Periksa kolom ekspor, hak teks bebas, dan filter kelompok | Batasi teks bebas, kontrol penerima, tinjau kelompok kecil; ekspor standar tanpa nama | Pengelola data |
 | **R7 • sedang** | Versi berubah atau skor salah ditafsirkan; instrumen berubah | Uji A/B, rekonsiliasi, keterangan interpretasi di dashboard/kodebook; periksa kodebook per versi | Publikasi membekukan versi; simpan nilai asli; dokumentasikan batas interpretasi | Pemilik produk |
 | **R8 • tinggi** | Retensi berlebih atau cadangan gagal | Simulasikan restore dan pastikan penghapusan terdokumentasi tetap dihormati; uji penghapusan setelah restore | Jadwal retensi per kelas data; uji pemulihan sintetis | Operasional |
@@ -324,7 +349,7 @@ Prioritas awal merupakan penilaian desain. Tim meninjau register setiap iterasi 
 
 **Contoh keterlacakan R4.** Creator mencoba mengunduh hasil responden di luar penugasannya. Dampak keamanan berupa terbukanya jawaban individual. Dampak privasi bagi responden berupa pengungkapan jawaban sensitif (contoh: pengalaman technostress) kepada pihak yang tidak berwenang. Hubungkan R4 ke F-14/F-17 dan F-18/F-19, lalu uji dengan dua akun creator. Bukti lulus berupa penolakan server dan log audit tanpa isi jawaban. Pemilik risiko menilai sisa risiko salinan CSV setelah unduhan sah.
 
-**Contoh keterlacakan R5.** Data anak masuk tanpa bukti wali yang berlaku. Uji berdasarkan data sintetis bahwa server menolak pengiriman ketika bukti belum terverifikasi atau telah ditarik. Pengendali menetapkan tata cara verifikasi dan retensi sebelum pilot studi kasus.
+**Contoh keterlacakan R5.** Persetujuan tercatat pada survei `wajib_upload` tanpa bukti. Uji berdasarkan data sintetis bahwa `POST /public/surveys/{token}/consent` menolak tanpa referensi/berkas (`422 guardian_evidence_required`) dan menerima pernyataan sendiri beserta bukti (`self_attested`). Pengendali menetapkan survei mana yang mewajibkan bukti, tata cara tinjauannya, dan retensi berkas sebelum pilot studi kasus.
 
 ### 10.2 Penerapan standar
 
@@ -336,7 +361,7 @@ Edisi acuan dipilih per 9 November 2026. Tim membatasi evaluasi pada proses, kar
 | **ISO/IEC 25010:2023 • model mutu produk** | Pilih karakteristik berdasarkan tujuan MVP. Hubungkan setiap karakteristik terpilih dengan skenario, metrik, target, dan bukti aktual. Alasan pemilihan dicatat pada metodologi. |
 | **ISO/IEC 27001:2022 beserta Amd 1:2024 • keamanan informasi** | Tetapkan aset, ancaman, dan dampak terhadap kerahasiaan, integritas, dan ketersediaan. Catat pemilik risiko, perlakuan, kontrol, bukti uji, dan keputusan mengenai risiko sisa. |
 | **ISO/IEC 27701:2025 • manajemen privasi** | Petakan pemrosesan dari undangan sampai penghapusan. Catat tujuan, peran pengendali/prosesor, subjek, data, akses, penerima CSV/API, retensi, dan penanganan permintaan. |
-| **UU 27/2022 tentang Pelindungan Data Pribadi • dasar hukum** | Hubungkan alur data dengan kewajiban yang relevan. Siapkan bukti persetujuan orang tua/wali untuk data anak, penilaian dampak, dan prosedur insiden sesuai §9. |
+| **UU 27/2022 tentang Pelindungan Data Pribadi • dasar hukum** | Hubungkan alur data dengan kewajiban yang relevan. Siapkan bukti persetujuan yang diwajibkan per survei, penilaian dampak, dan prosedur insiden sesuai §9. |
 
 **Batas penerapan.** Laporan mendokumentasikan penerapan terpilih pada capstone. Pemeriksaan klausul menyeluruh dan sertifikasi sistem manajemen organisasi berada di luar ruang lingkup proyek. Pada studi kasus, skor survei pengalaman siswa menggunakan Figma dan evaluasi mutu aplikasi Modul 14 merupakan dua pengukuran dengan objek berbeda.
 
@@ -368,7 +393,9 @@ Edisi acuan dipilih per 9 November 2026. Tim membatasi evaluasi pada proses, kar
 | AC09 | Ekspor jawaban teks dengan koma, baris baru, dan awalan formula | File terbaca, hak kolom diterapkan, teks aman, nilai asli di basis data utuh |
 | AC10 | Layanan terputus | Alur mandiri berjalan; pengiriman status dapat diulang tanpa membuat respons kedua |
 | AC11 | Formulir responden dari ponsel dan keyboard | Pengguna dapat membaca skala, memperbaiki validasi, meninjau, dan menerima bukti; label, kontras, pesan validasi, dan fokus keyboard terverifikasi |
-| AC12 | Bukti wali (studi kasus) dan pencabutan simulasi | Permintaan ditangani sesuai status, akses diaudit, log bebas jawaban dan kredensial; token dicabut ditolak; unduhan tanpa izin ditolak; penarikan dan penghapusan data sintetis tercatat |
+| AC12 | Bukti pendukung (studi kasus) dan pencabutan simulasi | Permintaan ditangani sesuai status, akses diaudit, log bebas jawaban dan kredensial; token dicabut ditolak; unduhan tanpa izin ditolak; penarikan dan penghapusan data sintetis tercatat |
+| AC17 | `consent_required` per survei | Survei organisasi `wajib_upload` menolak persetujuan tanpa bukti dan menerima pernyataan sendiri + bukti; survei personal menolak `wajib_upload` dengan 422; badge pengantar memakai istilah netral |
+| AC18 | Rumah per peran | `org_admin` mendarat di `/admin/org`, super admin di `/admin`, creator di `/creator`; sidebar `org_admin` menyorot tepat satu entri untuk `/admin/org`, `/admin/org/evidence`, dan `/creator` |
 | AC13 | 30 kiriman serentak, 20 item per kiriman | p95 waktu server dari penerimaan hingga bukti commit ≤3 detik; 30 ID respons unik dan 600 jawaban sah lengkap; catat lingkungan dan tidak ada kehilangan/duplikasi |
 | AC14 | Konsumen Modul 15 simulasi | Pencocokan ID dan pembacaan skema berhasil tanpa nama atau token; catatan uji menyebut simulasi; CSV/kodebook terbaca di spreadsheet dan nilai asli diperiksa |
 | AC15 | Penanganan risiko operasional | Catatan uji restore, penanganan penghapusan setelah restore, dan latihan insiden tersedia sebelum pilot |
@@ -425,10 +452,11 @@ Uji fleksibilitas memakai survei kedua dengan topik berbeda, skala empat opsi, d
 | Instrumen, objek tugas Figma, dan sumber adaptasi | Tim capstone, pembimbing, dan sekolah | Gunakan item demonstrasi berlabel sintetis untuk pengembangan |
 | ID/daftar peserta, autentikasi, dan endpoint Modul 13 | Tim Modul 13 dan 14 | Gunakan ID lokal, kode individual, dan adapter simulasi |
 | Format skema nyata serta penerima terotorisasi Modul 15 | Tim Modul 14/15 dan pengendali | Penuhi kontrak CSV/fixture per versi; dokumentasikan pemetaan yang perlu disepakati |
-| Penanggung jawab, bukti wali, akses individual, retensi, hosting, dan prosedur insiden | Sekolah dan pengendali yang ditetapkan | Pisahkan lingkungan sintetis; siapkan konfigurasi dan bukti uji sebelum data nyata |
-| Alur bukti wali: unggahan responden dan moderasi `org_admin` | Pengendali dan sekolah | Wali mengunggah berkas (maks. 5 MB; JPG, PNG, WebP, PDF); status awal `self_attested`, lalu `verified`/`rejected` oleh `org_admin` dengan audit. `rejected` tidak memblokir respons tersetujui karena `responses` tidak merujuk `consent_records`; retensi berkas belum ditetapkan |
+| Penanggung jawab, kebutuhan bukti persetujuan per survei, akses individual, retensi, hosting, dan prosedur insiden | Sekolah dan pengendali yang ditetapkan | Pisahkan lingkungan sintetis; siapkan konfigurasi dan bukti uji sebelum data nyata |
+| Alur bukti persetujuan: unggahan responden dan tinjauan `org_admin` | Pengendali dan sekolah | Responden mengunggah berkas (maks. 5 MB; JPG, PNG, WebP, PDF) atau mengisi referensi; status awal `self_attested`, lalu `verified`/`rejected` oleh `org_admin` dengan audit. Status tidak memblokir kiriman; retensi berkas belum ditetapkan |
+| Relasi responden–organisasi (keanggotaan, kelas, unit kerja) | Pengendali dan tim modul | Roadmap, bukan MVP; memerlukan skema dan keputusan tujuan pemrosesan tersendiri |
 
-Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, siapa di sekolah yang berwenang memutuskan status bukti wali (alur unggah–moderasi sudah tersedia), penerima individual, masa simpan per jenis data dan retensi berkas bukti, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
+Keputusan sekolah yang masih terbuka: pihak pengendali/prosesor dan kontak, siapa di sekolah yang berwenang memutuskan status bukti (alur unggah–tinjauan sudah tersedia), penerima individual, masa simpan per jenis data dan retensi berkas bukti, penanganan permintaan, lokasi hosting dan cadangan. Tinjau transfer lintas negara jika penyedia memproses data di luar Indonesia (Pasal 56 UU 27/2022).
 
 Pengesahan tertulis perubahan matriks topik belum tersedia; bukti arahan pembimbing berupa transkrip. Instrumen studi kasus masih menunggu penetapan.
 

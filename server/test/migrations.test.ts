@@ -50,6 +50,8 @@ const VERSIONS = [
   '021_access_grant_provenance.sql',
   '022_drop_plaintext_link_tokens.sql',
   '023_integration_token_expiry.sql',
+  '024_survey_consent_requirement.sql',
+  '025_drop_profile_legacy_consent_columns.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
@@ -160,6 +162,101 @@ test('upgrade 008 → 009 mengisi expires_at lama dengan created_at + 14 hari la
   }
 });
 
+test('024: kebutuhan bukti persetujuan pindah ke survei, mode profil organisasi dibuang', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '023' });
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    // Bentuk baris main: mode persetujuan di profil organisasi, survei belum punya kolom sendiri.
+    await client.query(
+      `INSERT INTO accounts (id, email, display_name, role, status, password_hash, created_at)
+       VALUES ('u_c24', 'c24@example.org', 'C24', 'creator', 'active', 'scrypt$x$y', '2026-11-01T00:00:00Z')`,
+    );
+    await client.query(
+      `INSERT INTO organizations (id, name, organization_type, policy_url, terms_url, created_at, respondent_age_category, consent_mode)
+       VALUES ('org_c24', 'Org C24', 'organization', '/p', '/t', '2026-11-01T00:00:00Z', 'minor', 'guardian')`,
+    );
+    await client.query(
+      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode, policy_url, terms_url, notice_version)
+       VALUES ('p_c24', 'Org C24', 'organization', 'minor', 'guardian', '/p', '/t', '1.0')`,
+    );
+    await client.query(
+      `INSERT INTO surveys (id, owner_id, profile_id, organization_id, title, purpose, object_label, instructions, status, created_at, updated_at)
+       VALUES ('s_c24', 'u_c24', 'p_c24', 'org_c24', 'Survei', '', '', '', 'draft', 'now', 'now')`,
+    );
+  } finally {
+    await client.end();
+  }
+
+  assert.deepEqual(await migrate(), VERSIONS.slice(VERSIONS.indexOf('024_survey_consent_requirement.sql')));
+
+  const verify = new Client({ connectionString: databaseUrl });
+  await verify.connect();
+  try {
+    const column = await verify.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_name = 'organizations' AND column_name = 'consent_mode'",
+    );
+    assert.deepEqual(column.rows, [], 'organizations.consent_mode dibuang');
+    const survey = await verify.query<{ consent_required: string }>("SELECT consent_required FROM surveys WHERE id = 's_c24'");
+    assert.equal(survey.rows[0]?.consent_required, 'tidak', 'survei lama mulai tanpa kewajiban bukti');
+    await verify.query("UPDATE surveys SET consent_required = 'wajib_upload' WHERE id = 's_c24'");
+    await assert.rejects(
+      verify.query("UPDATE surveys SET consent_required = 'wajib' WHERE id = 's_c24'"),
+      (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '23514',
+      'CHECK menolak nilai di luar tidak/wajib_upload',
+    );
+  } finally {
+    await verify.end();
+  }
+});
+
+test('025: kolom warisan persetujuan/usia di profiles dibuang', async () => {
+  const { migrate, resetSchema } = await import('../migrate.ts');
+  await resetSchema();
+  await migrate({ to: '024' });
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    // Bentuk baris setelah 024: profil masih memegang kolom warisan yang diisi netral kode lama.
+    await client.query(
+      `INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode, policy_url, terms_url, notice_version)
+       VALUES ('p_c25', 'Org C25', 'organization', 'adult', 'self', '/p', '/t', '1.0')`,
+    );
+  } finally {
+    await client.end();
+  }
+
+  assert.deepEqual(await migrate(), VERSIONS.slice(VERSIONS.indexOf('025_drop_profile_legacy_consent_columns.sql')));
+
+  const verify = new Client({ connectionString: databaseUrl });
+  await verify.connect();
+  try {
+    const remaining = await verify.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'profiles'
+          AND column_name IN ('respondent_age_category', 'consent_mode')
+        ORDER BY column_name`,
+    );
+    assert.deepEqual(remaining.rows, [], 'kolom warisan di profiles tidak tersisa');
+    const orgColumn = await verify.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'organizations'
+          AND column_name = 'respondent_age_category'`,
+    );
+    assert.deepEqual(orgColumn.rows, [], 'organizations.respondent_age_category dibuang');
+    const profile = await verify.query<{ id: string; organization_name: string }>(
+      "SELECT id, organization_name FROM profiles WHERE id = 'p_c25'",
+    );
+    assert.deepEqual(profile.rows, [{ id: 'p_c25', organization_name: 'Org C25' }], 'baris profil tetap utuh tanpa kolom warisan');
+  } finally {
+    await verify.end();
+  }
+});
+
 test('foreign key dan unique constraint ditegakkan Postgres', async () => {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
@@ -181,7 +278,7 @@ test('foreign key dan unique constraint ditegakkan Postgres', async () => {
     );
 
     await client.query(
-      "INSERT INTO profiles (id, organization_name, organization_type, respondent_age_category, consent_mode, policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder) VALUES ('p_pub', 'Org', 'Sekolah', '13-17', 'respondent', '/p', '/t', 30, 'x', 0, 'v1', 1)",
+      "INSERT INTO profiles (id, organization_name, organization_type, policy_url, terms_url, retention_days, data_request_contact, cross_border_transfer, notice_version, synthetic_placeholder) VALUES ('p_pub', 'Org', 'Sekolah', '/p', '/t', 30, 'x', 0, 'v1', 1)",
     );
     await client.query(
       "INSERT INTO surveys (id, owner_id, profile_id, title, purpose, object_label, instructions, status, created_at, updated_at) VALUES ('s_pub', 'u_dup', 'p_pub', 'x', '', '', '', 'draft', 'now', 'now')",

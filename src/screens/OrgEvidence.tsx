@@ -40,14 +40,14 @@ const FILTERS: Array<{ value: EvidenceFilter; label: string }> = [
 ];
 
 const DECISION_COPY: Record<Decision, { title: string; confirm: string }> = {
-  verified: { title: 'Verifikasi bukti wali ini?', confirm: 'Verifikasi bukti' },
-  rejected: { title: 'Tolak bukti wali ini?', confirm: 'Tolak bukti' },
+  verified: { title: 'Verifikasi bukti pendukung ini?', confirm: 'Verifikasi bukti' },
+  rejected: { title: 'Tolak bukti pendukung ini?', confirm: 'Tolak bukti' },
 };
 
 const EMPTY_COPY: Record<EvidenceFilter, { title: string; detail: string }> = {
   self_attested: {
     title: 'Tidak ada bukti yang menunggu tinjauan',
-    detail: 'Unggahan bukti wali dari responden organisasi Anda akan muncul di sini.',
+    detail: 'Unggahan bukti pendukung dari responden organisasi Anda akan muncul di sini.',
   },
   verified: {
     title: 'Belum ada bukti terverifikasi',
@@ -88,7 +88,7 @@ export function OrgEvidencePage() {
       .catch((loadError: unknown) => {
         if (cancelled) return;
         setRows(null);
-        setError(loadError instanceof ApiError ? loadError.message : 'Bukti wali gagal dimuat. Periksa koneksi lalu coba lagi.');
+        setError(loadError instanceof ApiError ? loadError.message : 'Bukti pendukung gagal dimuat. Periksa koneksi lalu coba lagi.');
       });
     return () => {
       cancelled = true;
@@ -105,7 +105,7 @@ export function OrgEvidencePage() {
     setBusy(true);
     void reviewOrgGuardianEvidence(target.row.consent_id, target.decision, note)
       .then(() => {
-        notify(target.decision === 'verified' ? 'Bukti wali diverifikasi.' : 'Bukti wali ditolak.');
+        notify(target.decision === 'verified' ? 'Bukti pendukung diverifikasi.' : 'Bukti pendukung ditolak.');
         setTarget(null);
         setNote('');
         setReloadKey((key) => key + 1);
@@ -119,8 +119,8 @@ export function OrgEvidencePage() {
   return (
     <Shell
       kind="admin"
-      title="Bukti wali"
-      subtitle="Tinjau unggahan bukti persetujuan wali dari survei organisasi Anda. Keputusan tercatat di log audit."
+      title="Bukti pendukung"
+      subtitle="Tinjau unggahan bukti persetujuan dari survei organisasi Anda. Keputusan tercatat di log audit."
     >
       <StateView
         routeId="admin-org-evidence"
@@ -152,12 +152,12 @@ export function OrgEvidencePage() {
 
             {error ? (
               <ErrorState
-                title="Bukti wali gagal dimuat"
+                title="Bukti pendukung gagal dimuat"
                 detail={`${error} Tabel kosong bukan berarti tidak ada bukti.`}
                 action={<Button variant="secondary" onClick={() => setReloadKey((key) => key + 1)}>Coba lagi</Button>}
               />
             ) : rows === null ? (
-              <LoadingState label="Memuat bukti wali…" rows={3} />
+              <LoadingState label="Memuat bukti pendukung…" rows={3} />
             ) : rows.length === 0 ? (
               <EmptyState title={EMPTY_COPY[filter].title}>{EMPTY_COPY[filter].detail}</EmptyState>
             ) : (
@@ -175,7 +175,7 @@ export function OrgEvidencePage() {
                           {row.guardian_evidence_mime?.startsWith('image/') && (
                             <img
                               src={guardianEvidenceFileUrl(row.consent_id)}
-                              alt={`Pratinjau ${row.guardian_evidence_file ?? 'bukti wali'}`}
+                              alt={`Pratinjau ${row.guardian_evidence_file ?? 'bukti pendukung'}`}
                               width={44}
                               height={44}
                               loading="lazy"
@@ -185,7 +185,7 @@ export function OrgEvidencePage() {
                           <div className="min-w-0">
                             <a
                               href={guardianEvidenceFileUrl(row.consent_id)}
-                              aria-label={`Unduh berkas ${row.guardian_evidence_file ?? 'bukti wali'}`}
+                              aria-label={`Unduh berkas ${row.guardian_evidence_file ?? 'bukti pendukung'}`}
                               className="inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4"
                             >
                               Unduh berkas
@@ -242,7 +242,7 @@ export function OrgEvidencePage() {
           <Field
             id="evidence-note"
             label="Catatan keputusan (opsional)"
-            hint="Maksimal 500 karakter. Catatan tampil di riwayat bukti wali."
+            hint="Maksimal 500 karakter. Catatan tampil di riwayat bukti pendukung."
           >
             {(aria) => (
               <TextArea

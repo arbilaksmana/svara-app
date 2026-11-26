@@ -946,7 +946,7 @@ test('SEC-04 (d): PATCH verified mengubah status, mencatat peninjau, dan menulis
 });
 
 test('SEC-04 (e): konsen tanpa guardianRequired tidak menerima berkas', async () => {
-  // org_perpus memakai consent_mode self; survei baru miliknya menjadi tautan tanpa wali.
+  // survei baru organisasi default 'tidak' (persetujuan diri); berkas bukti tidak diterima.
   const owner = await session('creator.b@svara.local');
   const created = data<{ survey: { id: string } }>(await call('/surveys', {
     method: 'POST', cookie: owner, body: { title: 'Survei tanpa wali', owner_scope: 'organization' },
@@ -993,6 +993,111 @@ test('SEC-04 (e): konsen tanpa guardianRequired tidak menerima berkas', async ()
   assert.equal((await storedEvidenceRow(consentId))?.guardian_evidence_file, null);
   assert.deepEqual(evidenceFiles(), before, 'konsen tanpa wali tidak boleh menulis berkas');
 });
+
+test('Kebutuhan bukti persetujuan milik survei: organisasi boleh, personal ditolak 422', async () => {
+  const owner = await session('creator.a@svara.local');
+  const questions = [{ code: 'Q1', type: 'short_text', required: true, section: 'Uji', label: 'Tanggapan' }];
+
+  const personal = data<{ survey: { id: string; organization_id: string | null; consent_required: string } }>(
+    await call('/surveys', { method: 'POST', cookie: owner, body: { title: 'Survei personal', owner_scope: 'individual' } }),
+  );
+  assert.equal(personal.survey.organization_id, null);
+  assert.equal(personal.survey.consent_required, 'tidak', 'survei personal selalu persetujuan diri');
+  const personalRejected = await call('/surveys', {
+    method: 'POST',
+    cookie: owner,
+    body: { title: 'Survei personal berbekal', owner_scope: 'individual', consent_required: 'wajib_upload' },
+  });
+  assert.equal(personalRejected.status, 422);
+  assert.equal((personalRejected.json as { code?: string }).code, 'consent_required_personal');
+
+  const organization = data<{ survey: { id: string } }>(
+    await call('/surveys', {
+      method: 'POST',
+      cookie: owner,
+      body: { title: 'Survei organisasi berbekal', owner_scope: 'organization', consent_required: 'wajib_upload' },
+    }),
+  );
+  const created = data<{ survey: { consent_required: string } }>(await call(`/surveys/${organization.survey.id}`, { cookie: owner }));
+  assert.equal(created.survey.consent_required, 'wajib_upload', 'survei organisasi menerima wajib_upload saat dibuat');
+
+  const invalidValue = await call(`/surveys/${personal.survey.id}/settings`, {
+    method: 'PUT',
+    cookie: owner,
+    body: { allowResults: true, allowIndividual: false, consent_required: 'wajib' },
+  });
+  assert.equal(invalidValue.status, 422);
+  const personalSettings = await call(`/surveys/${personal.survey.id}/settings`, {
+    method: 'PUT',
+    cookie: owner,
+    body: { allowResults: true, allowIndividual: false, consent_required: 'wajib_upload' },
+  });
+  assert.equal(personalSettings.status, 422);
+  assert.equal((personalSettings.json as { code?: string }).code, 'consent_required_personal');
+
+  const saveOrganization = await call(`/surveys/${organization.survey.id}/settings`, {
+    method: 'PUT',
+    cookie: owner,
+    body: { allowResults: true, allowIndividual: false, consent_required: 'wajib_upload' },
+  });
+  assert.equal(saveOrganization.status, 200, saveOrganization.text);
+  assert.equal(data<{ consentRequired: string }>(saveOrganization).consentRequired, 'wajib_upload');
+
+  for (const survey of [personal.survey.id, organization.survey.id]) {
+    const saved = await call(`/surveys/${survey}`, {
+      method: 'PUT',
+      cookie: owner,
+      body: { title: 'Judul', purpose: 'Tujuan', object_label: 'Objek', instructions: '', questions },
+    });
+    assert.equal(saved.status, 200, saved.text);
+    const published = await call(`/surveys/${survey}/publish`, { method: 'POST', cookie: owner });
+    assert.equal(published.status, 200, published.text);
+  }
+
+  // Kewajiban bukti dibaca dari survei saat pengantar dibuka: organisasi wajib, personal tidak.
+  const settings = data<{ allowResults: boolean; allowIndividual: boolean; consentRequired: string }>(
+    await call(`/surveys/${organization.survey.id}/settings`, { cookie: owner }),
+  );
+  assert.deepEqual(settings, { allowResults: true, allowIndividual: false, consentRequired: 'wajib_upload' });
+  const personalContext = data<{ guardianRequired: boolean; consent_version: string }>(
+    await call(`/public/surveys/${(await publicTokenFor(personal.survey.id, owner))}`),
+  );
+  assert.equal(personalContext.guardianRequired, false);
+
+  const organizationToken = await publicTokenFor(organization.survey.id, owner);
+  const organizationContext = data<{ guardianRequired: boolean; consent_version: string }>(
+    await call(`/public/surveys/${organizationToken}`),
+  );
+  assert.equal(organizationContext.guardianRequired, true, 'survei organisasi berbekal menuntut bukti pendukung');
+  const withoutEvidence = await call(`/public/surveys/${organizationToken}/consent`, {
+    method: 'POST',
+    body: { version_id: organizationContext.consent_version, respondent_click: true, eligibility: true },
+  });
+  assert.equal(withoutEvidence.status, 422);
+  assert.equal((withoutEvidence.json as { code?: string }).code, 'guardian_evidence_required');
+  assert.equal(
+    (withoutEvidence.json as { error?: string }).error,
+    'Untuk survei ini, persetujuan perlu disertai bukti pendukung.',
+    'notice generik tanpa umur/anak/wali',
+  );
+  const withEvidence = await call(`/public/surveys/${organizationToken}/consent`, {
+    method: 'POST',
+    body: {
+      version_id: organizationContext.consent_version,
+      respondent_click: true,
+      eligibility: true,
+      guardian_evidence_ref: 'surat-persetujuan-01',
+    },
+  });
+  assert.equal(withEvidence.status, 201, withEvidence.text);
+  assert.equal(data<{ guardian_evidence_status: string }>(withEvidence).guardian_evidence_status, 'self_attested');
+});
+
+async function publicTokenFor(surveyId: string, cookie: string): Promise<string> {
+  const issued = await call(`/surveys/${surveyId}/public-link/token`, { method: 'POST', cookie });
+  assert.equal(issued.status, 201, issued.text);
+  return data<{ token: string }>(issued).token;
+}
 
 test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () => {
   const creator = await session('creator.a@svara.local');
@@ -1055,8 +1160,15 @@ test('AC09/AC11: hasil, CSV, codebook, izin ekspor, dan audit akses', async () =
   const header = officerCsv.text.replace('\uFEFF', '').split('\r\n')[0]!;
   assert.equal(
     header,
-    'response_id,respondent_id,survey_id,survey_version,assignment_id,collection_mode,identity_source,submitted_at,AD01,TS01,K02',
+    'response_id,respondent_id,survey_id,survey_version,assignment_id,collection_mode,identity_source,submitted_at,organisasi,cara_masuk,AD01,TS01,K02',
   );
+  // Kolom pembeda tetap di akhir daftar kolom tetap: organisasi pemilik atau `publik`, lalu asal kiriman.
+  const dataRows = officerCsv.text.replace('\uFEFF', '').trim().split('\r\n').slice(1).map((line) => line.split(','));
+  assert.ok(dataRows.length > 0);
+  for (const row of dataRows) {
+    assert.equal(row[8], 'org_smk', 'organisasi = id organisasi pemilik survei');
+    assert.equal(row[9], row[4] ? 'undangan' : 'tautan_umum', 'cara_masuk mengikuti assignment_id');
+  }
   assert.ok(!header.toLowerCase().includes('token'));
   assert.ok(!header.toLowerCase().includes('name'));
   assert.ok(officerCsv.text.includes('Perlu panduan singkat.'), 'teks bebas tampil untuk penerima berizin');
@@ -1153,17 +1265,17 @@ test('AC09: formula, kutip, dan baris baru dinetralkan tanpa mengubah nilai ters
 
 test('SEC-01/SEC-02: notice publik berasal dari lingkup survei dan tidak jatuh ke versi lain', async () => {
   const context = data<{
-    profile: { id: string; source: string; consent_mode: string | null; respondent_age_category: string | null };
+    profile: { id: string; source: string };
     notice: { id: string; version: string };
     version: { notice_version: string };
     consent_version: string;
     guardianRequired: boolean;
   }>(await call('/public/surveys/pl_demoTautanUmum1A'));
 
-  // s_demo1 milik org_smk dengan consent_mode guardian dan notice_version versi 1.0.
+  // s_demo1 milik org_smk, menetapkan consent_required 'wajib_upload' pada surveinya, notice versi 1.0.
   assert.equal(context.profile.source, 'organization');
   assert.equal(context.profile.id, 'org_smk');
-  assert.equal(context.profile.consent_mode, 'guardian');
+  assert.equal('consent_mode' in context.profile, false, 'profil publik tidak lagi membawa mode persetujuan');
   assert.equal(context.guardianRequired, true);
   assert.equal(context.notice.id, 'on_org_smk_1_0');
   assert.equal(context.notice.version, context.version.notice_version);
@@ -1416,8 +1528,6 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
     name: 'SMA Harapan Baru (sintetis)',
     notice_profile_name: 'SMK Nusantara (contoh)',
     organization_type: 'school',
-    respondent_age_category: 'minor',
-    consent_mode: 'guardian',
     admin: { display_name: 'Dewi Lestari', email, password: 'SvaraBaru123!x' },
   };
 
@@ -1427,14 +1537,6 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
     body: payload,
   });
   assert.equal(forbidden.status, 403);
-
-  const mismatch = await call('/admin/organizations', {
-    method: 'POST',
-    cookie: admin,
-    body: { ...payload, admin: { ...payload.admin, email: 'lain@svara.local' }, consent_mode: 'self' },
-  });
-  assert.equal(mismatch.status, 422);
-  assert.equal((mismatch.json as { code?: string } | null)?.code, 'consent_mode_mismatch');
 
   const weak = await call('/admin/organizations', {
     method: 'POST',
@@ -1472,13 +1574,13 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
   const created = await call('/admin/organizations', { method: 'POST', cookie: admin, body: payload });
   assert.equal(created.status, 201, created.text);
   const result = data<{
-    organization: { id: string; name: string; organization_type: string; respondent_age_category: string; consent_mode: string };
+    organization: Record<string, unknown> & { id: string; name: string; organization_type: string };
     account: { id: string; role: string; status: string; organization_id: string | null; email: string };
   }>(created);
   assert.equal(result.organization.name, payload.name);
   assert.equal(result.organization.organization_type, 'school');
-  assert.equal(result.organization.respondent_age_category, 'minor');
-  assert.equal(result.organization.consent_mode, 'guardian');
+  // Kebutuhan bukti persetujuan milik survei, bukan profil organisasi: kolom profil itu sudah tidak ada.
+  assert.equal('consent_mode' in result.organization, false);
   assert.equal(result.account.role, 'org_admin');
   assert.equal(result.account.status, 'active');
   assert.equal(result.account.organization_id, result.organization.id);
@@ -2129,35 +2231,33 @@ test('Lingkup organisasi: pemilik, org_admin, dan isolasi antar organisasi', asy
   }
 });
 
-test('GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2', async () => {
+test('GET/PUT /org/profile menghormati lingkup organisasi; mode persetujuan bukan milik profil', async () => {
   const orgAdmin = await session('orgadmin@svara.local');
 
-  const own = data<{ source: string; profile: { id: string; consent_mode: string | null } }>(
+  const own = data<{ source: string; profile: Record<string, unknown> & { id: string } }>(
     await call('/org/profile', { cookie: orgAdmin }),
   );
   assert.equal(own.source, 'organization');
   assert.equal(own.profile.id, 'org_smk');
-  assert.equal(own.profile.consent_mode, 'guardian');
+  // Profil organisasi hanya memuat kebijakan; kebutuhan bukti persetujuan hidup pada survei.
+  assert.equal('consent_mode' in own.profile, false, 'profil tidak membawa mode persetujuan');
+  assert.equal('respondent_age_category' in own.profile, false, 'profil tidak membawa kategori usia');
 
-  const othersProfile = data<{ source: string; profile: { id: string; consent_mode: string | null } }>(
+  const othersProfile = data<{ source: string; profile: { id: string } }>(
     await call('/org/profile', { cookie: await session('creator.a@svara.local') }),
   );
   assert.equal(othersProfile.profile.id, 'org_smk', 'creator membaca profil organisasinya');
 
-  const mismatch = await call('/org/profile', {
+  // PUT biasa tetap mengembalikan profil tanpa kedua kolom warisan.
+  const saved = await call('/org/profile', {
     method: 'PUT',
     cookie: orgAdmin,
-    body: { respondent_age_category: 'minor', consent_mode: 'self' },
+    body: { data_request_contact: 'privasi@smk.local' },
   });
-  assert.equal(mismatch.status, 422);
-  assert.equal((mismatch.json as { code?: string }).code, 'consent_mode_mismatch');
-
-  const invalidMode = await call('/org/profile', {
-    method: 'PUT',
-    cookie: orgAdmin,
-    body: { consent_mode: 'tidak-ada' },
-  });
-  assert.equal(invalidMode.status, 422);
+  assert.equal(saved.status, 200, saved.text);
+  const savedProfile = (saved.json as { data: { profile: Record<string, unknown> } }).data.profile;
+  assert.equal('consent_mode' in savedProfile, false);
+  assert.equal('respondent_age_category' in savedProfile, false);
 
   // BF-06: memperpendek retention_days menghapus data pada run retensi berikutnya -> wajib konfirmasi.
   await call('/org/profile', { method: 'PUT', cookie: orgAdmin, body: { retention_days: 365 } });
@@ -2180,30 +2280,6 @@ test('GET/PUT /org/profile menghormati lingkup organisasi dan aturan PRD §1.2',
     body: { retention_days: 90 },
   });
   assert.equal(lengthen.status, 200, 'memperpanjang tidak perlu konfirmasi');
-  // Hanya sebagian field: nilai lain dipertahankan, aturan gabungan tetap divalidasi.
-  const senderOnly = await call('/org/profile', {
-    method: 'PUT',
-    cookie: orgAdmin,
-    body: { respondent_age_category: 'minor' },
-  });
-  assert.equal(senderOnly.status, 200, senderOnly.text);
-  const partial = (senderOnly.json as { data: { profile: { respondent_age_category: string; consent_mode: string } } })
-    .data.profile;
-  assert.equal(partial.respondent_age_category, 'minor');
-  assert.equal(partial.consent_mode, 'guardian');
-
-  const adultSelf = await call('/org/profile', {
-    method: 'PUT',
-    cookie: orgAdmin,
-    body: { respondent_age_category: 'adult', consent_mode: 'self' },
-  });
-  assert.equal(adultSelf.status, 200, adultSelf.text);
-  assert.equal(
-    (adultSelf.json as { data: { profile: { consent_mode: string } } }).data.profile.consent_mode,
-    'self',
-    'kombinasi adult/self sah dan tersimpan pada organisasi',
-  );
-
   const updated = await call('/org/profile', {
     method: 'PUT',
     cookie: orgAdmin,
@@ -2464,8 +2540,6 @@ test('Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback
     id: string;
     organization_name: string;
     organization_type: string;
-    consent_mode: string | null;
-    respondent_age_category: string | null;
   }
   const detail = async (id: string) =>
     (await call(`/surveys/${id}`, { cookie: owner })).json as { data: { profile: DetailProfile } };
@@ -2483,15 +2557,12 @@ test('Profil kebijakan survei berasal dari server sesuai lingkup, tanpa fallback
   const db = new Client({ connectionString: databaseUrl });
   await db.connect();
   try {
-    const sources = await db.query<{ platform_name: string; org_consent: string; org_name: string }>(
+    const sources = await db.query<{ platform_name: string; org_name: string }>(
       `SELECT (SELECT organization_name FROM platform_profile WHERE id = 'platform') AS platform_name,
-              (SELECT consent_mode FROM organizations WHERE id = 'org_smk') AS org_consent,
               (SELECT name FROM organizations WHERE id = 'org_smk') AS org_name`,
     );
     const expected = sources.rows[0]!;
     assert.equal(individual.organization_name, expected.platform_name);
-    assert.equal(individual.consent_mode, null, 'profil platform tidak memuat kolom persetujuan organisasi');
-    assert.equal(org.consent_mode, expected.org_consent);
     assert.equal(org.organization_name, expected.org_name);
     assert.ok(!/SMK Nusantara/i.test(individual.organization_name), 'regresi: nama organisasi bocor ke survei individual');
   } finally {
