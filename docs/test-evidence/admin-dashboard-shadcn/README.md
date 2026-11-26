@@ -5,13 +5,14 @@ Diambil dari worktree `admin-dashboard-shadcn-2` pada dev server terisolasi
 dengan data seed demo + 18 respons historis tambahan (Jun–Okt 2026) di database uji
 itu saja, supaya grafik 6 bulan dan badge tren terisi nyata.
 
+App belum punya mode gelap; halaman Ringkasan hanya dirender terang, termasuk saat OS memakai
+`prefers-color-scheme: dark`.
+
 | Berkas | Isi |
 | --- | --- |
-| `ringkasan-desktop-1440-light.png` | `/admin` desktop 1440, tema terang |
-| `ringkasan-desktop-1440-dark.png` | `/admin` desktop 1440, tema gelap (`prefers-color-scheme: dark`) |
+| `ringkasan-desktop-1440-light.png` | `/admin` desktop 1440 |
 | `ringkasan-mobile-390-light.png` | `/admin` mobile 390, halaman penuh |
 | `ringkasan-mobile-390-drawer-light.png` | Mobile 390, drawer navigasi terbuka |
-| `ringkasan-mobile-390-drawer-dark.png` | Mobile 390, drawer terbuka, tema gelap |
 | `admin-accounts-desktop-1440-pill-light.png` | Pembanding: `/admin/accounts` masih pill + sidebar lama |
 | `admin-accounts-mobile-390-pill-light.png` | Pembanding: `/admin/accounts` mobile, pill lama |
 | `creator-desktop-1440-pill-light.png` | Pembanding: `/creator` tidak berubah |
