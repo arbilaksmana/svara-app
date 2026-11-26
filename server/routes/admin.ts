@@ -614,12 +614,46 @@ adminRouter.patch('/admin/data-requests/:id', async (req: AuthedRequest, res: Re
 adminRouter.get('/admin/stats', async (_req: AuthedRequest, res: Response) => {
   try {
     const count = async (sql: string) => Number((await get<{ count: number }>(sql))?.count ?? 0);
+    // Tren kartu: entri baru pada 30 hari terakhir (current) dibanding 30 hari sebelumnya (previous).
+    // Timestamp tersimpan sebagai teks ISO-8601, jadi perbandingan memakai cast timestamptz eksplisit.
+    const windowCount = async (table: string, column: string) => {
+      const row = await get<{ current: number; previous: number }>(
+        `SELECT COUNT(*) FILTER (WHERE ${column}::timestamptz >= now() - interval '30 days') AS current,
+                COUNT(*) FILTER (WHERE ${column}::timestamptz >= now() - interval '60 days'
+                                 AND ${column}::timestamptz < now() - interval '30 days') AS previous
+           FROM ${table}`,
+      );
+      return { current: Number(row?.current ?? 0), previous: Number(row?.previous ?? 0) };
+    };
+    const [accounts, surveys, responses, requests] = await Promise.all([
+      windowCount('accounts', 'created_at'),
+      windowCount('surveys', 'created_at'),
+      windowCount('responses', 'submitted_at'),
+      windowCount('data_requests', 'created_at'),
+    ]);
     res.json({
       data: {
         accounts: await count('SELECT COUNT(*) AS count FROM accounts'),
         surveys: await count('SELECT COUNT(*) AS count FROM surveys'),
         responses: await count('SELECT COUNT(*) AS count FROM responses'),
         pendingRequests: await count("SELECT COUNT(*) AS count FROM data_requests WHERE status = 'pending'"),
+        delta: { accounts, surveys, responses, requests },
+        // 6 bulan kalender terakhir termasuk bulan berjalan; bulan tanpa respons tetap muncul dengan 0.
+        perMonth: await all<{ month: string; responses: number }>(
+          `WITH months AS (
+             SELECT generate_series(date_trunc('month', now()) - interval '5 months',
+                                    date_trunc('month', now()),
+                                    interval '1 month') AS month_start
+           )
+           SELECT to_char(m.month_start, 'YYYY-MM') AS month,
+                  COUNT(r.id) AS responses
+             FROM months m
+             LEFT JOIN responses r
+               ON r.submitted_at::timestamptz >= m.month_start
+              AND r.submitted_at::timestamptz < m.month_start + interval '1 month'
+            GROUP BY m.month_start
+            ORDER BY m.month_start`,
+        ).then((rows) => rows.map((row) => ({ month: row.month, responses: Number(row.responses) }))),
         perCreator: await all<{ id: string; display_name: string; surveys: number; responses: number }>(
           `SELECT a.id, a.display_name,
                   COUNT(DISTINCT s.id) AS surveys,

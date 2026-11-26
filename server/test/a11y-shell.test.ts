@@ -224,10 +224,12 @@ test('UIX-16: heading landing dan halaman masuk boleh patah baris pada teks 200%
   }
 });
 
-test('UIX-25: item navigasi desktop aktif memakai aria-current dan penanda selain warna', async (t) => {
+test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda selain warna', async (t) => {
   await signInAs('super_admin', t.mock);
   const html = render(createElement(Shell, { kind: 'admin', title: 'Ringkasan', children: 'isi' }), '/admin');
-  const nav = /<nav\b[^>]*aria-label="Navigasi utama"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? '';
+  // Halaman Ringkasan memakai sidebar admin bergrup, bukan pill lama.
+  const nav = /<nav\b[^>]*aria-label="Navigasi admin"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? '';
+  assert.ok(nav, 'Ringkasan super admin harus merender sidebar admin');
   const links = [...nav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
   assert.ok(links.length > 1, 'Navigasi admin harus memuat beberapa item');
   const active = links.filter((a) => /\baria-current="page"/.test(a));
@@ -238,4 +240,11 @@ test('UIX-25: item navigasi desktop aktif memakai aria-current dan penanda selai
   const inactiveClasses = new Set(classes(inactive));
   const marker = classes(active[0]!).filter((name) => !inactiveClasses.has(name) && !isColorOnly(name));
   assert.ok(marker.length > 0, `Item aktif hanya dibedakan warna: ${classes(active[0]!).join(' ')}`);
+
+  // Halaman admin selain Ringkasan tetap memakai pill lama dengan sorotan aria-current.
+  const accounts = render(createElement(Shell, { kind: 'admin', title: 'Akun & izin', children: 'isi' }), '/admin/accounts');
+  const pillNav = /<nav\b[^>]*aria-label="Navigasi utama"[^>]*>[\s\S]*?<\/nav>/.exec(accounts)?.[0] ?? '';
+  const pillActive = [...pillNav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a).filter((a) => /\baria-current="page"/.test(a));
+  assert.equal(pillActive.length, 1, 'Halaman admin lain tetap memakai pill dengan satu item aktif');
+  assert.match(pillActive[0]!, />Akun &amp; izin<\/a>$/);
 });

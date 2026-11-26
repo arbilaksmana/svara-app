@@ -368,11 +368,21 @@ export async function adminRetryEvent(id: string): Promise<void> {
   await call(`/admin/integration/${encodeURIComponent(id)}/retry`, { method: 'POST' });
 }
 
+/** Jumlah entri baru pada 30 hari terakhir (current) dan 30 hari sebelumnya (previous). */
+export interface StatsDelta {
+  current: number;
+  previous: number;
+}
+
 export interface AdminStats {
   accounts: number;
   surveys: number;
   responses: number;
   pendingRequests: number;
+  /** Tren kartu ringkasan; previous = 0 berarti periode pembanding belum punya data. */
+  delta: { accounts: StatsDelta; surveys: StatsDelta; responses: StatsDelta; requests: StatsDelta };
+  /** 6 bulan kalender terakhir termasuk bulan berjalan; bulan kosong bernilai 0. Kunci 'YYYY-MM'. */
+  perMonth: Array<{ month: string; responses: number }>;
   perCreator: Array<{ id: string; display_name: string; surveys: number; responses: number }>;
   perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
 }

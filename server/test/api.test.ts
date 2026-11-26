@@ -1687,12 +1687,86 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
 test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
   const admin = await session('admin@svara.local');
   const stats = data<{
+    accounts: number;
+    surveys: number;
+    responses: number;
+    pendingRequests: number;
+    delta: Record<'accounts' | 'surveys' | 'responses' | 'requests', { current: number; previous: number }>;
+    perMonth: Array<{ month: string; responses: number }>;
     perCreator: Array<{ id: string; surveys: number; responses: number }>;
     perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
   }>(await call('/admin/stats', { cookie: admin }));
   assert.ok(stats.perCreator.length >= 1);
   assert.ok(stats.perSurvey.length >= 1);
   assert.ok(stats.perSurvey.every((row) => typeof row.owner === 'string'));
+
+  // Kontrak kartu tren: delta jendela 30 hari untuk keempat kartu, bilangan bulat non-negatif.
+  for (const key of ['accounts', 'surveys', 'responses', 'requests'] as const) {
+    const entry = stats.delta[key];
+    assert.ok(Number.isInteger(entry.current) && entry.current >= 0, `delta.${key}.current`);
+    assert.ok(Number.isInteger(entry.previous) && entry.previous >= 0, `delta.${key}.previous`);
+  }
+
+  // Kontrak grafik: tepat 6 bulan kalender berurutan, bulan berjalan di ujung, bulan kosong = 0.
+  assert.equal(stats.perMonth.length, 6);
+  const now = new Date();
+  assert.deepEqual(
+    stats.perMonth.map((row) => row.month),
+    [5, 4, 3, 2, 1, 0].map((offset) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1)).toISOString().slice(0, 7)),
+  );
+  assert.ok(stats.perMonth.every((row) => Number.isInteger(row.responses) && row.responses >= 0));
+});
+
+test('Postgres: perMonth dan delta stats menghitung jendela waktu dengan benar', async () => {
+  const admin = await session('admin@svara.local');
+  type StatsPayload = {
+    delta: { responses: { current: number; previous: number } };
+    perMonth: Array<{ month: string; responses: number }>;
+  };
+  const baseline = data<StatsPayload>(await call('/admin/stats', { cookie: admin }));
+
+  const monthKeyOf = (at: Date) =>
+    new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1)).toISOString().slice(0, 7);
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+  // Satu respons di jendela 30 hari terakhir, satu di jendela 30-60 hari, satu di luar keduanya
+  // (400 hari, juga di luar rentang grafik 6 bulan).
+  const rows = [
+    { id: 'r_tren_cur', at: daysAgo(5) },
+    { id: 'r_tren_prev', at: daysAgo(45) },
+    { id: 'r_tren_old', at: daysAgo(400) },
+  ];
+  const monthCurrent = monthKeyOf(rows[0]!.at);
+  const monthPrevious = monthKeyOf(rows[1]!.at);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    for (const row of rows) {
+      await client.query(
+        `INSERT INTO responses (id, survey_id, version_id, assignment_id, respondent_id, collection_mode, identity_source, submitted_at, idempotency_key)
+         VALUES ($1, 's_demo1', 'v_demo1_1', NULL, 'p_tren', 'standalone', 'local', $2, $3)`,
+        [row.id, row.at.toISOString(), `idem_${row.id}`],
+      );
+    }
+
+    const next = data<StatsPayload>(await call('/admin/stats', { cookie: admin }));
+    assert.equal(next.delta.responses.current, baseline.delta.responses.current + 1);
+    assert.equal(next.delta.responses.previous, baseline.delta.responses.previous + 1);
+
+    const monthCount = (month: string) => next.perMonth.find((row) => row.month === month)?.responses ?? 0;
+    const baseCount = (month: string) => baseline.perMonth.find((row) => row.month === month)?.responses ?? 0;
+    assert.equal(monthCount(monthCurrent), baseCount(monthCurrent) + 1, 'respons jendela current masuk bulannya');
+    assert.equal(monthCount(monthPrevious), baseCount(monthPrevious) + 1, 'respons 45 hari lalu masuk bulannya');
+    // Bulan tanpa respons tetap nol; bulan yang mungkin terisi hanya bulan kedua sisipan dan bulan seed.
+    const seededMonths = new Set([monthCurrent, monthPrevious, '2026-11']);
+    assert.ok(
+      next.perMonth.filter((row) => !seededMonths.has(row.month)).every((row) => row.responses === 0),
+      'bulan kosong harus nol',
+    );
+  } finally {
+    await client.query('DELETE FROM responses WHERE id = ANY($1)', [rows.map((row) => row.id)]);
+    await client.end();
+  }
 });
 
 test('SEC-12: token integrasi tanpa cakupan ditolak', async () => {

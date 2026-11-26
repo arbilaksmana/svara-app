@@ -15,7 +15,6 @@ import {
   Field,
   Label,
   LoadingState,
-  Muted,
   Panel,
   PlainLink,
   SectionTitle,
@@ -29,6 +28,13 @@ import { useScreenState } from '../lib/state';
 import { ROUTES } from '../lib/routes';
 import { formatWIB } from '../lib/summary';
 import { useToast } from '../components/Toast';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import type { ColumnDef } from '@tanstack/react-table';
+import { Minus, TrendingDown, TrendingUp } from 'lucide-react';
+import { Card as DashCard, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge as UiBadge } from '../components/ui/badge';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '../components/ui/chart';
+import { DataTable } from '../components/data-table';
 import {
   cancelAdminStatsLoad,
   cancelDataRequestsLoad,
@@ -43,7 +49,7 @@ import {
   useStore,
   type AdminData,
 } from '../lib/store';
-import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type DataRequest, type DataRequestStatus } from '../lib/api';
+import { adminCreateOrganization, adminSaveAccount, adminSaveGrants, ApiError, updateDataRequest, type AdminStats, type DataRequest, type DataRequestStatus, type StatsDelta } from '../lib/api';
 import { ACCOUNT_STATUS_LABEL, DATA_REQUEST_TYPE_LABEL, ORGANIZATION_TYPE_LABEL, ROLE_LABEL } from '../lib/labels';
 import type { AuditOutcome, OrganizationType } from '../lib/types';
 
@@ -86,26 +92,31 @@ export function AdminSummaryPage() {
           <div className="flex flex-col gap-5">
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <Label>Jumlah survei</Label>
-                <p className="mt-2 text-h1 font-bold text-ink">{stats.surveys}</p>
-                <Muted>Termasuk draf, terbit, dan arsip.</Muted>
-              </Card>
-              <Card>
-                <Label>Total respons final</Label>
-                <p className="mt-2 text-h1 font-bold text-ink">{stats.responses}</p>
-                <Muted>Agregat lintas versi.</Muted>
-              </Card>
-              <Card>
-                <Label>Akun pengelola</Label>
-                <p className="mt-2 text-h1 font-bold text-ink">{stats.accounts}</p>
-                <Muted>Termasuk akun dinonaktifkan.</Muted>
-              </Card>
-              <Card>
-                <Label>Permintaan data menunggu</Label>
-                <p className="mt-2 text-h1 font-bold text-ink">{stats.pendingRequests}</p>
-                <ActionLink to={ROUTES.adminRequests} variant="ghost" className="mt-2 px-0 text-body-sm underline">Buka permintaan</ActionLink>
-              </Card>
+              <StatCard
+                label="Jumlah survei"
+                value={stats.surveys}
+                delta={stats.delta.surveys}
+                caption="Termasuk draf, terbit, dan arsip."
+              />
+              <StatCard
+                label="Total respons final"
+                value={stats.responses}
+                delta={stats.delta.responses}
+                caption="Agregat lintas versi."
+              />
+              <StatCard
+                label="Akun pengelola"
+                value={stats.accounts}
+                delta={stats.delta.accounts}
+                caption="Termasuk akun dinonaktifkan."
+              />
+              <StatCard
+                label="Permintaan data menunggu"
+                value={stats.pendingRequests}
+                delta={stats.delta.requests}
+                caption="Permintaan berstatus menunggu."
+                action={<ActionLink to={ROUTES.adminRequests} variant="ghost" className="px-0 text-body-sm underline">Buka permintaan</ActionLink>}
+              />
             </div>
 
             <Banner tone="info" title="Tanpa akses jawaban individual">
@@ -113,32 +124,54 @@ export function AdminSummaryPage() {
               <div className="mt-2"><PlainLink to={ROUTES.adminAccounts}>Kelola izin akun</PlainLink></div>
             </Banner>
 
-            <Card className="flex flex-col gap-3">
-              <SectionTitle>Metrik per creator</SectionTitle>
-              <Table head={['Creator', 'Survei', 'Respons']}>
-                {stats.perCreator.map((creator) => (
-                  <tr key={creator.id}>
-                    <Th>{creator.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{creator.id}</Code></span></Th>
-                    <Td>{creator.surveys}</Td>
-                    <Td>{creator.responses}</Td>
-                  </tr>
-                ))}
-              </Table>
-            </Card>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <DashCard>
+                <CardHeader>
+                  <CardTitle>Respons 6 bulan terakhir</CardTitle>
+                  <CardDescription>Agregat respons final per bulan; bulan kosong bernilai nol.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsesAreaChart stats={stats} />
+                </CardContent>
+              </DashCard>
+              <DashCard>
+                <CardHeader>
+                  <CardTitle>Respons per survei</CardTitle>
+                  <CardDescription>Total respons final tiap survei.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsesPerSurveyChart stats={stats} />
+                </CardContent>
+              </DashCard>
+            </div>
 
-            <Card className="flex flex-col gap-3">
-              <SectionTitle>Metrik per survei</SectionTitle>
-              <Table head={['Survei', 'Pemilik', 'Versi', 'Respons']}>
-                {stats.perSurvey.map((survey) => (
-                  <tr key={survey.id}>
-                    <Th>{survey.title}</Th>
-                    <Td>{survey.owner}</Td>
-                    <Td>{survey.versions}</Td>
-                    <Td>{survey.responses}</Td>
-                  </tr>
-                ))}
-              </Table>
-            </Card>
+            <DashCard className="gap-3">
+              <CardHeader>
+                <CardTitle>Metrik per creator</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DataTable
+                  columns={creatorColumns}
+                  data={stats.perCreator}
+                  caption="Jumlah survei dan respons per creator"
+                  emptyMessage="Belum ada creator."
+                />
+              </CardContent>
+            </DashCard>
+
+            <DashCard className="gap-3">
+              <CardHeader>
+                <CardTitle>Metrik per survei</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DataTable
+                  columns={surveyColumns}
+                  data={stats.perSurvey}
+                  caption="Jumlah versi dan respons per survei"
+                  emptyMessage="Belum ada survei."
+                />
+              </CardContent>
+            </DashCard>
 
             <div className="flex flex-wrap gap-3">
               <ActionLink to={ROUTES.adminAccounts} variant="secondary">Akun dan izin</ActionLink>
@@ -152,6 +185,153 @@ export function AdminSummaryPage() {
     </Shell>
   );
 }
+
+/* ---------------- Ringkasan: kartu tren, grafik, dan tabel data ---------------- */
+
+/** Singkatan bulan Indonesia untuk sumbu grafik; kunci perMonth berformat 'YYYY-MM'. */
+const MONTH_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+/**
+ * Badge tren dari delta server. previous = 0 berarti periode pembanding belum punya data,
+ * jadi tampil netral "baru" — tidak ada persen yang diarang.
+ */
+function TrendBadge({ delta }: { delta: StatsDelta }) {
+  if (delta.previous === 0) {
+    return <UiBadge variant="secondary">baru</UiBadge>;
+  }
+  const pct = Math.round(((delta.current - delta.previous) / delta.previous) * 100);
+  if (pct > 0) {
+    return (
+      <UiBadge variant="success">
+        <TrendingUp aria-hidden="true" className="size-3" />+{pct}%
+      </UiBadge>
+    );
+  }
+  if (pct < 0) {
+    return (
+      <UiBadge variant="danger">
+        <TrendingDown aria-hidden="true" className="size-3" />{pct}%
+      </UiBadge>
+    );
+  }
+  return (
+    <UiBadge variant="secondary">
+      <Minus aria-hidden="true" className="size-3" />0%
+    </UiBadge>
+  );
+}
+
+function StatCard({ label, value, delta, caption, action }: { label: string; value: number; delta: StatsDelta; caption: string; action?: ReactNode }) {
+  return (
+    <DashCard className="gap-2">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardAction>
+          <TrendBadge delta={delta} />
+        </CardAction>
+        <CardTitle className="text-h1">{value}</CardTitle>
+      </CardHeader>
+      <CardFooter className="mt-auto flex-col items-start gap-1 text-caption text-[var(--ad-muted)]">
+        <span>{caption}</span>
+        <span>Tren 30 hari vs 30 hari sebelumnya.</span>
+        {action}
+      </CardFooter>
+    </DashCard>
+  );
+}
+
+/** Recharts butuh pengukuran DOM; grafik dirender setelah mount agar SSR tetap ringan. */
+function useChartsReady(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  return ready;
+}
+
+function ResponsesAreaChart({ stats }: { stats: AdminStats }) {
+  const ready = useChartsReady();
+  const data = stats.perMonth.map((row) => ({
+    label: MONTH_ID[Number(row.month.slice(5, 7)) - 1] ?? row.month,
+    responses: row.responses,
+  }));
+  const summary = `Respons per bulan, 6 bulan terakhir: ${data.map((row) => `${row.label} ${row.responses}`).join(', ')}.`;
+  return (
+    <>
+      <div role="img" aria-label={summary}>
+        {ready && (
+          <ChartContainer config={{ responses: { label: 'Respons', color: 'var(--ad-accent)' } }} className="h-64">
+            <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} accessibilityLayer>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} tick={{ fill: 'var(--ad-muted)', fontSize: 12 }} />
+              <YAxis allowDecimals={false} width={36} tickLine={false} axisLine={false} tick={{ fill: 'var(--ad-muted)', fontSize: 12 }} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Area type="monotone" dataKey="responses" stroke="var(--color-responses)" strokeWidth={2} fill="var(--color-responses)" fillOpacity={0.15} />
+            </AreaChart>
+          </ChartContainer>
+        )}
+      </div>
+      <p className="sr-only">{summary}</p>
+    </>
+  );
+}
+
+function ResponsesPerSurveyChart({ stats }: { stats: AdminStats }) {
+  const ready = useChartsReady();
+  const data = stats.perSurvey.map((survey) => ({ name: survey.title, responses: survey.responses }));
+  const summary = `Respons per survei: ${data.map((row) => `${row.name} ${row.responses}`).join(', ')}.`;
+  return (
+    <>
+      <div role="img" aria-label={summary}>
+        {ready && (
+          <ChartContainer config={{ responses: { label: 'Respons', color: 'var(--ad-accent)' } }} className="h-64">
+            <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }} accessibilityLayer>
+              <CartesianGrid horizontal={false} />
+              <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: 'var(--ad-muted)', fontSize: 12 }} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={150}
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: 'var(--ad-muted)', fontSize: 12 }}
+                tickFormatter={(value: string) => (value.length > 20 ? `${value.slice(0, 19)}…` : value)}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="responses" fill="var(--color-responses)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ChartContainer>
+        )}
+      </div>
+      <p className="sr-only">{summary}</p>
+    </>
+  );
+}
+
+type CreatorRow = AdminStats['perCreator'][number];
+type SurveyRow = AdminStats['perSurvey'][number];
+
+const creatorColumns: ColumnDef<CreatorRow>[] = [
+  {
+    accessorKey: 'display_name',
+    header: 'Creator',
+    cell: ({ row }) => (
+      <>
+        {row.original.display_name}
+        <span className="mt-1 block font-mono text-annotation tracking-mono text-[var(--ad-muted)]">
+          <Code>{row.original.id}</Code>
+        </span>
+      </>
+    ),
+  },
+  { accessorKey: 'surveys', header: 'Survei' },
+  { accessorKey: 'responses', header: 'Respons' },
+];
+
+const surveyColumns: ColumnDef<SurveyRow>[] = [
+  { accessorKey: 'title', header: 'Survei' },
+  { accessorKey: 'owner', header: 'Pemilik' },
+  { accessorKey: 'versions', header: 'Versi' },
+  { accessorKey: 'responses', header: 'Respons' },
+];
 
 /* ---------------- Data admin dari bootstrap ---------------- */
 

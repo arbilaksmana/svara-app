@@ -15,3 +15,6 @@ tsconfig.tsbuildinfo
 *.sqlite-shm
 *.sqlite-wal
 server/test/.tmp-*
+
+# Skrip/log sementara sesi kerja (dev server lokal)
+tmp/

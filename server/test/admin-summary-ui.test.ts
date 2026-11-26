@@ -29,6 +29,20 @@ const READY_STATS: AdminStats = {
   surveys: 12,
   responses: 345,
   pendingRequests: 2,
+  delta: {
+    accounts: { current: 2, previous: 1 },
+    surveys: { current: 3, previous: 1 },
+    responses: { current: 40, previous: 25 },
+    requests: { current: 1, previous: 0 },
+  },
+  perMonth: [
+    { month: '2026-06', responses: 0 },
+    { month: '2026-07', responses: 12 },
+    { month: '2026-08', responses: 30 },
+    { month: '2026-09', responses: 25 },
+    { month: '2026-10', responses: 48 },
+    { month: '2026-11', responses: 40 },
+  ],
   perCreator: [{ id: 'u_petugas', display_name: 'Petugas Lapangan', surveys: 3, responses: 120 }],
   perSurvey: [{ id: 's_demo1', title: 'Survei Kebiasaan Belajar', owner: 'Petugas Lapangan', versions: 2, responses: 120 }],
 };

@@ -194,3 +194,65 @@ a,
 button {
   -webkit-tap-highlight-color: transparent;
 }
+
+/*
+ * Scope chrome baru halaman Ringkasan super admin (/admin). Variabel lokal ini hanya dipakai
+ * komponen di bawah scope .admin-dash, sehingga halaman lain tidak terpengaruh. Tema gelap
+ * mengikuti prefers-color-scheme dan hanya memakai token DESIGN.md (dark, n800, n400, dst).
+ */
+.admin-dash {
+  --ad-bg: var(--color-canvas);
+  --ad-surface: var(--color-n0);
+  --ad-soft: var(--color-n100);
+  --ad-border: var(--color-n200);
+  --ad-text: var(--color-ink);
+  --ad-muted: var(--color-muted);
+  --ad-accent: var(--color-action);
+  --ad-accent-contrast: var(--color-n0);
+  --ad-accent-soft: var(--color-action-soft);
+  --ad-success: var(--color-success-text);
+  --ad-success-soft: var(--color-success-soft);
+  --ad-danger: var(--color-danger-text);
+  --ad-danger-soft: var(--color-danger-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  .admin-dash {
+    color-scheme: dark;
+    --ad-bg: var(--color-dark);
+    --ad-surface: var(--color-n800);
+    --ad-soft: var(--color-n700);
+    --ad-border: var(--color-n700);
+    --ad-text: var(--color-n100);
+    --ad-muted: var(--color-n400);
+    --ad-accent: var(--color-action-light);
+    --ad-accent-contrast: var(--color-dark);
+    --ad-accent-soft: color-mix(in srgb, var(--color-action-light) 18%, var(--color-dark));
+    --ad-success: var(--color-success-fill);
+    --ad-success-soft: color-mix(in srgb, var(--color-success-fill) 18%, var(--color-dark));
+    --ad-danger: var(--color-danger-fill);
+    --ad-danger-soft: color-mix(in srgb, var(--color-danger-fill) 18%, var(--color-dark));
+  }
+
+  /* Primitif lama (src/components/ui.tsx) memakai token terang; di scope gelap token itu dipetakan
+     ulang agar banner, teks ink, kode, dan tombol tetap terbaca tanpa mengubah halaman lain. */
+  .admin-dash .bg-action-soft { background-color: var(--ad-accent-soft); }
+  .admin-dash .border-action-subtle { border-color: var(--ad-accent); }
+  .admin-dash .bg-success-soft { background-color: var(--ad-success-soft); }
+  .admin-dash .bg-warning-soft,
+  .admin-dash .bg-danger-soft { background-color: var(--ad-danger-soft); }
+  .admin-dash .bg-n100 { background-color: var(--ad-soft); }
+  .admin-dash .border-n200 { border-color: var(--ad-border); }
+  .admin-dash .text-ink { color: var(--ad-text); }
+  .admin-dash .text-n700 { color: var(--ad-text); }
+  .admin-dash .text-n600,
+  .admin-dash .text-muted { color: var(--ad-muted); }
+  .admin-dash .bg-n0 { background-color: var(--ad-surface); }
+  .admin-dash .text-action { color: var(--ad-accent); }
+  .admin-dash .hover\:bg-n100:hover { background-color: var(--ad-soft); }
+  .admin-dash .hover\:bg-action-soft:hover { background-color: var(--ad-accent-soft); }
+  .admin-dash .border-n200:disabled,
+  .admin-dash .disabled\:bg-n100:disabled { background-color: var(--ad-soft); }
+  .admin-dash .disabled\:text-n600:disabled { color: var(--ad-muted); }
+  .admin-dash .disabled\:border-n200:disabled { border-color: var(--ad-border); }
+}
