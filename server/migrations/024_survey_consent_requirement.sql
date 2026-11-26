@@ -16,7 +16,7 @@
 --
 -- Data lama: semua survei mulai 'tidak'. Aplikasi belum rilis dan belum ada data pelanggan, jadi tidak
 -- ada pemetaan dari `consent_mode` lama; pengelola memilih ulang per survei pada layar pengaturan.
--- `organizations.respondent_age_category` tidak dibaca/ditulis lagi (dibiarkan di skema).
+-- `organizations.respondent_age_category` tidak dibaca/ditulis lagi; dibuang di 025 bersama kolom warisan profiles.
 --
 -- Idempoten: `ADD COLUMN IF NOT EXISTS`, CHECK dipasang sekali lewat DO blok dengan penjaga, dan
 -- `DROP CONSTRAINT IF EXISTS`/`DROP COLUMN IF EXISTS`.

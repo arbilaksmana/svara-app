@@ -242,6 +242,12 @@ test('025: kolom warisan persetujuan/usia di profiles dibuang', async () => {
         ORDER BY column_name`,
     );
     assert.deepEqual(remaining.rows, [], 'kolom warisan di profiles tidak tersisa');
+    const orgColumn = await verify.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'organizations'
+          AND column_name = 'respondent_age_category'`,
+    );
+    assert.deepEqual(orgColumn.rows, [], 'organizations.respondent_age_category dibuang');
     const profile = await verify.query<{ id: string; organization_name: string }>(
       "SELECT id, organization_name FROM profiles WHERE id = 'p_c25'",
     );

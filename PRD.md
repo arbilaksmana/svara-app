@@ -68,7 +68,7 @@ Field minimal dan lokasinya:
 
 Aturan:
 - Profil kebijakan (organisasi atau platform) hanya menyimpan teks dan kanal kebijakan. Kebutuhan bukti persetujuan **bukan** bagian profil; nilainya milik survei (`surveys.consent_required`, lihat §5 dan §6).
-- Profil tidak menyimpan kategori umur responden maupun mode persetujuan. Migrasi 024 membuang `organizations.consent_mode`; migrasi 025 membuang `profiles.consent_mode` dan `profiles.respondent_age_category`. Kolom warisan `organizations.respondent_age_category` masih ada di skema tetapi tidak dibaca maupun ditulis.
+- Profil tidak menyimpan kategori umur responden maupun mode persetujuan. Migrasi 024 membuang `organizations.consent_mode`; migrasi 025 membuang `profiles.consent_mode`, `profiles.respondent_age_category`, dan `organizations.respondent_age_category`.
 - `policy_url` dan `terms_url` harus dapat diakses tanpa login.
 - Profil hanya mengubah policy, consent, dan teks UI; tidak mengubah skema respons atau format ekspor.
 - Development memakai organisasi dan profil platform sintetis. Profil produksi diisi pengendali sebelum data nyata. `platform_profile` hanya boleh berisi satu baris (`CHECK (id = 'platform')`).
