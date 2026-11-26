@@ -18,3 +18,4 @@ server/test/.tmp-*
 
 # Skrip/log sementara sesi kerja (dev server lokal)
 tmp/
+.scratch/

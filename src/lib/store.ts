@@ -461,13 +461,13 @@ export async function replayEvent(eventId: string): Promise<void> {
   await refreshBootstrap();
 }
 
-export async function loadAdminStats(): Promise<void> {
+export async function loadAdminStats(range: api.ChartRange = '6m'): Promise<void> {
   const request = ++statsRequest;
   stats = null;
   statsError = null;
   emit();
   try {
-    const next = await api.adminStats();
+    const next = await api.adminStats(range);
     if (request !== statsRequest) return;
     stats = next;
   } catch (cause) {

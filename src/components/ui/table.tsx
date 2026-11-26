@@ -1,11 +1,38 @@
-import type { ComponentProps } from 'react';
+import type { ComponentProps, Ref } from 'react';
 import { cn } from '../../lib/utils';
 
 /** Primitif tabel gaya shadcn bertoken Svara; perilaku (sorting, pagination) ada di data-table. */
-export function Table({ className, ...props }: ComponentProps<'table'>) {
+export function Table({
+  className,
+  scrollRegionLabel,
+  viewportRef,
+  measureKey,
+  ...props
+}: ComponentProps<'table'> & {
+  /**
+   * Bila diisi, kontainer geser menjadi region berfokus dan berlabel, sehingga pengguna keyboard
+   * bisa menggeser kolom yang berada di luar viewport.
+   */
+  scrollRegionLabel?: string;
+  /** Kontainer geser; pemanggil mengukurnya untuk tahu isi tabel melebihi lebar. */
+  viewportRef?: Ref<HTMLDivElement>;
+  /**
+   * Dipakai sebagai dependency effect pengukuran: visibilitas kolom, jumlah baris, dan lebar
+   * sel berubah tanpa mengubah ukuran kontainer, jadi ResizeObserver saja akan basi.
+   */
+  measureKey?: unknown;
+}) {
+  void measureKey; // dependency effect di pemanggil (`useOverflowX`), bukan sisi DOM
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
-      <table data-slot="table" className={cn('w-full caption-bottom text-body-sm', className)} {...props} />
+    <div
+      ref={viewportRef}
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ad-accent)]"
+      {...(scrollRegionLabel
+        ? { role: 'region', 'aria-label': scrollRegionLabel, tabIndex: 0 }
+        : {})}
+    >
+      <table data-slot="table" className={cn('w-full caption-top text-body-sm', className)} {...props} />
     </div>
   );
 }
@@ -33,14 +60,14 @@ export function TableHead({ className, scope = 'col', ...props }: ComponentProps
     <th
       data-slot="table-head"
       scope={scope}
-      className={cn('h-10 px-3 text-start align-middle text-caption font-bold whitespace-nowrap text-[var(--ad-muted)]', className)}
+      className={cn('h-11 px-3 text-start align-middle text-caption font-bold whitespace-nowrap text-[color:var(--ad-muted)]', className)}
       {...props}
     />
   );
 }
 
 export function TableCell({ className, ...props }: ComponentProps<'td'>) {
-  return <td data-slot="table-cell" className={cn('px-3 py-2.5 align-middle text-[var(--ad-text)]', className)} {...props} />;
+  return <td data-slot="table-cell" className={cn('px-3 py-2.5 align-middle text-[color:var(--ad-text)]', className)} {...props} />;
 }
 
 export function TableCaption({ className, ...props }: ComponentProps<'caption'>) {

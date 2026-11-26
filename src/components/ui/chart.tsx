@@ -1,8 +1,15 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useId, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
-import * as RechartsPrimitive from 'recharts';
-import { cn } from '../../lib/utils';
+import {
+  createContext,
+  useContext,
+  useId,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import * as RechartsPrimitive from "recharts";
+import { cn } from "../../lib/utils";
 
 /**
  * Versi ringkas chart shadcn: ChartConfig mendeklarasikan label + warna per seri; warna disuntik
@@ -14,7 +21,8 @@ const ChartContext = createContext<{ config: ChartConfig } | null>(null);
 
 function useChart() {
   const context = useContext(ChartContext);
-  if (!context) throw new Error('useChart harus dipakai di dalam <ChartContainer />');
+  if (!context)
+    throw new Error("useChart harus dipakai di dalam <ChartContainer />");
   return context;
 }
 
@@ -24,9 +32,9 @@ export function ChartContainer({
   children,
   config,
   ...props
-}: ComponentProps<'div'> & { config: ChartConfig; children: ReactNode }) {
+}: ComponentProps<"div"> & { config: ChartConfig; children: ReactNode }) {
   const uniqueId = useId();
-  const chartId = `chart-${id ?? uniqueId.replace(/:/g, '')}`;
+  const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`;
   const style = Object.fromEntries(
     Object.entries(config)
       .filter(([, value]) => value.color)
@@ -39,12 +47,14 @@ export function ChartContainer({
         data-chart={chartId}
         style={style}
         className={cn(
-          'flex w-full justify-center text-caption [&_.recharts-cartesian-axis-tick-value]:fill-[var(--ad-muted)] [&_.recharts-cartesian-grid_line]:stroke-[var(--ad-border)] [&_.recharts-tooltip-cursor]:stroke-[var(--ad-border)]',
+          "flex min-h-0 w-full justify-center text-caption [&_.recharts-responsive-container]:min-h-0 [&_.recharts-cartesian-axis-tick-value]:fill-[var(--ad-muted)] [&_.recharts-cartesian-grid_line]:stroke-[var(--ad-border)] [&_.recharts-tooltip-cursor]:stroke-[var(--ad-border)]",
           className,
         )}
         {...props}
       >
-        <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
+        <RechartsPrimitive.ResponsiveContainer>
+          {children}
+        </RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
   );
@@ -78,20 +88,30 @@ export function ChartTooltipContent({
   return (
     <div
       className={cn(
-        'grid min-w-[8rem] gap-1.5 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] px-2.5 py-1.5 text-caption shadow-overlay',
+        "grid min-w-[8rem] gap-1.5 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] px-2.5 py-1.5 text-caption shadow-overlay",
         className,
       )}
     >
       {label !== undefined && (
-        <div className="font-bold text-[var(--ad-text)]">{labelFormatter ? labelFormatter(label) : label}</div>
+        <div className="font-bold text-[color:var(--ad-text)]">
+          {labelFormatter ? labelFormatter(label) : label}
+        </div>
       )}
       {payload.map((item, index) => {
         const key = String(item.dataKey ?? item.name ?? index);
         return (
           <div key={key} className="flex items-center gap-2">
-            <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[2px]" style={{ background: item.color ?? `var(--color-${key})` }} />
-            <span className="text-[var(--ad-muted)]">{config[key]?.label ?? item.name ?? key}</span>
-            <span className="ml-auto font-mono font-bold text-[var(--ad-text)]">{item.value}</span>
+            <span
+              aria-hidden="true"
+              className="size-2.5 shrink-0 rounded-[2px]"
+              style={{ background: item.color ?? `var(--color-${key})` }}
+            />
+            <span className="text-[color:var(--ad-muted)]">
+              {config[key]?.label ?? item.name ?? key}
+            </span>
+            <span className="ml-auto font-mono font-bold text-[color:var(--ad-text)]">
+              {item.value}
+            </span>
           </div>
         );
       })}
@@ -102,17 +122,31 @@ export function ChartTooltipContent({
 export const ChartLegend = RechartsPrimitive.Legend;
 
 /** Legenda: swatch + label per seri, di bawah grafik. */
-export function ChartLegendContent({ payload, className }: { payload?: TooltipItem[]; className?: string }) {
+export function ChartLegendContent({
+  payload,
+  className,
+}: {
+  payload?: TooltipItem[];
+  className?: string;
+}) {
   const { config } = useChart();
   if (!payload?.length) return null;
   return (
-    <div className={cn('flex items-center justify-center gap-4 pt-3', className)}>
+    <div
+      className={cn("flex items-center justify-center gap-4 pt-3", className)}
+    >
       {payload.map((item, index) => {
         const key = String(item.dataKey ?? index);
         return (
           <div key={key} className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[2px]" style={{ background: item.color ?? `var(--color-${key})` }} />
-            <span className="text-caption text-[var(--ad-muted)]">{config[key]?.label ?? item.name ?? key}</span>
+            <span
+              aria-hidden="true"
+              className="size-2.5 shrink-0 rounded-[2px]"
+              style={{ background: item.color ?? `var(--color-${key})` }}
+            />
+            <span className="text-caption text-[color:var(--ad-muted)]">
+              {config[key]?.label ?? item.name ?? key}
+            </span>
           </div>
         );
       })}

@@ -6,7 +6,7 @@ export function Card({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       data-slot="card"
-      className={cn('flex flex-col gap-6 rounded-lg border border-[var(--ad-border)] bg-[var(--ad-surface)] py-6 text-[var(--ad-text)] shadow-raised', className)}
+      className={cn('flex flex-col gap-6 rounded-lg border border-[var(--ad-border)] bg-[var(--ad-surface)] py-6 text-[color:var(--ad-text)] shadow-raised', className)}
       {...props}
     />
   );
@@ -27,7 +27,7 @@ export function CardTitle({ className, ...props }: ComponentProps<'div'>) {
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="card-description" className={cn('text-body-sm text-[var(--ad-muted)]', className)} {...props} />;
+  return <div data-slot="card-description" className={cn('text-body-sm text-[color:var(--ad-muted)]', className)} {...props} />;
 }
 
 /** Slot kanan atas header (mis. badge tren), sejajar dengan judul dan deskripsi. */

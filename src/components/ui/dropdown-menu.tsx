@@ -111,7 +111,7 @@ export function DropdownMenuContent({
 }
 
 const menuItemClass =
-  'flex min-h-[36px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-body-sm text-[var(--ad-text)] transition-colors duration-fast hover:bg-[var(--ad-soft)]';
+  'flex min-h-[44px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-body-sm text-[color:var(--ad-text)] transition-colors duration-fast hover:bg-[var(--ad-soft)]';
 
 export function DropdownMenuItem({
   className,
@@ -161,7 +161,7 @@ export function DropdownMenuCheckboxItem({
         aria-hidden="true"
         className={cn(
           'flex size-4 shrink-0 items-center justify-center rounded-[4px] border',
-          checked ? 'border-[var(--ad-accent)] bg-[var(--ad-accent)] text-[var(--ad-accent-contrast)]' : 'border-[var(--ad-border)]',
+          checked ? 'border-[var(--ad-accent)] bg-[var(--ad-accent)] text-[color:var(--ad-accent-contrast)]' : 'border-[var(--ad-border)]',
         )}
       >
         {checked && (
@@ -176,7 +176,7 @@ export function DropdownMenuCheckboxItem({
 }
 
 export function DropdownMenuLabel({ className, children }: { className?: string; children: ReactNode }) {
-  return <p className={cn('px-2 py-1.5 text-caption font-bold text-[var(--ad-muted)]', className)}>{children}</p>;
+  return <p className={cn('px-2 py-1.5 text-caption font-bold text-[color:var(--ad-muted)]', className)}>{children}</p>;
 }
 
 export function DropdownMenuSeparator() {

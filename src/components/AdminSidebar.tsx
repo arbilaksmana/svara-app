@@ -1,20 +1,19 @@
 'use client';
 
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  Building2,
-  ChevronsUpDown,
-  Inbox,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Plug,
-  ScrollText,
-  Users,
-  X,
-} from 'lucide-react';
+import { LayoutGrid } from 'runeicons-react/icons/LayoutGrid';
+import { Earth } from 'runeicons-react/icons/Earth';
+import { Users } from 'runeicons-react/icons/Users';
+import { FileText } from 'runeicons-react/icons/FileText';
+import { Link2 } from 'runeicons-react/icons/Link2';
+import { Inbox } from 'runeicons-react/icons/Inbox';
+import { UnfoldVertical } from 'runeicons-react/icons/UnfoldVertical';
+import { LogOut } from 'runeicons-react/icons/LogOut';
+import { Menu } from 'runeicons-react/icons/Menu';
+import { X } from 'runeicons-react/icons/X';
+import { withIconClass, type ClassIcon } from './rune-icon';
 import { BrandMark } from './Brand';
 import { useToast } from './Toast';
 import { ROUTES } from '../lib/routes';
@@ -30,31 +29,37 @@ import {
 } from './ui/dropdown-menu';
 
 /**
- * Sidebar admin gaya shadcn — chrome khusus halaman Ringkasan super admin (/admin).
+ * Sidebar admin gaya shadcn — chrome seluruh halaman super admin (/admin, /admin/accounts,
+ * /admin/platform, /admin/audit, /admin/integration, /admin/requests).
  * Desktop: kolom tetap 256px di kiri. Mobile: bar atas tipis dengan tombol menu yang membuka drawer.
- * Halaman admin lain tetap memakai chrome lama (pill + sidebar Shell).
+ * Halaman organisasi (/admin/org*) dan peran lain tetap memakai chrome lama (pill + sidebar Shell).
  */
 
-type AdminNavEntry = NavEntry & { icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }> };
+type AdminNavEntry = NavEntry & { icon: ClassIcon };
 
 const NAV_GROUPS: Array<{ label: string; items: AdminNavEntry[] }> = [
   {
     label: 'Platform',
     items: [
-      { to: ROUTES.admin, label: 'Ringkasan', icon: LayoutDashboard },
-      { to: ROUTES.adminPlatform, label: 'Profil platform', icon: Building2 },
+      { to: ROUTES.admin, label: 'Ringkasan', icon: withIconClass(LayoutGrid) },
+      { to: ROUTES.adminPlatform, label: 'Profil platform', icon: withIconClass(Earth) },
     ],
   },
   {
     label: 'Operasional',
     items: [
-      { to: ROUTES.adminAccounts, label: 'Akun & izin', icon: Users },
-      { to: ROUTES.adminAudit, label: 'Log audit', icon: ScrollText },
-      { to: ROUTES.adminIntegration, label: 'Integrasi', icon: Plug },
-      { to: ROUTES.adminRequests, label: 'Permintaan data', icon: Inbox },
+      { to: ROUTES.adminAccounts, label: 'Akun & izin', icon: withIconClass(Users) },
+      { to: ROUTES.adminAudit, label: 'Log audit', icon: withIconClass(FileText) },
+      { to: ROUTES.adminIntegration, label: 'Integrasi', icon: withIconClass(Link2) },
+      { to: ROUTES.adminRequests, label: 'Permintaan data', icon: withIconClass(Inbox) },
     ],
   },
 ];
+
+const UnfoldVerticalIcon = withIconClass(UnfoldVertical);
+const LogOutIcon = withIconClass(LogOut);
+const MenuIcon = withIconClass(Menu);
+const XIcon = withIconClass(X);
 
 const ALL_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 
@@ -65,7 +70,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
     <nav aria-label="Navigasi admin" className="flex flex-col gap-4">
       {NAV_GROUPS.map((group) => (
         <div key={group.label}>
-          <p className="px-3 pb-1 font-mono text-annotation tracking-mono text-[var(--ad-muted)]">{group.label}</p>
+          <p className="px-3 pb-1 text-caption font-bold text-[color:var(--ad-muted)]">{group.label}</p>
           <ul className="flex flex-col gap-0.5">
             {group.items.map((item) => {
               const active = item.to === activeNavTo([item], pathname) && item.to === activeTo;
@@ -82,10 +87,10 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
                       onNavigate?.();
                     }}
                     className={cn(
-                      'flex min-h-[40px] items-center gap-2.5 rounded-md px-3 text-body-sm no-underline transition-colors duration-fast',
+                      'flex min-h-[44px] items-center gap-2.5 rounded-md px-3 text-body-sm no-underline transition-colors duration-fast',
                       active
-                        ? 'bg-[var(--ad-accent-soft)] font-bold text-[var(--ad-accent)]'
-                        : 'font-normal text-[var(--ad-muted)] hover:bg-[var(--ad-soft)] hover:text-[var(--ad-text)]',
+                        ? 'bg-[var(--ad-accent-soft)] font-bold text-[color:var(--ad-accent)]'
+                        : 'font-normal text-[color:var(--ad-muted)] hover:bg-[var(--ad-soft)] hover:text-[color:var(--ad-text)]',
                     )}
                   >
                     <item.icon aria-hidden="true" className="size-4 shrink-0" />
@@ -124,15 +129,15 @@ function UserFooter() {
       >
         <span
           aria-hidden="true"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--ad-accent-soft)] text-caption font-bold text-[var(--ad-accent)]"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--ad-accent-soft)] text-caption font-bold text-[color:var(--ad-accent)]"
         >
           {initials}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-body-sm font-bold text-[var(--ad-text)]">{session.name}</span>
-          <span className="block truncate text-caption text-[var(--ad-muted)]">{session.email}</span>
+          <span className="block truncate text-body-sm font-bold text-[color:var(--ad-text)]">{session.name}</span>
+          <span className="block truncate text-caption text-[color:var(--ad-muted)]">{session.email}</span>
         </span>
-        <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-[var(--ad-muted)]" />
+        <UnfoldVerticalIcon aria-hidden="true" className="size-4 shrink-0 text-[color:var(--ad-muted)]" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-[calc(100%+0.5rem)] min-w-[12rem]">
         <DropdownMenuItem
@@ -144,7 +149,7 @@ function UserFooter() {
             });
           }}
         >
-          <LogOut aria-hidden="true" className="size-4" />
+          <LogOutIcon aria-hidden="true" className="size-4" />
           Keluar
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -159,7 +164,7 @@ function Wordmark() {
       href={ROUTES.admin}
       aria-label="Svara — Ringkasan admin"
       onClick={(event) => { if (!allowNavigation(event, guard)) event.preventDefault(); }}
-      className="inline-flex min-h-[44px] items-center gap-2 text-body font-semibold text-[var(--ad-text)] no-underline"
+      className="inline-flex min-h-[44px] items-center gap-2 text-body font-semibold text-[color:var(--ad-text)] no-underline"
     >
       <BrandMark className="size-6" />
       Svara
@@ -167,7 +172,7 @@ function Wordmark() {
   );
 }
 
-export function AdminSummarySidebar({ pathname }: { pathname: string }) {
+export function AdminSidebar({ pathname }: { pathname: string }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -216,9 +221,9 @@ export function AdminSummarySidebar({ pathname }: { pathname: string }) {
           aria-controls="admin-nav-drawer"
           aria-label={drawerOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
           onClick={() => setDrawerOpen((value) => !value)}
-          className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-[var(--ad-muted)] transition-colors duration-fast hover:bg-[var(--ad-soft)] hover:text-[var(--ad-text)]"
+          className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-[color:var(--ad-muted)] transition-colors duration-fast hover:bg-[var(--ad-soft)] hover:text-[color:var(--ad-text)]"
         >
-          <Menu aria-hidden="true" className="size-5" />
+          <MenuIcon aria-hidden="true" className="size-5" />
         </button>
         <Wordmark />
       </div>
@@ -251,9 +256,9 @@ export function AdminSummarySidebar({ pathname }: { pathname: string }) {
                   setDrawerOpen(false);
                   menuButtonRef.current?.focus();
                 }}
-                className="inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-[var(--ad-muted)] transition-colors duration-fast hover:bg-[var(--ad-soft)] hover:text-[var(--ad-text)]"
+                className="inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-[color:var(--ad-muted)] transition-colors duration-fast hover:bg-[var(--ad-soft)] hover:text-[color:var(--ad-text)]"
               >
-                <X aria-hidden="true" className="size-5" />
+                <XIcon aria-hidden="true" className="size-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-3 py-4">

@@ -2,16 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { Shell } from '../components/Shell';
+import { Banner, Checkbox, Code, Spinner } from '../components/ui';
+import { Button } from '../components/ui/button';
 import {
-  Banner,
-  Button,
   Card,
-  Checkbox,
-  Code,
-  Field,
-  SectionTitle,
-  TextInput,
-} from '../components/ui';
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../components/ui/card';
+import { Field } from '../components/ui/field';
+import { Input } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
@@ -123,98 +125,105 @@ export function AdminPlatformPage() {
           {state === 'validation' && <ValidationSummary items={['Nama organisasi tidak boleh kosong.', 'URL kebijakan dan ketentuan wajib diisi.']} />}
           {loadError && <Banner tone="danger" title="Profil platform tidak dapat dimuat">{loadError}</Banner>}
 
-          <Card className="flex flex-col gap-4">
-            <SectionTitle>Profil platform</SectionTitle>
-            <p className="text-body-sm text-muted">
-              Dipakai akun tanpa organisasi dan survei yang tidak terikat organisasi. Anggota organisasi memakai profil organisasinya sendiri.
-            </p>
-            {saved && <p role="status" className="text-body-sm font-bold text-success">Tersimpan.</p>}
-            {form ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field id="platform-name" label="Nama organisasi" required error={fieldErrors.organization_name}>
-                  {(aria) => (
-                    <TextInput
-                      {...aria}
-                      value={form.organization_name}
-                      onChange={(event) => setField('organization_name', event.target.value)}
+          <Card>
+            <CardHeader>
+              <CardTitle>Profil platform</CardTitle>
+              <CardDescription>
+                Dipakai akun tanpa organisasi dan survei yang tidak terikat organisasi. Anggota organisasi memakai profil organisasinya sendiri.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {saved && <p role="status" className="text-body-sm font-bold text-[color:var(--ad-success)]">Tersimpan.</p>}
+              {form ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field id="platform-name" label="Nama organisasi" required error={fieldErrors.organization_name}>
+                    {(aria) => (
+                      <Input
+                        {...aria}
+                        value={form.organization_name}
+                        onChange={(event) => setField('organization_name', event.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field id="platform-type" label="Tipe organisasi" required>
+                    {(aria) => (
+                      <Select
+                        {...aria}
+                        className="w-full"
+                        value={form.organization_type}
+                        onChange={(event) => setField('organization_type', event.target.value as PlatformType)}
+                      >
+                        {PLATFORM_TYPES.map((value) => (
+                          <option key={value} value={value}>{PLATFORM_TYPE_LABEL[value]}</option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                  <Field id="platform-policy" label="URL kebijakan privasi" required error={fieldErrors.policy_url}>
+                    {(aria) => (
+                      <Input
+                        {...aria}
+                        value={form.policy_url}
+                        onChange={(event) => setField('policy_url', event.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field id="platform-terms" label="URL ketentuan layanan" required error={fieldErrors.terms_url}>
+                    {(aria) => (
+                      <Input
+                        {...aria}
+                        value={form.terms_url}
+                        onChange={(event) => setField('terms_url', event.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    id="platform-retention"
+                    label="Masa retensi (hari)"
+                    hint="Kosongkan bila masih menunggu keputusan pengendali."
+                  >
+                    {(aria) => (
+                      <Input
+                        {...aria}
+                        inputMode="numeric"
+                        value={form.retention_days}
+                        onChange={(event) => setField('retention_days', event.target.value.replace(/[^0-9]/g, ''))}
+                      />
+                    )}
+                  </Field>
+                  <Field id="platform-contact" label="Kontak permintaan data">
+                    {(aria) => (
+                      <Input
+                        {...aria}
+                        value={form.data_request_contact}
+                        onChange={(event) => setField('data_request_contact', event.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <div className="md:col-span-2">
+                    <Checkbox
+                      id="platform-cross-border"
+                      label="Ada transfer data lintas negara"
+                      checked={form.cross_border_transfer}
+                      onChange={(next) => setField('cross_border_transfer', next)}
                     />
-                  )}
-                </Field>
-                <Field id="platform-type" label="Tipe organisasi" required>
-                  {(aria) => (
-                    <select
-                      {...aria}
-                      value={form.organization_type}
-                      onChange={(event) => setField('organization_type', event.target.value as PlatformType)}
-                      className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
-                    >
-                      {PLATFORM_TYPES.map((value) => (
-                        <option key={value} value={value}>{PLATFORM_TYPE_LABEL[value]}</option>
-                      ))}
-                    </select>
-                  )}
-                </Field>
-                <Field id="platform-policy" label="URL kebijakan privasi" required error={fieldErrors.policy_url}>
-                  {(aria) => (
-                    <TextInput
-                      {...aria}
-                      value={form.policy_url}
-                      onChange={(event) => setField('policy_url', event.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field id="platform-terms" label="URL ketentuan layanan" required error={fieldErrors.terms_url}>
-                  {(aria) => (
-                    <TextInput
-                      {...aria}
-                      value={form.terms_url}
-                      onChange={(event) => setField('terms_url', event.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field
-                  id="platform-retention"
-                  label="Masa retensi (hari)"
-                  hint="Kosongkan bila masih menunggu keputusan pengendali."
-                >
-                  {(aria) => (
-                    <TextInput
-                      {...aria}
-                      inputMode="numeric"
-                      value={form.retention_days}
-                      onChange={(event) => setField('retention_days', event.target.value.replace(/[^0-9]/g, ''))}
-                    />
-                  )}
-                </Field>
-                <Field id="platform-contact" label="Kontak permintaan data">
-                  {(aria) => (
-                    <TextInput
-                      {...aria}
-                      value={form.data_request_contact}
-                      onChange={(event) => setField('data_request_contact', event.target.value)}
-                    />
-                  )}
-                </Field>
-                <div className="md:col-span-2">
-                  <Checkbox
-                    id="platform-cross-border"
-                    label="Ada transfer data lintas negara"
-                    checked={form.cross_border_transfer}
-                    onChange={(next) => setField('cross_border_transfer', next)}
-                  />
+                  </div>
                 </div>
-              </div>
-            ) : (
-              !loadError && <p className="text-body-sm text-muted">Profil platform belum dimuat.</p>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={onSave} loading={busy} disabled={!form || busy}>Simpan profil</Button>
-              {profile && (
-                <p className="text-caption text-muted">
-                  Versi pemberitahuan <Code>{profile.notice_version}</Code> · diperbarui {formatWIB(profile.updated_at)}
-                </p>
+              ) : (
+                !loadError && <p className="text-body-sm text-[color:var(--ad-muted)]">Profil platform belum dimuat.</p>
               )}
-            </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={onSave} disabled={!form || busy} aria-busy={busy}>
+                  {busy && <Spinner />}
+                  Simpan profil
+                </Button>
+                {profile && (
+                  <p className="text-caption text-[color:var(--ad-muted)]">
+                    Versi pemberitahuan <Code>{profile.notice_version}</Code> · diperbarui {formatWIB(profile.updated_at)}
+                  </p>
+                )}
+              </div>
+            </CardContent>
           </Card>
         </div>
       </StateView>
