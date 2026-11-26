@@ -154,7 +154,7 @@ scripts/         Smoke test web
 
 Tenancy bersandar pada dua tabel kebijakan dan dua kolom kepemilikan:
 
-- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/024_survey_consent_requirement.sql`). Kolom warisan `respondent_age_category`/`consent_mode` dibuang lewat `server/migrations/025_drop_profile_legacy_consent_columns.sql`.
+- `organizations` berisi satu baris per organisasi pelanggan: `name`, `organization_type`, `policy_url`, `terms_url`, `retention_days`, `data_request_contact`, `cross_border_transfer`, dan `notice_version` (`server/migrations/005_organizations.sql`, `server/migrations/024_survey_consent_requirement.sql`). `organizations.consent_mode` dibuang lewat migrasi 024; kolom warisan `organizations.respondent_age_category` tetap ada di skema tetapi tidak dibaca/ditulis. Kolom warisan di `profiles` (`respondent_age_category`, `consent_mode`) dibuang lewat `server/migrations/025_drop_profile_legacy_consent_columns.sql`.
 - `platform_profile` hanya boleh berisi satu baris ber-`id='platform'` (`CHECK (id = 'platform')`) dan tidak memiliki `respondent_age_category` maupun `consent_mode` (`server/migrations/005_organizations.sql`).
 - `accounts.organization_id` dan `surveys.organization_id` menautkan akun dan survei ke organisasi; keduanya dapat NULL (`server/migrations/005_organizations.sql`).
 
