@@ -23,7 +23,6 @@ import { Avatar, AvatarFallback } from './ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -159,12 +158,6 @@ function NavUser() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <Link href={ROUTES.home}>Buka situs Svara</Link>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
               onSelect={() => {
@@ -198,9 +191,7 @@ function Wordmark() {
               if (!allowNavigation(event, guard)) event.preventDefault();
             }}
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <BrandMark className="size-5" />
-            </span>
+            <BrandMark className="size-8 shrink-0" />
             <span className="grid flex-1 text-start text-base leading-tight">
               <span className="truncate font-semibold">Svara</span>
               <span className="truncate text-xs text-muted-foreground">Super admin</span>

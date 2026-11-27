@@ -18,6 +18,11 @@ import {
 } from "../components/ui/dialog";
 import { Skeleton } from "../components/ui/skeleton";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../components/ui/tooltip";
+import {
   StateView,
   SuccessBanner,
   ValidationSummary,
@@ -79,7 +84,11 @@ import { Clock } from "runeicons-react/icons/Clock";
 import { Users } from "runeicons-react/icons/Users";
 import { Group } from "runeicons-react/icons/Group";
 import { ShieldCheck } from "runeicons-react/icons/ShieldCheck";
+import { Check } from "runeicons-react/icons/Check";
 import { UserMinus } from "runeicons-react/icons/UserMinus";
+import { UserPlus } from "runeicons-react/icons/UserPlus";
+import { Eye } from "runeicons-react/icons/Eye";
+import { EyeClosed } from "runeicons-react/icons/EyeClosed";
 import { withIconClass } from "../components/rune-icon";
 import {
   cancelAdminStatsLoad,
@@ -134,6 +143,10 @@ const ResponsesIcon = withIconClass(ChartLine);
 const AccountsIcon = withIconClass(Users);
 const ActiveAccountsIcon = withIconClass(ShieldCheck);
 const SuspendedAccountsIcon = withIconClass(UserMinus);
+const ActivatedAccountsIcon = withIconClass(UserPlus);
+const ActiveStatusIcon = withIconClass(Check);
+const EyeIcon = withIconClass(Eye);
+const EyeClosedIcon = withIconClass(EyeClosed);
 const OrganizationsIcon = withIconClass(Group);
 const PendingIcon = withIconClass(Clock);
 
@@ -214,7 +227,7 @@ function LoadingState({ label = "Memuat data contoh…", rows = 3 }: { label?: s
 /** Galat layar: Alert shadcn varian danger. */
 function ErrorState({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
   return (
-    <Alert variant="danger" className="flex flex-col items-start gap-3">
+    <Alert variant="destructive" className="flex flex-col items-start gap-3">
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="text-body-sm">
         <p>{detail}</p>
@@ -267,8 +280,8 @@ function accountColumns({
       header: "Akun",
       cell: ({ row }) => (
         <div className="flex min-w-0 items-center gap-3">
-          <Avatar className="size-9 bg-primary/10">
-            <AvatarFallback className="bg-transparent text-annotation font-bold text-primary">
+          <Avatar className="size-9 bg-muted">
+            <AvatarFallback className="text-annotation font-bold text-muted-foreground">
               {initials(row.original.display_name)}
             </AvatarFallback>
           </Avatar>
@@ -369,6 +382,7 @@ function accountColumns({
         <Badge
           variant={row.original.status === "active" ? "success" : "secondary"}
           className="gap-1.5"
+          title={ACCOUNT_STATUS_LABEL[row.original.status]}
         >
           <span
             aria-hidden="true"
@@ -377,7 +391,12 @@ function accountColumns({
               row.original.status === "active" ? "bg-emerald-600" : "bg-muted-foreground",
             )}
           />
-          {ACCOUNT_STATUS_LABEL[row.original.status]}
+          {row.original.status === "active" ? (
+            <ActiveStatusIcon className="size-3" />
+          ) : (
+            <SuspendedAccountsIcon className="size-3" />
+          )}
+          <span className="sr-only">{ACCOUNT_STATUS_LABEL[row.original.status]}</span>
         </Badge>
       ),
     },
@@ -394,20 +413,38 @@ function accountColumns({
       cell: ({ row }) => {
         const account = row.original;
         return (
-          <BusyButton
-            variant="ghost"
-            loading={accountBusy === account.id}
-            disabled={
-              accountBusy === account.id ||
-              sessionId === account.id ||
-              mutationsBlocked
-            }
-            onClick={() =>
-              onToggleStatus(account.id, account.display_name, account.status)
-            }
-          >
-            {account.status === "active" ? "Nonaktifkan" : "Aktifkan"}
-          </BusyButton>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <BusyButton
+                variant="ghost"
+                size="icon"
+                className={
+                  account.status === "active"
+                    ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    : "text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                }
+                aria-label={`${account.status === "active" ? "Nonaktifkan" : "Aktifkan"} ${account.display_name}`}
+                loading={accountBusy === account.id}
+                disabled={
+                  accountBusy === account.id ||
+                  sessionId === account.id ||
+                  mutationsBlocked
+                }
+                onClick={() =>
+                  onToggleStatus(account.id, account.display_name, account.status)
+                }
+              >
+                {account.status === "active" ? (
+                  <SuspendedAccountsIcon className="size-4" />
+                ) : (
+                  <ActivatedAccountsIcon className="size-4" />
+                )}
+              </BusyButton>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {account.status === "active" ? "Nonaktifkan akun" : "Aktifkan akun"}
+            </TooltipContent>
+          </Tooltip>
         );
       },
     },
@@ -920,6 +957,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
     adminPassword: "",
   });
   const [orgBusy, setOrgBusy] = useState(false);
+  const [orgPasswordVisible, setOrgPasswordVisible] = useState(false);
   const [orgError, setOrgError] = useState<string | null>(null);
   const organizationsShown = organizations.filter(
     (organization) =>
@@ -1150,6 +1188,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                   }}
                   caption="Akun pengelola: peran, organisasi, status, cakupan, dan aksi"
                   emptyMessage="Belum ada akun."
+                  cellClassName="px-3"
                 />
               </div>
 
@@ -1161,8 +1200,8 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-3">
-                      <Avatar className="size-9 bg-primary/10">
-                        <AvatarFallback className="bg-transparent text-annotation font-bold text-primary">
+                      <Avatar className="size-9 bg-muted">
+                        <AvatarFallback className="text-annotation font-bold text-muted-foreground">
                           {initials(a.display_name)}
                         </AvatarFallback>
                       </Avatar>
@@ -1183,6 +1222,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                     <Badge
                       variant={a.status === "active" ? "success" : "secondary"}
                       className="gap-1.5"
+                      title={ACCOUNT_STATUS_LABEL[a.status]}
                     >
                       <span
                         aria-hidden="true"
@@ -1191,7 +1231,12 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                           a.status === "active" ? "bg-emerald-600" : "bg-muted-foreground",
                         )}
                       />
-                      {ACCOUNT_STATUS_LABEL[a.status]}
+                      {a.status === "active" ? (
+                        <ActiveStatusIcon className="size-3" />
+                      ) : (
+                        <SuspendedAccountsIcon className="size-3" />
+                      )}
+                      <span className="sr-only">{ACCOUNT_STATUS_LABEL[a.status]}</span>
                     </Badge>
                   </div>
                   <label className="flex flex-col gap-1 text-caption font-bold text-muted-foreground">
@@ -1334,8 +1379,8 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                       className="flex flex-col gap-3 rounded-lg border border-border p-4"
                     >
                       <div className="flex items-start gap-3">
-                        <Avatar className="size-10 rounded-md bg-primary/10">
-                          <AvatarFallback className="rounded-md bg-transparent text-primary">
+                        <Avatar className="size-10 rounded-md bg-muted">
+                          <AvatarFallback className="rounded-md text-muted-foreground">
                             <OrganizationsIcon aria-hidden="true" className="size-5" />
                           </AvatarFallback>
                         </Avatar>
@@ -1469,23 +1514,43 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                   hint="12–256 karakter, minimal tiga dari: huruf kecil, huruf besar, angka, simbol."
                 >
                   {(aria) => (
-                    <Input
-                      {...aria}
-                      type="password"
-                      value={orgForm.adminPassword}
-                      onChange={(event) =>
-                        setOrgForm((current) => ({
-                          ...current,
-                          adminPassword: event.target.value,
-                        }))
-                      }
-                      autoComplete="new-password"
-                    />
+                    <div className="relative">
+                      <Input
+                        {...aria}
+                        type={orgPasswordVisible ? "text" : "password"}
+                        className="pr-11"
+                        value={orgForm.adminPassword}
+                        onChange={(event) =>
+                          setOrgForm((current) => ({
+                            ...current,
+                            adminPassword: event.target.value,
+                          }))
+                        }
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        aria-label={
+                          orgPasswordVisible
+                            ? "Sembunyikan kata sandi"
+                            : "Tampilkan kata sandi"
+                        }
+                        aria-pressed={orgPasswordVisible}
+                        onClick={() => setOrgPasswordVisible((value) => !value)}
+                        className="absolute inset-y-0 end-1 my-auto inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                      >
+                        {orgPasswordVisible ? (
+                          <EyeClosedIcon className="size-4" />
+                        ) : (
+                          <EyeIcon className="size-4" />
+                        )}
+                      </button>
+                    </div>
                   )}
                 </Field>
               </div>
               {orgError && (
-                <Alert variant="danger" role="status">
+                <Alert variant="destructive" role="status">
                   <AlertTitle>Tidak dapat membuat organisasi</AlertTitle>
                   <AlertDescription>{orgError}</AlertDescription>
                 </Alert>
@@ -1548,8 +1613,8 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
-                      <Avatar className="size-8 bg-primary/10">
-                        <AvatarFallback className="bg-transparent text-annotation font-bold text-primary">
+                      <Avatar className="size-8 bg-muted">
+                        <AvatarFallback className="text-annotation font-bold text-muted-foreground">
                           {initials(acc?.display_name ?? g.account_id)}
                         </AvatarFallback>
                       </Avatar>
@@ -1788,10 +1853,9 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
               </BusyButton>
             </div>
             {saved && (
-              <Alert variant="success" role="status">
-                <AlertTitle>Izin tersimpan</AlertTitle>
-                <AlertDescription>Perubahan berlaku pada workspace ini.</AlertDescription>
-              </Alert>
+              <SuccessBanner title="Izin tersimpan">
+                Perubahan berlaku pada workspace ini.
+              </SuccessBanner>
             )}
             </CardContent>
           </Card>
@@ -2374,7 +2438,6 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
   const { integrationNote } = useStore();
   const [replayed, setReplayed] = useState<string | null>(null);
   const [busyEvent, setBusyEvent] = useState<string | null>(null);
-  const [retryError, setRetryError] = useState<string | null>(null);
   const [status, setStatus] = useState<EventFilter>("all");
   const [query, setQuery] = useState("");
   const statusCounts = integrationEvents.reduce<Record<EventStatus, number>>(
@@ -2404,7 +2467,6 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
 
   const handleReplay = (event: IntegrationEvent) => {
     setBusyEvent(event.id);
-    setRetryError(null);
     void replayEvent(event.id)
       .then(() => {
         setReplayed(event.id);
@@ -2413,7 +2475,6 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
       .catch((error: unknown) => {
         const message =
           error instanceof Error ? error.message : "Event gagal diulang.";
-        setRetryError(message);
         notify(message, "danger");
       })
       .finally(() => setBusyEvent(null));
@@ -2434,12 +2495,6 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
             <SuccessBanner title="Event berhasil diulang">
               ID kejadian tetap dipakai dan tidak membuat respons kedua.
             </SuccessBanner>
-          )}
-          {retryError && (
-            <Alert variant="danger" role="status">
-              <AlertTitle>Pengulangan tidak membuktikan pengiriman</AlertTitle>
-              <AlertDescription>{retryError}</AlertDescription>
-            </Alert>
           )}
           <Card>
             <CardHeader>
@@ -3006,7 +3061,7 @@ function RequestForm({
           </div>
         </div>
         {saveError && (
-          <Alert variant="danger" role="status">
+          <Alert variant="destructive" role="status">
             <AlertTitle>Perubahan belum tersimpan</AlertTitle>
             <AlertDescription>{saveError}</AlertDescription>
           </Alert>

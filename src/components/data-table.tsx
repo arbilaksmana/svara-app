@@ -72,6 +72,7 @@ export function DataTable<TData, TValue>({
   toolbarExtra,
   filter: filterProp,
   onFilterChange,
+  cellClassName,
 }: {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -96,6 +97,8 @@ export function DataTable<TData, TValue>({
   filter?: string;
   /** Perubahan pencarian saat nilai dikendalikan pemanggil. */
   onFilterChange?: (value: string) => void;
+  /** Padding horizontal tambahan untuk sel dan tajuk, mis. "px-3" pada tabel padat 6 kolom. */
+  cellClassName?: string;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -252,6 +255,7 @@ export function DataTable<TData, TValue>({
                   return (
                     <TableHead
                       key={header.id}
+                      className={cellClassName}
                       aria-sort={
                         sorted === "asc"
                           ? "ascending"
@@ -307,7 +311,7 @@ export function DataTable<TData, TValue>({
                   data-state={row.getIsSelected() ? "selected" : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className={cellClassName}>
                       {flexRender(
                         cell.column.columnDef.cell,
                         cell.getContext(),
