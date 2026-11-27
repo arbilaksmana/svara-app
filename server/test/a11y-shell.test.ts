@@ -13,6 +13,7 @@ import { HomePage } from '../../src/screens/Landing.tsx';
 import { LoginPage, PrivacyPage } from '../../src/screens/Public.tsx';
 import { RegisterPage } from '../../src/screens/Register.tsx';
 import { refreshBootstrap } from '../../src/lib/store.ts';
+import { ROUTES } from '../../src/lib/routes.ts';
 import type { BootstrapData } from '../../src/lib/api.ts';
 
 const unexpectedNavigation = () => { throw new Error('Render tidak boleh melakukan navigasi'); };
@@ -59,12 +60,28 @@ function classes(tag: string): string[] {
   return (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? '').split(/\s+/).filter(Boolean);
 }
 
+/* Alias `--ad-*` (scope .admin-dash) beserta token `--color-*` yang dirujuknya. */
+const AD_ALIASES = new Map(
+  [...readFileSync(new URL('../../src/app/globals.css', import.meta.url), 'utf8')
+    .matchAll(/--ad-([\w-]+):\s*var\(--color-([\w-]+)\)\s*;/g)]
+    .map(([, alias, color]) => [alias!, color!]),
+);
+
+/** Utility arbitrary-value untuk alias, mis. `border-[var(--ad-border)]` → `n200`. */
+function aliasColorToken(name: string, utility: 'border' | 'bg' | 'text'): string | undefined {
+  const prefix = `${utility}-[var(--ad-`;
+  return name.startsWith(prefix) && name.endsWith(')]') ? AD_ALIASES.get(name.slice(prefix.length, -2)) : undefined;
+}
+
 /** Token warna dari utility tanpa varian, mis. `border-control-border` → `control-border`. */
 function colorToken(tag: string, utility: 'border' | 'bg' | 'text'): string | undefined {
-  return classes(tag)
-    .filter((name) => name.startsWith(`${utility}-`))
-    .map((name) => name.slice(utility.length + 1))
-    .find((name) => COLORS.has(name));
+  for (const name of classes(tag)) {
+    if (!name.startsWith(`${utility}-`)) continue;
+    const rest = name.slice(utility.length + 1);
+    const token = COLORS.has(rest) ? rest : aliasColorToken(name, utility);
+    if (token && COLORS.has(token)) return token;
+  }
+  return undefined;
 }
 
 /** Utility yang hanya mengubah warna (termasuk varian seperti `hover:`), mis. `text-n0`, `hover:text-n0`. */
@@ -187,7 +204,7 @@ test('UIX-14: semua select, textarea, dan input di src memakai token batas denga
       checked.set(name, (checked.get(name) ?? 0) + 1);
     }
   }
-  const minimums = [['screens/Admin.tsx', 7], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2], ['components/ui.tsx', 2]] as const;
+  const minimums = [['components/ui.tsx', 2], ['components/ui/input.tsx', 1], ['components/ui/select.tsx', 1], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2]] as const;
   for (const [file, minimum] of minimums) {
     const found = checked.get(file) ?? 0;
     assert.ok(found >= minimum, `Pemindaian harus memeriksa ≥ ${minimum} kontrol bertoken batas di ${file}, ditemukan ${found}`);
@@ -224,10 +241,12 @@ test('UIX-16: heading landing dan halaman masuk boleh patah baris pada teks 200%
   }
 });
 
-test('UIX-25: item navigasi desktop aktif memakai aria-current dan penanda selain warna', async (t) => {
+test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda selain warna', async (t) => {
   await signInAs('super_admin', t.mock);
   const html = render(createElement(Shell, { kind: 'admin', title: 'Ringkasan', children: 'isi' }), '/admin');
-  const nav = /<nav\b[^>]*aria-label="Navigasi utama"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? '';
+  // Halaman Ringkasan memakai sidebar admin bergrup, bukan pill lama.
+  const nav = /<nav\b[^>]*aria-label="Navigasi admin"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? '';
+  assert.ok(nav, 'Ringkasan super admin harus merender sidebar admin');
   const links = [...nav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
   assert.ok(links.length > 1, 'Navigasi admin harus memuat beberapa item');
   const active = links.filter((a) => /\baria-current="page"/.test(a));
@@ -238,4 +257,29 @@ test('UIX-25: item navigasi desktop aktif memakai aria-current dan penanda selai
   const inactiveClasses = new Set(classes(inactive));
   const marker = classes(active[0]!).filter((name) => !inactiveClasses.has(name) && !isColorOnly(name));
   assert.ok(marker.length > 0, `Item aktif hanya dibedakan warna: ${classes(active[0]!).join(' ')}`);
+
+  // Seluruh halaman super admin memakai sidebar bergrup dengan tepat satu item aktif.
+  const CHROME_PAGES: Array<[string, string]> = [
+    [ROUTES.admin, 'Ringkasan'],
+    [ROUTES.adminAccounts, 'Akun &amp; izin'],
+    [ROUTES.adminPlatform, 'Profil platform'],
+    [ROUTES.adminAudit, 'Log audit'],
+    [ROUTES.adminIntegration, 'Integrasi'],
+    [ROUTES.adminRequests, 'Permintaan data'],
+  ];
+  for (const [pathname, label] of CHROME_PAGES) {
+    const chromeHtml = render(createElement(Shell, { kind: 'admin', title: label, children: 'isi' }), pathname);
+    const nav = /<nav\b[^>]*aria-label="Navigasi admin"[^>]*>[\s\S]*?<\/nav>/.exec(chromeHtml)?.[0] ?? '';
+    assert.ok(nav, `${pathname} harus merender sidebar admin`);
+    const items = [...nav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
+    const current = items.filter((a) => /\baria-current="page"/.test(a));
+    assert.equal(current.length, 1, `${pathname} harus menandai tepat satu item aktif`);
+    assert.match(current[0]!, new RegExp(`>${label}</a>$`));
+  }
+
+  // Halaman di luar chrome (mis. organisasi) tetap memakai pill + sidebar lama, bukan sidebar admin.
+  const org = render(createElement(Shell, { kind: 'admin', title: 'Organisasi', children: 'isi' }), ROUTES.adminOrg);
+  assert.doesNotMatch(org, /aria-label="Navigasi admin"/, 'Chrome admin tidak boleh bocor ke halaman di luar daftar');
+  assert.match(org, /<nav\b[^>]*aria-label="Navigasi utama"/, 'Halaman di luar chrome tetap memakai pill lama');
+  assert.match(org, /aria-label="Navigasi bagian"/, 'Halaman di luar chrome tetap memakai sidebar lama');
 });

@@ -10,9 +10,21 @@ import { useToast } from './Toast';
 import { ROUTES, homeForRole } from '../lib/routes';
 import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
+import { activeNavTo, navPath, type NavEntry } from '../lib/nav';
+import { AdminSidebar } from './AdminSidebar';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
-export type NavEntry = { to: string; label: string };
+export type { NavEntry };
+
+/** Halaman super admin yang memakai chrome dasbor baru (sidebar bergrup). */
+const ADMIN_CHROME_PATHS = new Set<string>([
+  ROUTES.admin,
+  ROUTES.adminAccounts,
+  ROUTES.adminAudit,
+  ROUTES.adminIntegration,
+  ROUTES.adminRequests,
+  ROUTES.adminPlatform,
+]);
 
 /* Tamu memakai tautan bagian landing; anchor absolut agar tetap benar dari halaman lain. */
 const GUEST_NAV: NavEntry[] = [
@@ -28,27 +40,6 @@ const ORG_NAV: NavEntry[] = [
   { to: ROUTES.adminOrgEvidence, label: 'Bukti pendukung' },
   { to: ROUTES.creator, label: 'Daftar survei' },
 ];
-
-/**
- * Entri yang sorot: kecocokan path sama persis, atau awalan path utuh (`/admin/org` juga menaungi
- * `/admin/org/evidence`). Bila beberapa cocok, yang terpanjang menang agar tidak ada sorot ganda.
- */
-function navPath(value: string): string {
-  const path = value.split(/[?#]/u)[0] ?? '';
-  return path.length > 1 ? path.replace(/\/+$/u, '') : path;
-}
-
-function activeNavTo(entries: NavEntry[], pathname: string): string | undefined {
-  const path = navPath(pathname);
-  let best: NavEntry | undefined;
-  for (const entry of entries) {
-    const to = navPath(entry.to);
-    if (path === to || path.startsWith(to === '/' ? '/' : `${to}/`)) {
-      if (!best || to.length > navPath(best.to).length) best = entry;
-    }
-  }
-  return best?.to;
-}
 
 const NAV: Record<ShellKind, NavEntry[]> = {
   public: GUEST_NAV,
@@ -329,7 +320,7 @@ export function Shell({
   bottomInset?: boolean;
 }) {
   const pathname = usePathname() ?? '';
-  const { session } = useStore();
+  const { session, ready } = useStore();
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -358,6 +349,43 @@ export function Shell({
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const sidebarActiveTo = activeNavTo(sectionNav, pathname);
   const activePath = kind === 'respondent' ? ROUTES.home : sidebarActiveTo ?? pathname;
+  // Chrome baru untuk SELURUH halaman super admin: peran 'admin' (super_admin sudah dinormalisasi
+  // di store) DAN path salah satu halaman platform/operasional. Halaman organisasi (/admin/org*),
+  // org_admin, creator, dan responden tetap memakai pill + sidebar lama di bawah.
+  // Hanya `session` (hasil bootstrap), bukan `activeSession` (memakai sesi mock saat request
+  // /auth/me awal masih berjalan): sidebar tidak boleh berganti bentuk setelah bootstrap selesai.
+  // Selama bootstrap belum selesai (`ready` false) chrome admin langsung dipakai agar sidebar tidak
+  // berkedip pill lama lebih dulu; peran diverifikasi begitu sesi tersedia.
+  const usesAdminChrome = Boolean(kind === 'admin' && (!ready || session?.role === 'admin'));
+
+  if (!chromeless && usesAdminChrome && ADMIN_CHROME_PATHS.has(navPath(pathname))) {
+    return (
+      <div className="admin-dash flex min-h-dvh flex-col bg-[var(--ad-bg)] text-[color:var(--ad-text)]">
+        <a
+          href="#konten-utama"
+          className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[60] focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-md focus:bg-action focus:px-4 focus:py-2 focus:text-n0"
+        >
+          Lewati ke konten utama
+        </a>
+
+        <AdminSidebar pathname={pathname} />
+
+        <div className="flex min-w-0 flex-1 flex-col lg:ps-64">
+          <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex-1 focus:outline-none">
+            <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 lg:px-8 lg:py-8">
+              {!hideHeading && (
+                <div className="flex flex-col gap-1.5">
+                  <h1 className="text-h1 font-bold wrap-break-word">{title}</h1>
+                  {subtitle && <p className="max-w-[70ch] text-body text-[color:var(--ad-muted)]">{subtitle}</p>}
+                </div>
+              )}
+              {children}
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">

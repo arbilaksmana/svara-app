@@ -83,4 +83,7 @@ test('UIX-02: ringkasan berhasil hanya merender angka dari respons server', asyn
   for (const value of [READY_STATS.surveys, READY_STATS.responses, READY_STATS.accounts, READY_STATS.pendingRequests]) {
     assert.match(html, new RegExp(`>${value}<`), `KPI ${value} harus berasal dari respons server`);
   }
+  // Kartu KPI sengaja hanya label + angka: tanpa lencana tren, teks keterangan, maupun tautan cepat.
+  assert.doesNotMatch(html, /\+100%|>Baru<|Tren 30 hari|Termasuk draf|Buka permintaan/);
+  assert.doesNotMatch(html, /NaN|Infinity|undefined/);
 });

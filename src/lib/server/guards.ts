@@ -43,7 +43,10 @@ export async function accountForCookie(cookie: string): Promise<ServerAccount | 
 }
 
 async function fetchAccount(): Promise<ServerAccount | null> {
-  return accountForCookie((await cookies()).toString());
+  const cookie = (await cookies()).toString();
+  if (cookie) return accountForCookie(cookie);
+  const mock = await import('./guards.mock');
+  return mock.UI_MOCK ? mock.fetchMockAccount() : accountForCookie(cookie);
 }
 
 /**

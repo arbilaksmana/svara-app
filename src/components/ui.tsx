@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, MouseEvent, ReactNode, Ref, TextareaHTMLAttributes } from 'react';
 import Link from 'next/link';
 import { StateLink } from '../lib/state';
@@ -477,6 +477,25 @@ export function BlockedNotice({ state }: { state: 'closed' | 'expired' | 'revoke
 
 /* ---------- Tabel ---------- */
 
+/**
+ * Petunjuk geser mengikuti fakta, bukan tebakan breakpoint: satu tabel bisa muat di lebar yang
+ * membuat tabel lain menggeser (704px muat, 684px tidak), jadi lebar viewport tidak cukup.
+ */
+function useOverflowX<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => setOverflows(node.scrollWidth > node.clientWidth + 1);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, overflows] as const;
+}
+
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   const minWidth = head.length >= 6
     ? 'min-w-[44rem]'
@@ -485,10 +504,12 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
       : head.length >= 4
         ? 'min-w-[34rem]'
         : '';
+  const [viewportRef, overflows] = useOverflowX<HTMLDivElement>();
   return (
     <div className="min-w-0">
-      {minWidth && <p className="mb-2 text-caption text-muted sm:hidden">Geser tabel ke samping untuk melihat semua kolom.</p>}
+      {overflows && <p className="mb-2 text-caption text-muted">Geser tabel ke samping untuk melihat semua kolom.</p>}
       <div
+        ref={minWidth ? viewportRef : undefined}
         className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0"
         tabIndex={minWidth ? 0 : undefined}
         role={minWidth ? 'region' : undefined}

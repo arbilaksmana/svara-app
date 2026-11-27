@@ -11,6 +11,9 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3001
 WORKDIR /app
+# OPS-06: paket OS base image tertinggal patch keamanan Debian (libpam-modules 1.5.2-6+deb12u2,
+# CVE-2025-6020 HIGH fixable di deb12u3); upgrade sebelum scan Trivy.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 # OPS-06: npm bawaan base image membawa brace-expansion 5.0.9 dan undici 6.28.0 (CVE HIGH fixable).
 RUN npm install -g npm@11.21.3 && npm cache clean --force
 RUN npm install -g --allow-scripts=esbuild tsx@4.23.15

@@ -194,3 +194,29 @@ a,
 button {
   -webkit-tap-highlight-color: transparent;
 }
+
+/*
+ * Scope chrome baru halaman Ringkasan super admin (/admin). Variabel lokal ini hanya dipakai
+ * komponen di bawah scope .admin-dash, sehingga halaman lain tidak terpengaruh. Hanya tema
+ * terang: app belum punya mode gelap.
+ */
+.admin-dash {
+  --ad-bg: var(--color-canvas);
+  --ad-surface: var(--color-n0);
+  --ad-soft: var(--color-n100);
+  --ad-border: var(--color-n200);
+  /* Batas kontrol form (input/select) wajib ≥ 3:1 terhadap permukaannya, jadi memakai token kontrol. */
+  --ad-control-border: var(--color-control-border);
+  --ad-text: var(--color-ink);
+  --ad-muted: var(--color-muted);
+  --ad-accent: var(--color-action);
+  --ad-accent-contrast: var(--color-n0);
+  --ad-accent-soft: var(--color-action-soft);
+  --ad-success: var(--color-success-text);
+  --ad-success-soft: var(--color-success-soft);
+  --ad-warning-soft: var(--color-warning-soft);
+  --ad-danger: var(--color-danger-text);
+  --ad-danger-soft: var(--color-danger-soft);
+  /* Ikon penanda keadaan (mis. glif urut netral) wajib ≥ 3:1 sebagai grafik, bukan dekorasi. */
+  --ad-icon-low: var(--color-n600);
+}
