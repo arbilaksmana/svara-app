@@ -4,10 +4,10 @@
  * tanpa backend/DB/login. Tidak dipakai pada build normal; nilai default mati.
  * Berkas ini hanya impor sisi klien; modul data preview ada di mock-preview-client.ts.
  */
-import type { AdminStats } from './api';
+import type { AdminStats, ChartRange } from './api';
 import { MOCK_ACCOUNT, MOCK_BOOTSTRAP, MOCK_DATA_REQUESTS, MOCK_PLATFORM_PROFILE } from './mock-preview-client';
 
-export const MOCK_STATS: AdminStats = {
+export const MOCK_STATS: Omit<AdminStats, 'chart'> = {
   accounts: 6,
   surveys: 4,
   responses: 253,
@@ -32,18 +32,17 @@ export const MOCK_STATS: AdminStats = {
 };
 
 /**
- * Deret grafik per rentang untuk mode preview: 'today' per jam, '7d'/'30d' per hari.
- * Jendela 7 hari memakai ekor deret 30 hari agar angka antar rentang konsisten.
+ * Deret grafik per rentang untuk mode preview, dengan kunci yang sama seperti kontrak server:
+ * 'today' per jam, '7d'/'30d' per hari, '6m' per bulan. Jendela 7 hari memakai ekor deret
+ * 30 hari agar angka antar rentang konsisten.
  */
-/** Rentang awal pemilih grafik di layar Ringkasan (`useState<ChartRange>('30d')`). */
-const DEFAULT_RANGE = '30d';
-
 const HOURLY_TODAY = [
   0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 const DAILY_30 = [
   1, 0, 2, 3, 1, 0, 1, 2, 4, 3, 2, 1, 0, 2, 3, 5, 4, 3, 2, 1, 2, 0, 0, 2, 4, 1, 3, 2, 1, 2,
 ];
+const MONTHLY_6 = [22, 31, 18, 27, 24, 19];
 
 /** Kunci hari lokal 'YYYY-MM-DD', format yang sama dengan kunci titik server. */
 function dayKey(date: Date): string {
@@ -52,11 +51,12 @@ function dayKey(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-/**
- * Deret titik per rentang: 'today' per jam, '30d' per hari. Payload server tidak
- * membawa `chart`, jadi mode preview mengisi deret rentang awal layar ('30d') agar grafik terisi.
- */
-function chartForRange(range: string): Array<{ point: string; responses: number }> {
+/** Kunci bulan lokal 'YYYY-MM' untuk titik 6 bulan. */
+function monthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function chartForRange(range: ChartRange): Array<{ point: string; responses: number }> {
   const now = new Date();
   if (range === 'today') {
     const day = dayKey(now);
@@ -65,9 +65,17 @@ function chartForRange(range: string): Array<{ point: string; responses: number 
       responses,
     }));
   }
-  return DAILY_30.map((responses, index) => {
+  if (range === '6m') {
+    return MONTHLY_6.map((responses, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth(), 1);
+      date.setMonth(date.getMonth() - (MONTHLY_6.length - 1 - index));
+      return { point: monthKey(date), responses };
+    });
+  }
+  const daily = range === '7d' ? DAILY_30.slice(-7) : DAILY_30;
+  return daily.map((responses, index) => {
     const date = new Date(now);
-    date.setDate(date.getDate() - (DAILY_30.length - 1 - index));
+    date.setDate(date.getDate() - (daily.length - 1 - index));
     return { point: dayKey(date), responses };
   });
 }
@@ -80,7 +88,13 @@ export function mockResponse(path: string, method: string): unknown | null {
   if (path === '/bootstrap') return MOCK_BOOTSTRAP;
   if (path === '/auth/me') return { account: MOCK_ACCOUNT };
   if (path === '/auth/login' && method === 'POST') return { account: MOCK_ACCOUNT };
-  if (path === '/admin/stats') return { ...MOCK_STATS, chart: chartForRange(DEFAULT_RANGE) };
+  const statsPath = /^\/admin\/stats(?:\?range=([^&]*))?$/.exec(path);
+  if (statsPath) {
+    const requested = statsPath[1];
+    const range: ChartRange =
+      requested === 'today' || requested === '7d' || requested === '30d' || requested === '6m' ? requested : '30d';
+    return { ...MOCK_STATS, chart: chartForRange(range) };
+  }
   if (path === '/auth/logout' && method === 'POST') return {};
   if (path === '/admin/requests' || path === '/admin/data-requests') return MOCK_DATA_REQUESTS;
   if (path === '/admin/platform-profile') return { profile: MOCK_PLATFORM_PROFILE };

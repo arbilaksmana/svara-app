@@ -19,7 +19,7 @@ import {
   organizations,
 } from './fixtures/records';
 import * as api from './api';
-import type { AdminStats, DataRequest, SurveyScope } from './api';
+import type { AdminStats, ChartRange, DataRequest, SurveyScope } from './api';
 import type {
   Account,
   AccessGrant,
@@ -461,13 +461,13 @@ export async function replayEvent(eventId: string): Promise<void> {
   await refreshBootstrap();
 }
 
-export async function loadAdminStats(): Promise<void> {
+export async function loadAdminStats(range: ChartRange = '30d'): Promise<void> {
   const request = ++statsRequest;
   stats = null;
   statsError = null;
   emit();
   try {
-    const next = await api.adminStats();
+    const next = await api.adminStats(range);
     if (request !== statsRequest) return;
     stats = next;
   } catch (cause) {
