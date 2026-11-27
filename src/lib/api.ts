@@ -382,9 +382,8 @@ export interface AdminStats {
   /**
    * Deret agregat respons sesuai rentang terpilih; periode kosong bernilai 0.
    * Kunci 'YYYY-MM-DDTHH' (today), 'YYYY-MM-DD' (7d/30d), atau 'YYYY-MM' (6m).
-   * Saat ini hanya mode preview UI yang mengirim field ini.
    */
-  chart?: Array<{ point: string; responses: number }>;
+  chart: Array<{ point: string; responses: number }>;
   perCreator: Array<{ id: string; display_name: string; surveys: number; responses: number }>;
   perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
 }
@@ -435,8 +434,8 @@ export async function updateDataRequest(id: string, input: DataRequestUpdate): P
   });
 }
 
-export async function adminStats(): Promise<AdminStats> {
-  return call<AdminStats>('/admin/stats');
+export async function adminStats(range: ChartRange = '30d'): Promise<AdminStats> {
+  return call<AdminStats>(`/admin/stats?range=${range}`);
 }
 
 export interface PublicContextData {

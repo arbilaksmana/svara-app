@@ -256,15 +256,15 @@ export function AdminSummaryPage() {
   const { stats, statsError, error } = useStore();
   const [range, setRange] = useState<ChartRange>("30d");
   useEffect(() => {
-    void loadAdminStats();
+    void loadAdminStats(range);
     return cancelAdminStatsLoad;
-  }, []);
+  }, [range]);
 
   const failure = stats ? null : (statsError ?? error);
   const retry = () => {
     void (async () => {
       if (error) await loadBootstrap();
-      await loadAdminStats();
+      await loadAdminStats(range);
     })();
   };
 
@@ -410,17 +410,18 @@ const RANGE_LABEL: Record<ChartRange, string> = {
 };
 
 /**
- * Label sumbu dari kunci titik server: 'YYYY-MM-DDTHH' (per jam) atau 'YYYY-MM-DD' (per hari).
+ * Label sumbu dari kunci titik server: 'YYYY-MM-DDTHH' (per jam), 'YYYY-MM-DD' (per hari),
+ * atau 'YYYY-MM' (per bulan). Format dibaca dari panjang kunci, bukan state rentang, karena
+ * satu render transisi bisa membawa deret rentang lama saat pemilih baru diganti.
  * Titik harian ditulis 'dd/MM' karena jendela 30 hari melewati dua bulan.
  */
-function pointLabel(point: string, range: ChartRange): string {
-  if (range === "6m") return monthLabel(point);
-  return range === "today"
-    ? `${point.slice(11, 13)}:00`
-    : `${point.slice(8, 10)}/${point.slice(5, 7)}`;
+function pointLabel(point: string): string {
+  if (point.length === 7) return monthLabel(point);
+  if (point.length === 13) return `${point.slice(11, 13)}:00`;
+  return `${point.slice(8, 10)}/${point.slice(5, 7)}`;
 }
 
-/** Nama bulan singkat Indonesia untuk titik bulanan 'YYYY-MM' pada payload tanpa `chart`. */
+/** Nama bulan singkat Indonesia untuk titik bulanan 'YYYY-MM'. */
 const MONTH_SHORT = new Intl.DateTimeFormat("id-ID", { month: "short" });
 
 function monthLabel(point: string): string {
@@ -435,9 +436,8 @@ function ResponsesAreaChart({
   range: ChartRange;
 }) {
   const ready = useChartsReady();
-  const points = stats.chart ?? [];
-  const data = points.map((row) => ({
-    label: pointLabel(row.point, range),
+  const data = stats.chart.map((row) => ({
+    label: pointLabel(row.point),
     responses: row.responses,
   }));
   if (data.length === 0) {
@@ -452,12 +452,6 @@ function ResponsesAreaChart({
   const summary = `Respons ${windowLabel} (total ${total}): ${data.map((row) => `${row.label} ${row.responses}`).join(", ")}.`;
   return (
     <>
-      {!stats.chart && (
-        <p className="mb-1 text-caption text-[color:var(--ad-muted)]">
-          Server belum menyediakan deret untuk rentang ini; grafik terisi saat
-          data rentang tersedia.
-        </p>
-      )}
       <div role="img" aria-label={summary}>
         {ready && (
           <ChartContainer

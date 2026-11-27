@@ -611,8 +611,113 @@ adminRouter.patch('/admin/data-requests/:id', async (req: AuthedRequest, res: Re
   }
 });
 
-adminRouter.get('/admin/stats', async (_req: AuthedRequest, res: Response) => {
+type StatsRange = 'today' | '7d' | '30d' | '6m';
+
+const STATS_RANGES: readonly StatsRange[] = ['today', '7d', '30d', '6m'];
+
+/** Rentang grafik: nilai hilang memakai 30d, nilai lain adalah galat klien. */
+function statsRange(raw: unknown): StatsRange {
+  if (raw === undefined) return '30d';
+  if (typeof raw !== 'string' || !STATS_RANGES.includes(raw as StatsRange)) {
+    fail(400, 'validation_error', 'range harus salah satu dari today, 7d, 30d, atau 6m.');
+  }
+  return raw as StatsRange;
+}
+
+/**
+ * Satu query agregat per rentang: bucket penuh dari generate_series LEFT JOIN hitungan respons,
+ * sehingga periode kosong tetap hadir bernilai 0. Semua batas dan bucket memakai waktu WIB;
+ * `submitted_at` disimpan sebagai teks ISO UTC dan baru dikonversi di sini.
+ */
+const STATS_CHART_SQL: Record<StatsRange, string> = {
+  today: `
+    WITH bounds AS (
+      SELECT date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AS start_wib
+    ),
+    buckets AS (
+      SELECT generate_series(start_wib, start_wib + interval '23 hours', interval '1 hour') AS bucket
+        FROM bounds
+    ),
+    counts AS (
+      SELECT date_trunc('hour', submitted_at::timestamptz AT TIME ZONE 'Asia/Jakarta') AS bucket,
+             COUNT(*)::int AS responses
+        FROM responses, bounds
+       WHERE submitted_at::timestamptz >= start_wib AT TIME ZONE 'Asia/Jakarta'
+         AND submitted_at::timestamptz < (start_wib + interval '1 day') AT TIME ZONE 'Asia/Jakarta'
+       GROUP BY 1
+    )
+    SELECT to_char(b.bucket, 'YYYY-MM-DD"T"HH24') AS point, COALESCE(c.responses, 0) AS responses
+      FROM buckets b
+      LEFT JOIN counts c USING (bucket)
+     ORDER BY b.bucket`,
+  '7d': `
+    WITH bounds AS (
+      SELECT date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') - interval '6 days' AS start_wib,
+             date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') + interval '1 day' AS end_wib
+    ),
+    buckets AS (
+      SELECT generate_series(start_wib, end_wib - interval '1 day', interval '1 day') AS bucket
+        FROM bounds
+    ),
+    counts AS (
+      SELECT date_trunc('day', submitted_at::timestamptz AT TIME ZONE 'Asia/Jakarta') AS bucket,
+             COUNT(*)::int AS responses
+        FROM responses, bounds
+       WHERE submitted_at::timestamptz >= start_wib AT TIME ZONE 'Asia/Jakarta'
+         AND submitted_at::timestamptz < end_wib AT TIME ZONE 'Asia/Jakarta'
+       GROUP BY 1
+    )
+    SELECT to_char(b.bucket, 'YYYY-MM-DD') AS point, COALESCE(c.responses, 0) AS responses
+      FROM buckets b
+      LEFT JOIN counts c USING (bucket)
+     ORDER BY b.bucket`,
+  '30d': `
+    WITH bounds AS (
+      SELECT date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') - interval '29 days' AS start_wib,
+             date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') + interval '1 day' AS end_wib
+    ),
+    buckets AS (
+      SELECT generate_series(start_wib, end_wib - interval '1 day', interval '1 day') AS bucket
+        FROM bounds
+    ),
+    counts AS (
+      SELECT date_trunc('day', submitted_at::timestamptz AT TIME ZONE 'Asia/Jakarta') AS bucket,
+             COUNT(*)::int AS responses
+        FROM responses, bounds
+       WHERE submitted_at::timestamptz >= start_wib AT TIME ZONE 'Asia/Jakarta'
+         AND submitted_at::timestamptz < end_wib AT TIME ZONE 'Asia/Jakarta'
+       GROUP BY 1
+    )
+    SELECT to_char(b.bucket, 'YYYY-MM-DD') AS point, COALESCE(c.responses, 0) AS responses
+      FROM buckets b
+      LEFT JOIN counts c USING (bucket)
+     ORDER BY b.bucket`,
+  '6m': `
+    WITH bounds AS (
+      SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta') - interval '5 months' AS start_wib,
+             date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta') + interval '1 month' AS end_wib
+    ),
+    buckets AS (
+      SELECT generate_series(start_wib, end_wib - interval '1 month', interval '1 month') AS bucket
+        FROM bounds
+    ),
+    counts AS (
+      SELECT date_trunc('month', submitted_at::timestamptz AT TIME ZONE 'Asia/Jakarta') AS bucket,
+             COUNT(*)::int AS responses
+        FROM responses, bounds
+       WHERE submitted_at::timestamptz >= start_wib AT TIME ZONE 'Asia/Jakarta'
+         AND submitted_at::timestamptz < end_wib AT TIME ZONE 'Asia/Jakarta'
+       GROUP BY 1
+    )
+    SELECT to_char(b.bucket, 'YYYY-MM') AS point, COALESCE(c.responses, 0) AS responses
+      FROM buckets b
+      LEFT JOIN counts c USING (bucket)
+     ORDER BY b.bucket`,
+};
+
+adminRouter.get('/admin/stats', async (req: AuthedRequest, res: Response) => {
   try {
+    const range = statsRange(req.query.range);
     const count = async (sql: string) => Number((await get<{ count: number }>(sql))?.count ?? 0);
     res.json({
       data: {
@@ -620,6 +725,7 @@ adminRouter.get('/admin/stats', async (_req: AuthedRequest, res: Response) => {
         surveys: await count('SELECT COUNT(*) AS count FROM surveys'),
         responses: await count('SELECT COUNT(*) AS count FROM responses'),
         pendingRequests: await count("SELECT COUNT(*) AS count FROM data_requests WHERE status = 'pending'"),
+        chart: await all<{ point: string; responses: number }>(STATS_CHART_SQL[range]),
         perCreator: await all<{ id: string; display_name: string; surveys: number; responses: number }>(
           `SELECT a.id, a.display_name,
                   COUNT(DISTINCT s.id) AS surveys,
