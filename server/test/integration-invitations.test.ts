@@ -29,6 +29,7 @@ interface Result {
     simulated?: boolean;
     label?: string;
     survey_version?: number | null;
+    columns?: string[];
     pagination?: { limit: number; offset: number; total: number };
     assignment_id?: string;
     invitation_id?: string;
@@ -178,6 +179,20 @@ async function ensureRepublishDraft(): Promise<void> {
      VALUES (?, 's_demo2', 2, 'draft', '1.0', NULL, NULL)
      ON CONFLICT (id) DO UPDATE SET status = 'draft', published_at = NULL, closed_at = NULL`,
     REPUBLISH_VERSION_ID,
+  );
+  // Salin pertanyaan opsi v1 agar alur publik lengkap (consent -> jawab) bisa dijalankan pada v2.
+  await run(
+    `INSERT INTO questions (id, version_id, code, ord, type, required, section, label, hint, group_code, dimension_code, direction)
+     SELECT id || '_v2', ?, code, ord, type, required, section, label, hint, group_code, dimension_code, direction
+       FROM questions WHERE version_id = 'v_demo2_1'
+     ON CONFLICT (id) DO NOTHING`,
+    REPUBLISH_VERSION_ID,
+  );
+  await run(
+    `INSERT INTO question_options (id, question_id, ord, label, value)
+     SELECT id || '_v2', question_id || '_v2', ord, label, value
+       FROM question_options WHERE question_id IN (SELECT id FROM questions WHERE version_id = 'v_demo2_1')
+     ON CONFLICT (id) DO NOTHING`,
   );
 }
 
@@ -380,6 +395,10 @@ test('GET survey-data menyaring assignment_id, total ikut filter, dan tanpa filt
   assert.equal(filtered.status, 200, JSON.stringify(filtered.json));
   assert.equal(filtered.json.pagination?.total, 1);
   assert.deepEqual(assignmentIds(filtered.json), [invitation.assignment_id]);
+  assert.ok(filtered.json.columns?.includes('version_id'));
+  const filteredRows = filtered.json.data as Array<Record<string, unknown>>;
+  assert.equal(filteredRows[0]!.version_id, 'v_demo2_1');
+  assert.equal(filtered.json.survey_version, 1);
 
   // Assignment yang ada, tetapi milik survei lain: himpunan kosong, bukan 404.
   const other = await request('/integration/survey-data?survey_id=s_demo2&assignment_id=a_demo01');
@@ -392,6 +411,9 @@ test('GET survey-data menyaring assignment_id, total ikut filter, dan tanpa filt
   // Satu respons seed (a_perpus01) + satu respons yang baru dikirim lewat undangan layanan.
   assert.equal(unfiltered.json.pagination?.total, 2);
   assert.equal(assignmentIds(unfiltered.json).length, 2);
+  assert.ok(unfiltered.json.columns?.includes('version_id'));
+  const unfilteredRows = unfiltered.json.data as Array<Record<string, unknown>>;
+  assert.ok(unfilteredRows.every((row) => typeof row.version_id === 'string'));
   assert.equal(unfiltered.json.simulated, true);
   assert.equal(unfiltered.json.label, 'SIMULASI Modul 15 — bukan integrasi nyata.');
 });
@@ -545,6 +567,8 @@ test('GET survey-data dengan assignment_id tetap mengembalikan baris setelah rep
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.response_id, responseId);
     assert.equal(rows[0]!.assignment_id, invitation.assignment_id);
+    assert.equal(rows[0]!.version_id, 'v_demo2_1');
+    assert.ok(byAssignment.json.columns?.includes('version_id'));
 
     for (const matchingVersion of ['v_demo2_1', '1']) {
       const same = await request(
@@ -565,6 +589,70 @@ test('GET survey-data dengan assignment_id tetap mengembalikan baris setelah rep
   }
 });
 
+test('GET survey-data dengan assignment_id memakai versi respons setelah republish dan upgrade', async () => {
+  const created = await createInvitation('s_demo2', { participant_ref: 'becraft-republish-002', label: 'Republish · 2' });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const invitation = invitationData(created.json.data);
+  assert.equal(invitation.version_id, 'v_demo2_1');
+
+  await setRepublished(true);
+  try {
+    // Undangan v1 yang sudah closed di-upgrade ke v2 saat intro; respons tersimpan di v2.
+    const submitted = await submitInvitation(invitation.token, 'm13-republish-2');
+    assert.equal(submitted.status, 201, JSON.stringify(submitted.json));
+    const responseId = receiptResponseId(submitted.json);
+    const response = await get<{ version_id: string }>('SELECT version_id FROM responses WHERE id = ?', responseId);
+    assert.equal(response?.version_id, 'v_demo2_2');
+
+    const byAssignment = await request(`/integration/survey-data?survey_id=s_demo2&assignment_id=${invitation.assignment_id}`);
+    assert.equal(byAssignment.status, 200, JSON.stringify(byAssignment.json));
+    assert.equal(byAssignment.json.pagination?.total, 1);
+    assert.equal(byAssignment.json.survey_version, 2);
+    const rows = byAssignment.json.data as Array<Record<string, unknown>>;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.response_id, responseId);
+    assert.equal(rows[0]!.version_id, 'v_demo2_2');
+
+    // Filter eksplisit yang tidak cocok dengan versi respons -> kosong, bukan 404.
+    const mismatched = await request(
+      `/integration/survey-data?survey_id=s_demo2&assignment_id=${invitation.assignment_id}&version=v_demo2_1`,
+    );
+    assert.equal(mismatched.status, 200, JSON.stringify(mismatched.json));
+    assert.equal(mismatched.json.pagination?.total, 0);
+    assert.deepEqual(assignmentIds(mismatched.json), []);
+
+    const matching = await request(
+      `/integration/survey-data?survey_id=s_demo2&assignment_id=${invitation.assignment_id}&version=v_demo2_2`,
+    );
+    assert.equal(matching.status, 200, JSON.stringify(matching.json));
+    assert.equal(matching.json.pagination?.total, 1);
+
+    // Status: version_id tetap versi assignment; answered_version_id mencatat versi respons.
+    const status = await request(`/integration/surveys/s_demo2/assignments/${invitation.assignment_id}`);
+    assert.equal(status.status, 200, JSON.stringify(status.json));
+    const statusData = status.json.data as Record<string, unknown>;
+    assert.equal(statusData.version_id, 'v_demo2_1');
+    assert.equal(statusData.answered_version_id, 'v_demo2_2');
+    assert.equal(statusData.submitted, true);
+    assert.equal(statusData.response_id, responseId);
+    assert.equal(statusData.invitation_status, 'used');
+  } finally {
+    await setRepublished(false);
+  }
+});
+
+test('GET survey-data dengan assignment_id tanpa respons mengikuti versi assignment', async () => {
+  const created = await createInvitation('s_demo2', { participant_ref: 'becraft-belum-001', label: 'Belum · 1' });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const invitation = invitationData(created.json.data);
+
+  const empty = await request(`/integration/survey-data?survey_id=s_demo2&assignment_id=${invitation.assignment_id}`);
+  assert.equal(empty.status, 200, JSON.stringify(empty.json));
+  assert.equal(empty.json.pagination?.total, 0);
+  assert.deepEqual(assignmentIds(empty.json), []);
+  assert.equal(empty.json.survey_version, 1);
+});
+
 test('GET status assignment sebelum submit melaporkan belum ada respons', async () => {
   const created = await createInvitation('s_demo2', { participant_ref: 'becraft-status-001', label: 'Status · 1' });
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -578,6 +666,7 @@ test('GET status assignment sebelum submit melaporkan belum ada respons', async 
   assert.equal(data.participant_ref, 'becraft-status-001');
   assert.equal(data.label, 'Status · 1');
   assert.equal(data.version_id, 'v_demo2_1');
+  assert.equal(data.answered_version_id, null);
   assert.equal(data.invitation_status, 'active');
   assert.equal(data.submitted, false);
   assert.equal(data.submitted_at, null);
@@ -595,6 +684,8 @@ test('GET status assignment sesudah submit melaporkan response_id', async () => 
   const status = await request(`/integration/surveys/s_demo2/assignments/${invitation.assignment_id}`);
   assert.equal(status.status, 200, JSON.stringify(status.json));
   const data = status.json.data as Record<string, unknown>;
+  assert.equal(data.version_id, 'v_demo2_1');
+  assert.equal(data.answered_version_id, 'v_demo2_1');
   assert.equal(data.invitation_status, 'used');
   assert.equal(data.submitted, true);
   assert.equal(data.response_id, responseId);
