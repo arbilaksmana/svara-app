@@ -241,14 +241,16 @@ Gunakan awalan `/api/v1`. Klien menerima pesan yang dapat ditindaklanjuti tanpa 
 | PUT `/surveys/{id}` | Creator pemilik | Simpan metadata dan konfigurasi draf; pertahankan versi terbit |
 | POST `/surveys/{id}/publish` | Creator pemilik | Validasi, bekukan versi, terbitkan tautan |
 | POST `/surveys/{id}/close` atau `/surveys/{id}/archive` | Creator pemilik | Ubah status dengan validasi dan audit |
-| POST `/surveys/{id}/invitations` | Creator berwenang | Buat penugasan dan undangan individual; mengembalikan `assignment_id`, `version_id`, dan URL formulir. Token mentah hanya muncul sekali di respons; basis data menyimpan hash-nya |
+| POST `/surveys/{id}/invitations` | Creator berwenang | Buat penugasan dan undangan individual pada versi terbit terbaru; mengembalikan `assignment_id`, `version_id`, dan URL formulir. Token mentah hanya muncul sekali di respons; basis data menyimpan hash-nya |
 | GET `/public/surveys/{token}` | Responden dengan akses | Kembalikan formulir versi aktif dan pemberitahuan |
 | POST `/public/surveys/{token}/responses` | Responden; `Idempotency-Key` | Validasi dan simpan atomik, kembalikan bukti |
 | GET/PUT `/surveys/{id}/settings` | Pemilik/`org_admin` | Izin hasil (`allowResults`, `allowIndividual`) dan `consent_required`; field yang tidak dikirim mempertahankan nilai tersimpan |
 | GET `/surveys/{id}/summary` | Pemilik berizin | Distribusi agregat per versi |
 | GET `/surveys/{id}/export` | Izin ekspor pada objek | CSV/kodebook per versi, catat ekspor dan filter kolom |
-| POST `/integration/surveys/{id}/invitations` | Kredensial layanan Modul 13 berizin | Badan `participant_ref`, `label`, `expires_at`; mengembalikan `assignment_id`, `invitation_id`, `version_id`, dan `url` |
-| GET `/integration/survey-data` | Layanan Modul 15 berizin | Skema berversi, filter versi, pembatasan kolom, paginasi; parameter opsional `assignment_id`; respons menandai `simulated: true` |
+| POST `/integration/surveys/{id}/invitations` | Kredensial layanan Modul 13 berizin | Badan `participant_ref`, `label`, `expires_at`; versi yang dipakai adalah versi terbit terbaru. Mengembalikan `assignment_id`, `invitation_id`, `version_id`, dan `url`; `409 no_published_version` bila belum ada versi terbit. `participant_ref` yang sudah punya assignment pada survei itu ditolak `409 assignment_exists` tanpa token |
+| POST `/integration/assignments/{id}/invitations` | Kredensial layanan Modul 13 berizin | Reissue: cabut undangan aktif, terbitkan token baru untuk assignment yang sama; `version_id` mengikuti assignment. `409 already_submitted` bila assignment sudah punya respons; di luar cakupan `404` |
+| GET `/integration/surveys/{id}/assignments/{assignmentId}` | Kredensial layanan Modul 13 berizin | Status per assignment: `assignment_id`, `participant_ref`, `label`, `version_id`, `invitation_status`, `submitted`, `submitted_at`, `response_id`. `version_id` dapat berubah antar poll |
+| GET `/integration/survey-data` | Layanan Modul 15 berizin | Skema berversi, filter versi, pembatasan kolom, paginasi. Bila `assignment_id` diisi, versi mengikuti `assignments.version_id`; `version` eksplisit yang tidak cocok menghasilkan `200` dengan `data: []` dan `pagination.total: 0`. `data: []` berarti belum ada respons, bukan galat dan bukan survei tidak ada; respons menandai `simulated: true` |
 
 **Contoh kiriman dan bukti sintetis.** Nilai yang disimpan diturunkan dari konfigurasi opsi pada server. Header `Idempotency-Key` dipertahankan pada setiap retry kiriman tersebut.
 
@@ -270,9 +272,17 @@ Simulasikan identitas peserta, penugasan, dan penerimaan event pada adapter laya
 {"schema_version":1,"event_id":"ev_demo01","type":"survey.submitted","assignment_id":"a_demo","respondent_id":"p_demo01","submitted_at":"2026-11-09T05:00:00Z"}
 ```
 
+**Undangan mengikuti versi terbit terbaru; versi tidak dipin.** Saat dibuat, undangan mencatat versi terbit terbaru saat itu. Saat tautan undangan yang masih aktif dibuka ulang, versi yang sudah tidak `published` disajikan sebagai versi terbit terbaru bila survei masih terbit dan sudah menerbitkan penggantinya; yang tampil adalah formulir versi baru, bukan versi saat undangan dibuat. Persetujuan terikat `version_id` + `notice_version`, jadi persetujuan pada versi lama tidak membuka formulir versi baru dan responden wajib menyetujui ulang. Konsekuensinya, `version_id` pada respons dapat berbeda antar peserta dalam satu wave; ringkasan, laporan, dan ekspor harus dipisah per versi. Bila versi lama ditutup tanpa versi pengganti, tautan tetap `closed` dan tidak ada versi yang dikarang. `version_id` pada status assignment juga dapat berubah antar poll setelah versi terbit berganti; jangan menyimpannya sebagai kunci permanen, karena kunci stabilnya `assignment_id`.
+
+**Retry dan reissue undangan.** Server pemanggil tidak boleh mengulang pembuatan undangan untuk `participant_ref` yang sama. Bila `participant_ref` sudah memiliki assignment pada survei itu, server membalas `409 assignment_exists` berisi `assignment_id`, `invitation_id`, dan `invitation_status` tanpa token; balasan itu adalah sinyal untuk memakai endpoint reissue, bukan mengulang `POST /integration/surveys/{id}/invitations`. Reissue (`POST /integration/assignments/{id}/invitations`) mencabut undangan aktif dan menerbitkan token baru untuk assignment yang sama; `version_id` mengikuti assignment. Assignment yang sudah memiliki respons final ditolak `409 already_submitted`, dan assignment di luar cakupan kredensial dijawab `404`. Token mentah hanya muncul sekali pada respons penerbitan; basis data hanya menyimpan hash, sehingga token lama tidak dapat dipulihkan. Karena itu reissue bersifat eksplisit: penerbit tidak dapat mengambil ulang token dari basis data, dan setiap token baru menggantikan yang lama.
+
+**Status per assignment.** `GET /integration/surveys/{id}/assignments/{assignmentId}` mengembalikan `assignment_id`, `participant_ref`, `label`, `version_id`, `invitation_status`, `submitted`, `submitted_at`, dan `response_id`. `submitted` menandai respons final sudah tersimpan; `submitted_at` dan `response_id` terisi setelah kiriman final. Poll endpoint ini untuk kemajuan per peserta, dan baca ulang `version_id` setiap poll karena nilainya dapat berubah setelah versi baru terbit.
+
 ### 8.2 Kontrak Modul 15
 
 CSV merupakan jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung rancangan. Sediakan fixture konsumen dengan `schema_version`, versi survei, kode item, nilai atau teks sesuai izin, serta ID peserta yang dapat dipadankan melalui kontrak.
+
+**Aturan versi dan arti `data: []`.** Tanpa `version` dan `assignment_id`, `GET /integration/survey-data` memakai versi terbit terbaru yang pernah diterbitkan. Bila `assignment_id` diisi, versi mengikuti `assignments.version_id`, bukan versi terbit terbaru; `version` eksplisit yang tidak cocok dengan versi assignment dibalas `200` dengan `data: []` dan `pagination.total: 0`, bukan galat. `data: []` berarti belum ada respons pada versi dan filter itu: bukan galat, bukan bukti survei tidak ada, dan bukan alasan mengulang permintaan sebagai kegagalan. `pagination.total` menghitung baris pada versi dan filter yang sama; halaman kosong dengan `total` positif berarti offset melewati batas.
 
 **Arti `collection_mode` dan `identity_source`.** Kedua kolom menjelaskan **cara proses kiriman berjalan** dan **asal identitas responden**, bukan hubungan responden dengan organisasi:
 
@@ -280,6 +290,12 @@ CSV merupakan jalur keluaran wajib MVP. API adalah jalur integrasi yang didukung
 - `identity_source` — `local` bila identitas peserta dibuat Modul 14; `module_13` bila identitas datang dari layanan terverifikasi Modul 13.
 
 MVP hanya menghasilkan `standalone`/`local`. Asal kiriman per baris ditandai kolom CSV `cara_masuk` (`undangan`/`tautan_umum`, lihat §7.1). Relasi responden–organisasi (misalnya keanggotaan, kelas, atau unit kerja responden) **tidak** dicatat pada MVP; ia menjadi roadmap dan, bila disepakati, memerlukan skema tersendiri. Pisahkan hasil uji fixture dari hasil integrasi nyata. Kontrak diuji dengan simulasi sampai antartim menyepakati format nyata. Format eksternal final masih terbuka.
+
+### 8.3 Catatan konsumen layanan
+
+- **`simulated: true` bukan data palsu.** Penanda itu menyatakan integrasi keluar masih simulasi. Baris pada `GET /integration/survey-data` berasal dari respons final yang tersimpan di Modul 14, bukan data rekaan.
+- **Belum ada push event.** Modul 14 mencatat `survey.submitted` dan pembacaan `survey-data` sebagai `integration_events` simulasi tanpa pengiriman keluar ke Modul 13/15. Polling adalah satu-satunya jalur: status assignment untuk kemajuan per peserta, `GET /integration/survey-data` untuk respons final.
+- **Polling aman diulang.** `data: []` dan halaman kosong adalah keadaan normal "belum ada respons"; jangan memperlakukannya sebagai galat. Gunakan `assignment_id` sebagai kunci stabil dan baca ulang `version_id` setiap poll karena nilainya dapat berubah setelah versi baru terbit.
 
 ---
 
