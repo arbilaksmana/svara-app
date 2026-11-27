@@ -17,6 +17,7 @@ const MIGRATION_022 = '022_drop_plaintext_link_tokens.sql';
 const MIGRATION_023 = '023_integration_token_expiry.sql';
 const MIGRATION_024 = '024_survey_consent_requirement.sql';
 const MIGRATION_025 = '025_drop_profile_legacy_consent_columns.sql';
+const MIGRATION_026 = '026_assignments_survey_participant_uq.sql';
 
 let server: Server;
 let origin: string;
@@ -518,8 +519,8 @@ test('B1: 019 tidak gagal karena expires_at tak terurai pada tautan aktif', asyn
   await sql('UPDATE public_links SET expires_at = $1 WHERE token_hash = $2', ['', hash(TOKENS.layananV1)]);
   assert.deepEqual(
     await migrate(),
-    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022, MIGRATION_023, MIGRATION_024, MIGRATION_025],
-    'migrasi 019-025 tetap berjalan',
+    [MIGRATION_019, MIGRATION_020, MIGRATION_021, MIGRATION_022, MIGRATION_023, MIGRATION_024, MIGRATION_025, MIGRATION_026],
+    'migrasi 019-026 tetap berjalan',
   );
   assert.deepEqual(await linkState(TUNGGAL, 1), { status: 'active', closed_reason: null }, 'tautan survei tunggal tidak tersentuh');
   // Tanggal tak terurai diperlakukan seperti resolver publik: belum kedaluwarsa, jadi ikut ditutup sebagai superseded.
