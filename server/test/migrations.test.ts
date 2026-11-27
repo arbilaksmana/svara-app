@@ -52,6 +52,7 @@ const VERSIONS = [
   '023_integration_token_expiry.sql',
   '024_survey_consent_requirement.sql',
   '025_drop_profile_legacy_consent_columns.sql',
+  '026_assignments_survey_participant_uq.sql',
 ];
 
 test('migrasi membuat 30 tabel aplikasi dan mencatat versi', async () => {
