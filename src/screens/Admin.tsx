@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Shell } from "../components/Shell";
 import {
   ActionLink,
@@ -52,6 +52,9 @@ import {
   ChartTooltipContent,
 } from "../components/ui/chart";
 import { DataTable } from "../components/data-table";
+import { Plus } from "runeicons-react/icons/Plus";
+import { X } from "runeicons-react/icons/X";
+import { withIconClass } from "../components/rune-icon";
 import {
   cancelAdminStatsLoad,
   cancelDataRequestsLoad,
@@ -71,16 +74,20 @@ import {
   adminSaveAccount,
   adminSaveGrants,
   ApiError,
+  getPlatformProfile,
+  savePlatformProfile,
   updateDataRequest,
   type AdminStats,
   type ChartRange,
   type DataRequest,
   type DataRequestStatus,
 } from "../lib/api";
+import { parseRetentionDays } from "../lib/retention";
 import {
   ACCOUNT_STATUS_LABEL,
   DATA_REQUEST_TYPE_LABEL,
   ORGANIZATION_TYPE_LABEL,
+  ORGANIZATION_TYPES,
   ROLE_LABEL,
 } from "../lib/labels";
 import type {
@@ -107,6 +114,71 @@ function SoftCard({
     >
       {children}
     </section>
+  );
+}
+
+/* ---------------- Dialog form ---------------- */
+
+const PlusIcon = withIconClass(Plus);
+const XIcon = withIconClass(X);
+
+/**
+ * Dialog modal bawaan browser: fokus terperangkap, Esc menutup, dan latar
+ * `backdrop:` dari `showModal` — tanpa dependensi baru.
+ */
+function FormDialog({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  /** Dua FormDialog hidup berdampingan di halaman yang sama; id label harus unik per dialog. */
+  const titleId = useId();
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (open && !node.open) node.showModal();
+    else if (!open && node.open) node.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      onCancel={onClose}
+      aria-labelledby={titleId}
+      className="m-auto w-[min(36rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-lg border border-[var(--ad-border)] bg-[var(--ad-surface)] p-0 text-[color:var(--ad-text)] backdrop:bg-black/40"
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--ad-border)] px-5 py-4">
+        <div>
+          <h2
+            id={titleId}
+            className="text-body font-bold text-[color:var(--ad-text)]"
+          >
+            {title}
+          </h2>
+          <p className="mt-1 text-body-sm text-[color:var(--ad-muted)]">
+            {description}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Tutup"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-[color:var(--ad-muted)] transition-colors duration-fast hover:bg-[var(--ad-soft)] hover:text-[color:var(--ad-text)]"
+        >
+          <XIcon aria-hidden="true" className="size-5" />
+        </button>
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </dialog>
   );
 }
 
@@ -247,6 +319,53 @@ function accountColumns({
           </Button>
         );
       },
+    },
+  ];
+}
+
+/** Label tipe organisasi dengan kunci bebas; nilai di luar enum tampil apa adanya. */
+const ORGANIZATION_TYPE_TEXT: Record<string, string> = ORGANIZATION_TYPE_LABEL;
+
+/** Kolom daftar organisasi, gaya sama dengan Daftar akun. */
+function organizationColumns(
+  accounts: Account[],
+): ColumnDef<OrganizationSummary>[] {
+  return [
+    {
+      accessorKey: "name",
+      header: "Nama",
+      cell: ({ row }) => (
+        <span className="font-bold text-[color:var(--ad-text)]">
+          {row.original.name}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "id",
+      header: "ID",
+      cell: ({ row }) => <Code>{row.original.id}</Code>,
+    },
+    {
+      accessorKey: "organization_type",
+      header: "Tipe",
+      cell: ({ row }) => (
+        <Badge variant="secondary">
+          {ORGANIZATION_TYPE_TEXT[row.original.organization_type] ?? row.original.organization_type}
+        </Badge>
+      ),
+    },
+    {
+      id: "accounts",
+      header: "Akun",
+      cell: ({ row }) => (
+        <span className="text-body-sm text-[color:var(--ad-muted)]">
+          {
+            accounts.filter((a) => a.organization_id === row.original.id)
+              .length
+          }{" "}
+          akun
+        </span>
+      ),
     },
   ];
 }
@@ -685,12 +804,16 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
   );
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [scopeAccount, setScopeAccount] = useState("");
+  const [scopeAccount, setScopeAccount] = useState<string | null>(null);
   const [scopeSurvey, setScopeSurvey] = useState(surveys[0]?.id ?? "");
   const [scopeRead, setScopeRead] = useState(false);
   const [scopeExport, setScopeExport] = useState(false);
   const [scopeText, setScopeText] = useState(false);
   const [scopeBusy, setScopeBusy] = useState(false);
+  const [orgTypeFilter, setOrgTypeFilter] = useState<"all" | OrganizationType>(
+    "all",
+  );
+  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
   const [orgForm, setOrgForm] = useState({
     name: "",
     organization_type: "school" as OrganizationType,
@@ -700,6 +823,11 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
   });
   const [orgBusy, setOrgBusy] = useState(false);
   const [orgError, setOrgError] = useState<string | null>(null);
+  const organizationsShown = organizations.filter(
+    (organization) =>
+      orgTypeFilter === "all" ||
+      organization.organization_type === orgTypeFilter,
+  );
   const grantCounts = accessGrants.reduce<Record<string, number>>(
     (counts, grant) => ({
       ...counts,
@@ -819,6 +947,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
         notify(
           `Organisasi ${created.organization.name} dibuat dengan admin ${created.account.display_name}.`,
         );
+        setOrgDialogOpen(false);
         setOrgForm({
           name: "",
           organization_type: "school",
@@ -861,15 +990,11 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
             />
           )}
 
-          <DashCard className="gap-4">
-            <CardHeader>
-              <CardTitle>Daftar akun</CardTitle>
-              <CardDescription>
-                Peran, organisasi, status, dan jumlah cakupan tiap akun. Akun
-                sendiri tidak dapat diubah.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+          <DashCard className="gap-3">
+            <CardContent className="flex flex-col gap-3">
+              <p className="text-body font-bold text-[color:var(--ad-text)] lg:hidden">
+                Daftar akun
+              </p>
               <div className="hidden lg:block">
                 <DataTable
                   columns={accountColumns({
@@ -883,9 +1008,19 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                     onToggleStatus: toggleStatus,
                   })}
                   data={accounts}
+                  compact
+                  title="Daftar akun"
+                  subtitle="Peran, organisasi, status, dan cakupan; akun sendiri tidak dapat diubah."
+                  filterPlaceholder="Cari nama, peran, atau organisasi"
+                  filterText={(account) => {
+                    const organization =
+                      organizations.find(
+                        (item) => item.id === account.organization_id,
+                      )?.name ?? "";
+                    return `${account.display_name} ${account.id} ${ROLE_LABEL[account.role]} ${organization} ${ACCOUNT_STATUS_LABEL[account.status]}`;
+                  }}
                   caption="Akun pengelola: peran, organisasi, status, cakupan, dan aksi"
                   emptyMessage="Belum ada akun."
-                  plain
                 />
               </div>
 
@@ -983,30 +1118,87 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
             <CardHeader>
               <CardTitle>Organisasi</CardTitle>
               <CardDescription>
-                Organisasi baru langsung mendapat admin pertama yang mengatur
-                profil, anggota, dan undangannya. Responden dewasa dengan
-                persetujuan diri dipakai sebagai awal; admin organisasi dapat
-                mengubahnya di halaman Organisasi.
+                Cari dan saring organisasi berdasarkan tipe; jumlah akun dihitung
+                per organisasi.
               </CardDescription>
+              <CardAction>
+                <Button
+                  variant="secondary"
+                  onClick={() => setOrgDialogOpen(true)}
+                  disabled={mutationsBlocked}
+                >
+                  <PlusIcon aria-hidden="true" className="size-4" />
+                  Tambah organisasi
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent>
-              <ul className="flex flex-col gap-2">
-                {organizations.map((organization) => (
+              <div className="hidden lg:block">
+                <DataTable
+                  columns={organizationColumns(accounts)}
+                  data={organizationsShown}
+                  caption="Daftar organisasi: nama, ID, tipe, jumlah akun"
+                  emptyMessage="Tidak ada organisasi yang cocok."
+                  filterPlaceholder="Cari nama, ID, atau tipe"
+                  compact
+                  toolbarExtra={
+                    <div className="w-44 shrink-0">
+                      <Select
+                        aria-label="Saring organisasi berdasarkan tipe"
+                        value={orgTypeFilter}
+                        onChange={(event) =>
+                          setOrgTypeFilter(
+                            event.target.value as "all" | OrganizationType,
+                          )
+                        }
+                        className="min-h-[44px] w-full"
+                      >
+                        <option value="all">Semua tipe</option>
+                        {ORGANIZATION_TYPES.map((value) => (
+                          <option key={value} value={value}>
+                            {ORGANIZATION_TYPE_TEXT[value]}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  }
+                />
+              </div>
+              <div className="mb-3 lg:hidden">
+                <Select
+                  aria-label="Saring organisasi berdasarkan tipe"
+                  value={orgTypeFilter}
+                  onChange={(event) =>
+                    setOrgTypeFilter(
+                      event.target.value as "all" | OrganizationType,
+                    )
+                  }
+                  className="min-h-[44px] w-full"
+                >
+                  <option value="all">Semua tipe</option>
+                  {ORGANIZATION_TYPES.map((value) => (
+                    <option key={value} value={value}>
+                      {ORGANIZATION_TYPE_TEXT[value]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <ul className="divide-y divide-[var(--ad-border)] rounded-md border border-[var(--ad-border)] lg:hidden">
+                {organizationsShown.map((organization) => (
                   <li
                     key={organization.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] p-3"
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2.5"
                   >
-                    <div className="min-w-0">
-                      <p className="text-body font-bold text-[color:var(--ad-text)]">
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                      <p className="text-body-sm font-bold text-[color:var(--ad-text)]">
                         {organization.name}
                       </p>
-                      <p className="mt-1 font-mono text-annotation tracking-mono text-[color:var(--ad-muted)]">
-                        <Code>{organization.id}</Code>
-                      </p>
+                      <Code>{organization.id}</Code>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">
-                        {ORGANIZATION_TYPE_LABEL[organization.organization_type]}
+                        {ORGANIZATION_TYPE_TEXT[organization.organization_type] ??
+                          organization.organization_type}
                       </Badge>
                       <span className="text-caption text-[color:var(--ad-muted)]">
                         {
@@ -1019,15 +1211,19 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                     </div>
                   </li>
                 ))}
-                {organizations.length === 0 && (
-                  <li className="text-body-sm text-[color:var(--ad-muted)]">
-                    Belum ada organisasi.
+                {organizationsShown.length === 0 && (
+                  <li className="px-3 py-2.5 text-body-sm text-[color:var(--ad-muted)]">
+                    Tidak ada organisasi yang cocok.
                   </li>
                 )}
               </ul>
             </CardContent>
-            <CardContent className="flex flex-col gap-4">
-              <Separator />
+            <FormDialog
+              open={orgDialogOpen}
+              title="Organisasi baru"
+              description="Admin pertama mengatur profil, anggota, dan undangan. Responden dewasa dengan persetujuan diri dipakai sebagai awal."
+              onClose={() => setOrgDialogOpen(false)}
+            >
             <form
               className="flex flex-col gap-4"
               noValidate
@@ -1063,13 +1259,11 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                       }
                       className="min-h-[44px] w-full"
                     >
-                      {(["school", "organization"] as OrganizationType[]).map(
-                        (value) => (
-                          <option key={value} value={value}>
-                            {ORGANIZATION_TYPE_LABEL[value]}
-                          </option>
-                        ),
-                      )}
+                      {ORGANIZATION_TYPES.map((value) => (
+                        <option key={value} value={value}>
+                          {ORGANIZATION_TYPE_LABEL[value]}
+                        </option>
+                      ))}
                     </Select>
                   )}
                 </Field>
@@ -1148,7 +1342,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 Buat organisasi
               </Button>
             </form>
-            </CardContent>
+            </FormDialog>
           </DashCard>
 
           <DashCard className="gap-4">
@@ -1158,8 +1352,27 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 Setiap grant mengatur akses baca, ekspor, dan teks bebas secara
                 terpisah per akun.
               </CardDescription>
+              <CardAction>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    setScopeAccount(
+                      accounts.find((a) => a.role !== "super_admin")?.id ?? null,
+                    )
+                  }
+                >
+                  <PlusIcon aria-hidden="true" className="size-4" />
+                  Tambah cakupan
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+            {accessGrants.length === 0 && (
+              <p className="text-body-sm text-[color:var(--ad-muted)]">
+                Belum ada cakupan. Setiap cakupan memberi satu akun akses baca,
+                ekspor, atau teks bebas untuk satu survei.
+              </p>
+            )}
             {accessGrants.map((g) => {
               const acc = accounts.find((a) => a.id === g.account_id);
               const current = grants[g.id] ?? {
@@ -1220,16 +1433,18 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
               );
             })}
 
-            <div className="rounded-md border border-dashed border-[var(--ad-border)] p-4">
-              <h2 className="text-body font-bold text-[color:var(--ad-text)]">
-                Tambah atau perbarui cakupan
-              </h2>
+            <FormDialog
+              open={scopeAccount !== null}
+              title="Tambah cakupan izin"
+              description="Pilih akun dan survei, lalu tentukan akses baca, ekspor, dan teks bebasnya."
+              onClose={() => setScopeAccount(null)}
+            >
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
                 <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-[color:var(--ad-muted)]">
                   Akun
                   <Select
                     aria-label="Akun untuk cakupan baru"
-                    value={scopeAccount}
+                    value={scopeAccount ?? ""}
                     onChange={(event) => setScopeAccount(event.target.value)}
                     className="min-h-[44px] w-full min-w-0 font-normal"
                   >
@@ -1287,6 +1502,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                   scopeBusy || mutationsBlocked || !scopeAccount || !scopeSurvey
                 }
                 onClick={() => {
+                  if (!scopeAccount) return;
                   const accountId = scopeAccount;
                   const surveyId = scopeSurvey;
                   const rows = accessGrants
@@ -1333,6 +1549,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                           },
                         }));
                       }
+                      setScopeAccount(null);
                       notify("Cakupan izin berhasil disimpan.");
                     })
                     .catch((error: unknown) =>
@@ -1348,7 +1565,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
               >
                 Simpan cakupan
               </Button>
-            </div>
+            </FormDialog>
             <div className="flex flex-wrap gap-3">
               <Button
                 onClick={() => {
@@ -1378,9 +1595,6 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
               >
                 Simpan izin
               </Button>
-              <ActionLink to={ROUTES.adminAudit} variant="secondary">
-                Lihat log perubahan izin
-              </ActionLink>
             </div>
             {saved && (
               <Banner tone="success" title="Izin tersimpan">
@@ -1389,15 +1603,6 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
             )}
             </CardContent>
           </DashCard>
-
-          <SoftCard>
-            <h2 className="text-body font-bold text-[color:var(--ad-text)]">Teks bebas</h2>
-            <p className="text-body-sm text-[color:var(--ad-muted)]">
-              Teks bebas dapat memuat identitas yang ditulis responden. Batasi
-              dan periksa sebelum dibagikan; hanya penerima berizin yang boleh
-              membacanya.
-            </p>
-          </SoftCard>
         </div>
       </StateView>
     </>
@@ -1469,6 +1674,96 @@ export function AdminAuditPage() {
   );
 }
 
+/**
+ * Masa retensi platform. Halaman Profil platform dihapus: hanya nilai operasional ini yang
+ * dipakai, dan konteksnya cocok dengan Log audit karena batch penghapusan tercatat di sana.
+ */
+function RetentionCard() {
+  const notify = useToast();
+  const [raw, setRaw] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    void getPlatformProfile()
+      .then((profile) => {
+        setRaw(profile.retention_days === null ? "" : String(profile.retention_days));
+      })
+      .catch(() => setError("Masa retensi gagal dimuat."));
+  }, []);
+
+  const onSave = (event: FormEvent) => {
+    event.preventDefault();
+    const days = parseRetentionDays(raw);
+    if (days === undefined) {
+      setError("Masa retensi harus bilangan bulat 0 atau lebih.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    void savePlatformProfile({ retention_days: days })
+      .then((profile) => {
+        setRaw(profile.retention_days === null ? "" : String(profile.retention_days));
+        setSaved(true);
+        notify("Masa retensi tersimpan.");
+      })
+      .catch((failure: unknown) =>
+        notify(failure instanceof Error ? failure.message : "Masa retensi gagal disimpan.", "danger"),
+      )
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <DashCard className="gap-0 py-4">
+      <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <CardTitle className="text-body">Retensi data</CardTitle>
+          <p className="text-caption text-[color:var(--ad-muted)]">
+            Survei tanpa organisasi; yang berorganisasi memakai retensi
+            organisasinya. Kosong atau 0 berarti tanpa penghapusan otomatis.
+          </p>
+        </div>
+        <form onSubmit={onSave} className="flex flex-wrap items-center gap-2">
+          <div className="flex w-40 flex-col gap-1">
+            <Input
+              aria-label="Masa retensi (hari)"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "platform-retention-error" : undefined}
+              inputMode="numeric"
+              placeholder="Hari, mis. 30"
+              value={raw}
+              disabled={busy}
+              onChange={(event) => {
+                setSaved(false);
+                setError("");
+                setRaw(event.target.value);
+              }}
+            />
+            {error && (
+              <p
+                id="platform-retention-error"
+                role="alert"
+                className="text-caption font-bold text-[color:var(--ad-danger)]"
+              >
+                {error}
+              </p>
+            )}
+          </div>
+          <DashButton type="submit" disabled={busy}>
+            {busy ? "Menyimpan…" : "Simpan"}
+          </DashButton>
+          {saved && (
+            <p role="status" className="text-caption font-bold text-[color:var(--ad-success)]">
+              Tersimpan.
+            </p>
+          )}
+        </form>
+      </CardContent>
+    </DashCard>
+  );
+}
+
 function AdminAuditContent({ data }: { data: AdminData }) {
   const { auditLogs, accounts } = data;
   const { state } = useScreenState("admin-audit");
@@ -1486,47 +1781,24 @@ function AdminAuditContent({ data }: { data: AdminData }) {
         permissionDetail="Log operasional hanya dapat dibaca sesuai tugas."
       >
         <div className="flex flex-col gap-5">
-          <Banner tone="info" title="Catatan aktivitas">
-            Kolom dibatasi pada informasi operasional. Log tidak memuat token,
-            kredensial, atau jawaban.
-          </Banner>
-          <DashCard className="gap-3">
-            <CardHeader>
-              <CardTitle>Entri operasional</CardTitle>
-              <CardDescription>
-                Aktor yang dikenal tampil sebagai nama beserta ID; yang tidak
-                dikenal tampil sebagai ID.
-              </CardDescription>
-            </CardHeader>
+          <RetentionCard />
+          <DashCard className="gap-0 py-4">
             <CardContent>
               <DataTable
                 columns={auditColumns}
                 data={auditLogs}
+                title="Entri operasional"
+                subtitle="Aktor dikenal tampil sebagai nama; sisanya ID."
                 caption="Entri operasional: waktu, aktor, aksi, objek, dan hasil"
                 emptyMessage="Belum ada entri audit."
-                plain
+                compact
+                filterPlaceholder="Cari aktor, aksi, atau objek"
+                filterText={(log) =>
+                  `${log.at} ${names.get(log.actor) ?? log.actor} ${log.action} ${log.object} ${log.outcome}`
+                }
               />
             </CardContent>
           </DashCard>
-          <SoftCard>
-            <h2 className="text-body font-bold text-[color:var(--ad-text)]">
-              Cakupan pencatatan
-            </h2>
-            <ul className="flex list-inside list-disc flex-col gap-1 text-body-sm text-[color:var(--ad-muted)]">
-              <li>Perubahan izin dan status.</li>
-              <li>Akses jawaban individual dan penolakan akses.</li>
-              <li>Publikasi, penutupan, dan ekspor beserta penerima.</li>
-              <li>Event integrasi dicatat dengan ID kejadian yang tetap.</li>
-            </ul>
-          </SoftCard>
-          <div className="flex flex-wrap gap-3">
-            <ActionLink to={ROUTES.adminIntegration} variant="secondary">
-              Lihat event integrasi
-            </ActionLink>
-            <ActionLink to={ROUTES.admin} variant="secondary">
-              Kembali ke ringkasan
-            </ActionLink>
-          </div>
         </div>
       </StateView>
     </>

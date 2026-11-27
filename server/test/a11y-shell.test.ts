@@ -262,7 +262,6 @@ test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda sel
   const CHROME_PAGES: Array<[string, string]> = [
     [ROUTES.admin, 'Ringkasan'],
     [ROUTES.adminAccounts, 'Akun &amp; izin'],
-    [ROUTES.adminPlatform, 'Profil platform'],
     [ROUTES.adminAudit, 'Log audit'],
     [ROUTES.adminIntegration, 'Integrasi'],
     [ROUTES.adminRequests, 'Permintaan data'],

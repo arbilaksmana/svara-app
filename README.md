@@ -240,7 +240,7 @@ Batas yang belum tertutup: tabel `responses` tidak merujuk `consent_records`, se
 | Endpoint | Perilaku |
 | --- | --- |
 | `GET /org/profile` | Akun berorganisasi mendapat profil organisasinya; akun tanpa organisasi (termasuk `super_admin`) mendapat `platform_profile` dengan `source: 'platform'` |
-| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan. `respondent_age_category`/`consent_mode` bukan bagian profil dan tidak dibaca dari body |
+| `PUT /org/profile` | Hanya `org_admin` berorganisasi; field yang tidak dikirim mempertahankan nilai tersimpan; `organization_type` divalidasi terhadap `ORGANIZATION_TYPES`. `respondent_age_category`/`consent_mode` bukan bagian profil dan tidak dibaca dari body |
 | `GET /org/members` | Daftar akun dengan `organization_id` sesi; cache `no-store` |
 | `PATCH /org/members/:id` | Hanya status `active`/`suspended` untuk anggota berperan `creator` di organisasi sendiri; akun di luar organisasi dijawab `404` agar keberadaannya tidak bocor; penangguhan menghapus semua sesi anggota |
 | `GET /org/invitations` | Daftar maksimal 50 kode terbaru organisasi sesi (`INVITATION_LIST_LIMIT`); status `active`/`used`/`revoked`/`expired` dihitung dari kolom waktu dengan prioritas used > revoked > expired > active, bukan disimpan |
@@ -270,9 +270,9 @@ Di `/admin/accounts`, kolom "Organisasi" memuat daftar dari `bootstrap.organizat
 
 ### Membuat organisasi baru
 
-Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.ts`): organisasi dan admin pertamanya dibuat dalam satu transaksi, sehingga tidak ada organisasi tanpa pengelola. Body wajib memuat `name`, `organization_type` (`school` atau `organization`), dan `admin` berisi `display_name`, `email`, serta `password`.
+Onboarding satu langkah lewat `POST /admin/organizations` (`server/routes/admin.ts`): organisasi dan admin pertamanya dibuat dalam satu transaksi, sehingga tidak ada organisasi tanpa pengelola. Body wajib memuat `name`, `organization_type`, dan `admin` berisi `display_name`, `email`, serta `password`. `organization_type` diambil dari satu daftar di `server/organization-types.ts` (`ORGANIZATION_TYPES`) yang juga dipakai `PUT /org/profile` dan disalin ke `src/lib/types.ts` untuk klien: `school`, `higher_education`, `company`, `cooperative`, `government`, `community`, `organization` (label Indonesia di `ORGANIZATION_TYPE_LABEL`, `src/lib/labels.ts`).
 
-- `organization_type` selain dua nilai itu ditolak `422 validation_error`; `admin.password` mengikuti kebijakan yang sama dengan pendaftaran (`422 weak_password`).
+- `organization_type` di luar daftar itu ditolak `422 validation_error` pada `POST /admin/organizations` dan `PUT /org/profile`; `admin.password` mengikuti kebijakan yang sama dengan pendaftaran (`422 weak_password`).
 - Email yang sudah terdaftar ditolak `409 email_taken`; untuk akun lama, tautkan lewat `PATCH /admin/accounts/:id`.
 - `policy_url`/`terms_url` default ke halaman `/kebijakan-privasi` dan `/ketentuan-layanan`, lalu dapat diubah `org_admin` lewat `PUT /org/profile`.
 - Akun admin hasil onboarding belum mencatat persetujuan kebijakan (`consent_version` NULL) karena belum ada yang menyetujui.
@@ -285,7 +285,7 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 
 ### Profil platform
 
-`platform_profile` dipakai survei dan akun tanpa organisasi, dan `super_admin` mengubahnya lewat `/admin/platform` (`src/app/admin/platform/page.tsx`). Endpoint-nya ada di router admin sehingga otomatis hanya untuk `super_admin` (`requireRole(['super_admin'])` pada `adminRouter` di `server/routes/admin.ts`):
+`platform_profile` dipakai survei dan akun tanpa organisasi. Halaman `/admin/platform` sudah dihapus (redirect ke `/admin/audit`); satu-satunya nilai yang dapat diubah dari UI adalah `retention_days`, lewat kartu "Retensi data" di `/admin/audit`. Endpoint-nya ada di router admin sehingga otomatis hanya untuk `super_admin` (`requireRole(['super_admin'])` pada `adminRouter` di `server/routes/admin.ts`):
 
 | Endpoint | Perilaku |
 | --- | --- |
@@ -293,6 +293,8 @@ Di `/admin/accounts`, kartu "Organisasi" menampilkan organisasi beserta jumlah a
 | `PUT /admin/platform-profile` | Field yang tidak dikirim mempertahankan nilai tersimpan; `organization_name`, `organization_type`, `policy_url`, `terms_url` wajib; `retention_days` bilangan bulat >= 0 atau null; `cross_border_transfer` hanya `boolean` (null "belum diputuskan" berasal dari seed dan tidak dapat dikembalikan lewat API); setiap perubahan diaudit `Ubah profil platform` |
 
 `notice_version` dan `updated_at` tidak dapat diubah dari sini: `notice_version` naik saat teks kebijakan berubah, `updated_at` diisi server. Profil ini tidak memiliki `respondent_age_category` maupun `consent_mode`; kebutuhan bukti persetujuan didefinisikan per survei (`surveys.consent_required`). Perubahan di sini tidak menyentuh baris `organizations`; `GET /org/profile` untuk akun berorganisasi tetap membaca organisasinya.
+
+Menyimpan masa retensi hanya menulis satu baris `platform_profile.retention_days`. `purgeExpiredResponses` di `server/retention.ts` belum punya entry CLI maupun jadwal (OPS-03), jadi tidak ada penghapusan respons/persetujuan yang berjalan otomatis; penghapusan baru terjadi bila fungsi itu dijalankan.
 
 ### Belum tersedia
 

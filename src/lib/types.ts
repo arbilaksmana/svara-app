@@ -1,6 +1,13 @@
 /** Tipe domain Modul 14. Mengikuti PRD §6 dan §1.2. Semua data bersifat sintetis. */
 
-export type OrganizationType = 'school' | 'organization';
+export type OrganizationType =
+  | 'school'
+  | 'higher_education'
+  | 'company'
+  | 'cooperative'
+  | 'government'
+  | 'community'
+  | 'organization';
 /** `wajib_upload` hanya berlaku untuk survei organisasi; survei personal selalu `tidak`. */
 export type ConsentRequired = 'tidak' | 'wajib_upload';
 

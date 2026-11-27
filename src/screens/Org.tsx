@@ -34,6 +34,7 @@ import {
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
   ORGANIZATION_TYPE_LABEL,
+  ORGANIZATION_TYPES,
   ROLE_LABEL,
 } from '../lib/labels';
 import { cancelOrgWorkspaceLoad, loadOrgWorkspace, useStore } from '../lib/store';
@@ -45,8 +46,6 @@ import type { OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../
 const FIELD_FOR_CODE: Record<string, 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact'> = {
   validation_error: 'organization_name',
 };
-
-const ORG_TYPES: OrganizationType[] = ['school', 'organization'];
 
 interface FormState {
   organization_name: string;
@@ -229,7 +228,7 @@ export function AdminOrgPage() {
                       onChange={(event) => setField('organization_type', event.target.value as OrganizationType)}
                       className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink"
                     >
-                      {ORG_TYPES.map((value) => (
+                      {ORGANIZATION_TYPES.map((value) => (
                         <option key={value} value={value}>{ORGANIZATION_TYPE_LABEL[value]}</option>
                       ))}
                     </select>

@@ -16,7 +16,7 @@ export function CardHeader({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       data-slot="card-header"
-      className={cn('grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto]', className)}
+      className={cn('grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 px-6 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto]', className)}
       {...props}
     />
   );
@@ -30,9 +30,9 @@ export function CardDescription({ className, ...props }: ComponentProps<'div'>) 
   return <div data-slot="card-description" className={cn('text-body-sm text-[color:var(--ad-muted)]', className)} {...props} />;
 }
 
-/** Slot kanan atas header (mis. badge tren), sejajar dengan judul dan deskripsi. */
+/** Slot aksi header: di layar ≥sm sejajar judul di kanan; di layar kecil turun ke bawah deskripsi, rata kiri. */
 export function CardAction({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="card-action" className={cn('col-start-2 row-span-2 row-start-1 self-start justify-self-end', className)} {...props} />;
+  return <div data-slot="card-action" className={cn('col-start-1 row-start-3 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:self-start sm:justify-self-end', className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: ComponentProps<'div'>) {

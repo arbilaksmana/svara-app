@@ -9,8 +9,16 @@ export const STATUS_LABEL: Record<SurveyStatus | VersionStatus, string> = {
 
 export const ORGANIZATION_TYPE_LABEL: Record<OrganizationType, string> = {
   school: 'Sekolah',
-  organization: 'Organisasi',
+  higher_education: 'Perguruan tinggi',
+  company: 'Perusahaan',
+  cooperative: 'Koperasi',
+  government: 'Instansi pemerintah',
+  community: 'Komunitas',
+  organization: 'Organisasi lain',
 };
+
+/** Urutan opsi dropdown mengikuti urutan label di atas; satu sumber untuk Admin dan Profil organisasi. */
+export const ORGANIZATION_TYPES = Object.keys(ORGANIZATION_TYPE_LABEL) as OrganizationType[];
 
 export const CONSENT_REQUIRED_LABEL: Record<ConsentRequired, string> = {
   tidak: 'Persetujuan diri',

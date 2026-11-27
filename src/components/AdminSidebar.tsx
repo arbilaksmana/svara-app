@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { LayoutGrid } from 'runeicons-react/icons/LayoutGrid';
-import { Earth } from 'runeicons-react/icons/Earth';
 import { Users } from 'runeicons-react/icons/Users';
 import { FileText } from 'runeicons-react/icons/FileText';
 import { Link2 } from 'runeicons-react/icons/Link2';
@@ -30,7 +29,7 @@ import {
 
 /**
  * Sidebar admin gaya shadcn — chrome seluruh halaman super admin (/admin, /admin/accounts,
- * /admin/platform, /admin/audit, /admin/integration, /admin/requests).
+ * /admin/audit, /admin/integration, /admin/requests).
  * Desktop: kolom tetap 256px di kiri. Mobile: bar atas tipis dengan tombol menu yang membuka drawer.
  * Halaman organisasi (/admin/org*) dan peran lain tetap memakai chrome lama (pill + sidebar Shell).
  */
@@ -42,7 +41,6 @@ const NAV_GROUPS: Array<{ label: string; items: AdminNavEntry[] }> = [
     label: 'Platform',
     items: [
       { to: ROUTES.admin, label: 'Ringkasan', icon: withIconClass(LayoutGrid) },
-      { to: ROUTES.adminPlatform, label: 'Profil platform', icon: withIconClass(Earth) },
     ],
   },
   {

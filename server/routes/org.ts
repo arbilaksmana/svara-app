@@ -5,6 +5,7 @@ import { all, get, nowIso, run, withTx } from '../db.ts';
 import { readGuardianEvidence } from '../guardian-evidence.ts';
 import { redactAuditRow, revokeSessionsOnStatusChange, type AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
+import { ORGANIZATION_TYPE_SET, ORGANIZATION_TYPES } from '../organization-types.ts';
 import {
   INVITATION_LIST_LIMIT, INVITATION_TTL_DAYS,
   ORGANIZATION_INVITATION_COLUMNS,
@@ -80,6 +81,11 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       return value;
     };
 
+    const organizationType = required('organization_type', current.organization_type, 50);
+    if (!ORGANIZATION_TYPE_SET.has(organizationType)) {
+      fail(422, 'validation_error', `organization_type harus salah satu: ${ORGANIZATION_TYPES.join(', ')}.`);
+    }
+
     let retentionDays: number | null = current.retention_days;
     if (body.retention_days !== undefined) {
       const value = body.retention_days;
@@ -131,7 +137,7 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
                 data_request_contact = ?, cross_border_transfer = ?, notice_version = ?
           WHERE id = ?`,
         required('organization_name', current.organization_name, 200),
-        required('organization_type', current.organization_type, 50),
+        organizationType,
         required('policy_url', current.policy_url, 500),
         required('terms_url', current.terms_url, 500),
         retentionDays,

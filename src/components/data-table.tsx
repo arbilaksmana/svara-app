@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
@@ -19,6 +20,7 @@ import { ChevronRight } from "runeicons-react/icons/ChevronRight";
 import { Columns3 } from "runeicons-react/icons/Columns3";
 import { withIconClass } from "./rune-icon";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { Select } from "./ui/select";
 import {
   DropdownMenu,
@@ -78,6 +80,11 @@ export function DataTable<TData, TValue>({
   emptyMessage,
   title,
   plain = false,
+  filterPlaceholder,
+  filterText,
+  subtitle,
+  compact = false,
+  toolbarExtra,
 }: {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -88,19 +95,40 @@ export function DataTable<TData, TValue>({
   title?: ReactNode;
   /** True: kontrol sorting, pagination, dan kolom disembunyikan; semua baris dirender. */
   plain?: boolean;
+  /** Placeholder isian cari; mengisi ini menampilkan kontrol pencarian di baris kontrol. */
+  filterPlaceholder?: string;
+  /** Teks yang dicari per baris; bawaan: semua nilai aksesornya. */
+  filterText?: (row: TData) => string;
+  /** Keterangan singkat di bawah baris kontrol, sejajar kiri dengan judul. */
+  subtitle?: string;
+  /** Kontrol ringkas ala /admin/audit: tanpa label "Baris per halaman", opsi "{n} baris". */
+  compact?: boolean;
+  /** Kontrol tambahan sebelum isian cari, mis. filter jenis pada kolom tertentu. */
+  toolbarExtra?: ReactNode;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 5 });
+  const [filter, setFilter] = useState("");
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnVisibility, pagination },
+    state: { sorting, columnVisibility, pagination, globalFilter: filter },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
+    onGlobalFilterChange: setFilter,
+    globalFilterFn: (row, _columnId, value) => {
+      const query = String(value).trim().toLowerCase();
+      if (!query) return true;
+      const haystack = filterText
+        ? filterText(row.original)
+        : Object.values(row.original as Record<string, unknown>).join(" ");
+      return haystack.toLowerCase().includes(query);
+    },
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
   });
@@ -124,6 +152,7 @@ export function DataTable<TData, TValue>({
   const [viewportRef, overflows] = useOverflowX<HTMLDivElement>(visibleCount);
   // `plain` memakai baris sebelum pagination: kontrol halaman disembunyikan, jadi semua baris harus terlihat.
   const rows = plain ? table.getPrePaginationRowModel().rows : table.getPaginationRowModel().rows;
+  const filteredCount = table.getFilteredRowModel().rows.length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -132,27 +161,56 @@ export function DataTable<TData, TValue>({
         hidden={plain}
       >
         {title ? (
-          <div className="flex min-h-9 items-center text-body font-bold text-[color:var(--ad-text)]">
+          <div className="flex min-h-11 items-center text-body font-bold text-[color:var(--ad-text)]">
             {title}
           </div>
         ) : null}
         <div className="ms-auto flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-caption text-[color:var(--ad-muted)]">
-          Baris per halaman
-          <Select
-            value={String(pageSize)}
+        {toolbarExtra}
+        {filterPlaceholder ? (
+          <Input
+            type="search"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder={filterPlaceholder}
+            aria-label={filterPlaceholder}
+            className="w-56"
+          />
+        ) : null}
+        {compact ? (
+          <span className="w-28">
+            <Select
+              value={String(pageSize)}
               onChange={(event) =>
                 table.setPageSize(Number(event.target.value))
               }
-            aria-label="Baris per halaman"
-          >
-            {PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </Select>
-        </label>
+              aria-label="Baris per halaman"
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size} baris
+                </option>
+              ))}
+            </Select>
+          </span>
+        ) : (
+          <label className="flex items-center gap-2 text-caption text-[color:var(--ad-muted)]">
+            Baris per halaman
+            <Select
+              value={String(pageSize)}
+              onChange={(event) =>
+                table.setPageSize(Number(event.target.value))
+              }
+              aria-label="Baris per halaman"
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </Select>
+          </label>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] px-3 text-body-sm font-bold text-[color:var(--ad-text)] transition-colors duration-fast hover:bg-[var(--ad-soft)]">
               <Columns3Icon aria-hidden="true" className="size-4" />
@@ -178,6 +236,10 @@ export function DataTable<TData, TValue>({
         </DropdownMenu>
       </div>
       </div>
+
+      {!plain && subtitle ? (
+        <p className="text-caption text-[color:var(--ad-muted)]">{subtitle}</p>
+      ) : null}
 
       {minWidth && overflows ? (
         <p className="text-caption text-[color:var(--ad-muted)]">
@@ -270,7 +332,7 @@ export function DataTable<TData, TValue>({
                   colSpan={columns.length}
                   className="py-8 text-center text-[color:var(--ad-muted)]"
                 >
-                  {emptyMessage}
+                  {filter.trim() ? "Tidak ada entri yang cocok dengan pencarian." : emptyMessage}
                 </TableCell>
               </TableRow>
             )}
@@ -283,7 +345,8 @@ export function DataTable<TData, TValue>({
         hidden={plain}
       >
         <p className="text-caption text-[color:var(--ad-muted)]">
-          {data.length} baris
+          {filteredCount} baris
+          {filteredCount !== data.length ? ` dari ${data.length}` : ""}
           {pageCount > 1 ? ` · halaman ${pageIndex + 1} dari ${pageCount}` : ""}
         </p>
         <div className="flex items-center gap-2">
