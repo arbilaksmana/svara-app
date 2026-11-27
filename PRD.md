@@ -241,13 +241,14 @@ Gunakan awalan `/api/v1`. Klien menerima pesan yang dapat ditindaklanjuti tanpa 
 | PUT `/surveys/{id}` | Creator pemilik | Simpan metadata dan konfigurasi draf; pertahankan versi terbit |
 | POST `/surveys/{id}/publish` | Creator pemilik | Validasi, bekukan versi, terbitkan tautan |
 | POST `/surveys/{id}/close` atau `/surveys/{id}/archive` | Creator pemilik | Ubah status dengan validasi dan audit |
-| POST `/surveys/{id}/assignments` | Creator berwenang | Buat penugasan dan undangan individual |
+| POST `/surveys/{id}/invitations` | Creator berwenang | Buat penugasan dan undangan individual; mengembalikan `assignment_id`, `version_id`, dan URL formulir. Token mentah hanya muncul sekali di respons; basis data menyimpan hash-nya |
 | GET `/public/surveys/{token}` | Responden dengan akses | Kembalikan formulir versi aktif dan pemberitahuan |
 | POST `/public/surveys/{token}/responses` | Responden; `Idempotency-Key` | Validasi dan simpan atomik, kembalikan bukti |
 | GET/PUT `/surveys/{id}/settings` | Pemilik/`org_admin` | Izin hasil (`allowResults`, `allowIndividual`) dan `consent_required`; field yang tidak dikirim mempertahankan nilai tersimpan |
 | GET `/surveys/{id}/summary` | Pemilik berizin | Distribusi agregat per versi |
 | GET `/surveys/{id}/export` | Izin ekspor pada objek | CSV/kodebook per versi, catat ekspor dan filter kolom |
-| GET `/integration/survey-data` | Layanan Modul 15 berizin | Skema berversi, filter versi, pembatasan kolom, paginasi jika perlu |
+| POST `/integration/surveys/{id}/invitations` | Kredensial layanan Modul 13 berizin | Badan `participant_ref`, `label`, `expires_at`; mengembalikan `assignment_id`, `invitation_id`, `version_id`, dan `url` |
+| GET `/integration/survey-data` | Layanan Modul 15 berizin | Skema berversi, filter versi, pembatasan kolom, paginasi; parameter opsional `assignment_id`; respons menandai `simulated: true` |
 
 **Contoh kiriman dan bukti sintetis.** Nilai yang disimpan diturunkan dari konfigurasi opsi pada server. Header `Idempotency-Key` dipertahankan pada setiap retry kiriman tersebut.
 
@@ -263,7 +264,7 @@ Gunakan awalan `/api/v1`. Klien menerima pesan yang dapat ditindaklanjuti tanpa 
 
 ### 8.1 Kontrak Modul 13
 
-Simulasikan identitas peserta, penugasan, dan penerimaan event pada adapter layanan. Nama endpoint eksternal dan mekanisme autentikasi masih perlu disepakati antartim. Bedakan LMS mencatat tautan dibuka dari Modul 14 mencatat jawaban tersimpan. Contoh event ke layanan terotorisasi:
+Simulasikan identitas peserta, penugasan, dan penerimaan event pada adapter layanan. Jalur masuk sudah tersedia lewat kredensial layanan (`POST /integration/surveys/{id}/invitations`); pengiriman event keluar ke Modul 13 masih terbuka, dan nama endpoint keluar serta mekanisme autentikasi finalnya masih perlu disepakati antartim. Integrasi nyata belum diuji. Bedakan LMS mencatat tautan dibuka dari Modul 14 mencatat jawaban tersimpan. Contoh event ke layanan terotorisasi:
 
 ```json
 {"schema_version":1,"event_id":"ev_demo01","type":"survey.submitted","assignment_id":"a_demo","respondent_id":"p_demo01","submitted_at":"2026-11-09T05:00:00Z"}
