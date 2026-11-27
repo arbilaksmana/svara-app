@@ -204,11 +204,17 @@ test('UIX-14: semua select, textarea, dan input di src memakai token batas denga
       checked.set(name, (checked.get(name) ?? 0) + 1);
     }
   }
-  const minimums = [['components/ui.tsx', 2], ['components/ui/input.tsx', 1], ['components/ui/select.tsx', 1], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2]] as const;
+  const minimums = [['components/ui.tsx', 2], ['components/ui/input.tsx', 1], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2]] as const;
   for (const [file, minimum] of minimums) {
     const found = checked.get(file) ?? 0;
     assert.ok(found >= minimum, `Pemindaian harus memeriksa ≥ ${minimum} kontrol bertoken batas di ${file}, ditemukan ${found}`);
   }
+  /* Select registry memakai trigger tombol (Radix), bukan elemen <select>, jadi tidak terjaring
+     loop di atas. Kontraknya tetap sama: batas kontrol memakai token dengan kontras ≥ 3:1. */
+  const selectSource = readFileSync(new URL('../../src/components/ui/select.tsx', import.meta.url), 'utf8');
+  assert.ok(selectSource.includes('border-input'), 'Trigger Select harus memakai token batas --color-input');
+  const inputRatio = contrast('input', 'canvas');
+  assert.ok(inputRatio >= 3, `Batas input di atas canvas hanya ${inputRatio.toFixed(2)}:1 (butuh ≥ 3:1)`);
 });
 
 test('UIX-15: anotasi langkah di landing memakai token teks dengan kontras ≥ 4,5:1', () => {

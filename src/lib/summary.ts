@@ -83,6 +83,32 @@ export function formatWIB(iso: string): string {
   return `${WIB.format(new Date(iso))} WIB`;
 }
 
+const WIB_DATE = new Intl.DateTimeFormat('id-ID', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'Asia/Jakarta',
+});
+
+const WIB_TIME = new Intl.DateTimeFormat('id-ID', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: 'Asia/Jakarta',
+});
+
+/**
+ * Tanggal dan jam WIB dipisah agar tabel audit dapat menumpuk keduanya tanpa kolom melebar,
+ * sekaligus tetap menyebut satuan WIB pada baris jam.
+ */
+export function formatWIBDate(iso: string): string {
+  return WIB_DATE.format(new Date(iso));
+}
+
+export function formatWIBTime(iso: string): string {
+  return `${WIB_TIME.format(new Date(iso))} WIB`;
+}
+
 const UTC_DATE = new Intl.DateTimeFormat('id-ID', { dateStyle: 'long', timeZone: 'UTC' });
 /** Server menormalkan tanggal saja (`YYYY-MM-DD`) menjadi akhir hari UTC. */
 const END_OF_DAY_UTC = /T23:59:59(?:\.\d{1,3})?Z$/;

@@ -289,24 +289,24 @@ export function AdminOrgPage() {
                 </div>
               </div>
             ) : (
-              <p className="text-body-sm text-muted">Profil organisasi belum dimuat.</p>
+              <p className="text-body-sm text-ink-muted">Profil organisasi belum dimuat.</p>
             )}
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={onSave} loading={busy} disabled={!form || busy}>Simpan profil</Button>
-              {profile && <p className="text-caption text-muted">Kode organisasi: <Code>{profile.id}</Code></p>}
+              {profile && <p className="text-caption text-ink-muted">Kode organisasi: <Code>{profile.id}</Code></p>}
             </div>
           </Card>
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Anggota</SectionTitle>
-            <p className="text-body-sm text-muted">Hanya status creator di organisasi ini yang dapat diubah. Peran tidak dapat diubah di sini.</p>
+            <p className="text-body-sm text-ink-muted">Hanya status creator di organisasi ini yang dapat diubah. Peran tidak dapat diubah di sini.</p>
             {members.length === 0 ? (
-              <p className="text-body-sm text-muted">Belum ada anggota.</p>
+              <p className="text-body-sm text-ink-muted">Belum ada anggota.</p>
             ) : (
               <Table head={['Nama', 'Email', 'Peran', 'Status', 'Aksi']}>
                 {members.map((member) => (
                   <tr key={member.id}>
-                    <Th>{member.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted"><Code>{member.id}</Code></span></Th>
+                    <Th>{member.display_name}<span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-ink-muted"><Code>{member.id}</Code></span></Th>
                     <Td>{member.email}</Td>
                     <Td>{ROLE_LABEL[member.role]}</Td>
                     <Td><Badge tone={member.status === 'active' ? 'success' : 'neutral'}>{ACCOUNT_STATUS_LABEL[member.status]}</Badge></Td>
@@ -328,7 +328,7 @@ export function AdminOrgPage() {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Undangan creator</SectionTitle>
-            <p className="text-body-sm text-muted">
+            <p className="text-body-sm text-ink-muted">
               Kode undangan dipakai sekali saat pendaftaran dan menautkan akun baru ke organisasi ini.
               Setiap kode berlaku 14 hari dan dapat dicabut sebelum dipakai.
             </p>
@@ -338,7 +338,7 @@ export function AdminOrgPage() {
               </Button>
             </div>
             {invitations.length === 0 ? (
-              <p className="text-body-sm text-muted">Belum ada kode undangan.</p>
+              <p className="text-body-sm text-ink-muted">Belum ada kode undangan.</p>
             ) : (
               <Table head={['Kode', 'Status', 'Dibuat', 'Kedaluwarsa', 'Aksi']}>
                 {invitations.map((row) => (
@@ -351,7 +351,7 @@ export function AdminOrgPage() {
                       {row.status === 'active' ? (
                         <Button variant="ghost" disabled={invitationBusy} onClick={() => setRevokeTarget(row)}>Cabut</Button>
                       ) : (
-                        <span className="text-caption text-muted">—</span>
+                        <span className="text-caption text-ink-muted">—</span>
                       )}
                     </Td>
                   </tr>
@@ -375,7 +375,7 @@ export function AdminOrgPage() {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Log audit organisasi</SectionTitle>
             {audit.length === 0 ? (
-              <p className="text-body-sm text-muted">Belum ada aktivitas organisasi.</p>
+              <p className="text-body-sm text-ink-muted">Belum ada aktivitas organisasi.</p>
             ) : (
               <Table head={['Waktu', 'Aktor', 'Tindakan', 'Objek', 'Hasil']}>
                 {audit.map((row) => (

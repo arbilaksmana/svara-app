@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -21,7 +21,13 @@ import { Columns3 } from "runeicons-react/icons/Columns3";
 import { withIconClass } from "./rune-icon";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Select } from "./ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -40,27 +46,6 @@ import {
 } from "./ui/table";
 
 const PAGE_SIZES = [5, 10, 20];
-
-/**
- * True saat isi tabel melebihi lebarnya. Petunjuk geser mengikuti keadaan nyata, bukan ambang
- * viewport: lebar tabel tergantung jumlah kolom dan merek, jadi breakpoint tebakan selalu salah
- * di satu sisi (mis. 768px: tabel audit muat, tabel lain belum).
- */
-function useOverflowX<T extends HTMLElement>(dependency: unknown) {
-  const ref = useRef<T>(null);
-  const [overflows, setOverflows] = useState(false);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const update = () => setOverflows(node.scrollWidth > node.clientWidth + 1);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    for (const child of Array.from(node.children)) observer.observe(child);
-    return () => observer.disconnect();
-  }, [dependency]);
-  return [ref, overflows] as const;
-}
 
 const ArrowDownIcon = withIconClass(ArrowDown);
 const ArrowUpIcon = withIconClass(ArrowUp);
@@ -85,6 +70,8 @@ export function DataTable<TData, TValue>({
   subtitle,
   compact = false,
   toolbarExtra,
+  filter: filterProp,
+  onFilterChange,
 }: {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -105,11 +92,21 @@ export function DataTable<TData, TValue>({
   compact?: boolean;
   /** Kontrol tambahan sebelum isian cari, mis. filter jenis pada kolom tertentu. */
   toolbarExtra?: ReactNode;
+  /** Nilai pencarian terkendali; kosongkan untuk state internal. */
+  filter?: string;
+  /** Perubahan pencarian saat nilai dikendalikan pemanggil. */
+  onFilterChange?: (value: string) => void;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 5 });
-  const [filter, setFilter] = useState("");
+  const [innerFilter, setInnerFilter] = useState("");
+  const filter = filterProp ?? innerFilter;
+  const updateFilter = (value: string | ((old: string) => string)) => {
+    const next = typeof value === "function" ? value(filter) : value;
+    if (onFilterChange) onFilterChange(next);
+    else setInnerFilter(next);
+  };
 
   const table = useReactTable({
     data,
@@ -118,7 +115,7 @@ export function DataTable<TData, TValue>({
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
-    onGlobalFilterChange: setFilter,
+    onGlobalFilterChange: updateFilter,
     globalFilterFn: (row, _columnId, value) => {
       const query = String(value).trim().toLowerCase();
       if (!query) return true;
@@ -137,19 +134,18 @@ export function DataTable<TData, TValue>({
     .getAllColumns()
     .filter((column) => column.getCanHide());
   // Ambang lebar minimum dihitung dari kolom yang terlihat: menyembunyikan kolom lewat menu
-  // "Kolom" mengubah kebutuhan min-w, dan petunjuk geser ikut diukur ulang (`useOverflowX`).
+  // "Kolom" mengubah kebutuhan min-w.
   const visibleCount = table.getVisibleLeafColumns().length;
   const minWidth =
     visibleCount >= 6
       ? "min-w-[44rem]"
       : visibleCount >= 5
-        ? "min-w-[40rem]"
+        ? "min-w-[36rem]"
         : visibleCount >= 4
-          ? "min-w-[34rem]"
+          ? "min-w-[32rem]"
           : "";
   const { pageIndex, pageSize } = table.getState().pagination;
   const pageCount = table.getPageCount();
-  const [viewportRef, overflows] = useOverflowX<HTMLDivElement>(visibleCount);
   // `plain` memakai baris sebelum pagination: kontrol halaman disembunyikan, jadi semua baris harus terlihat.
   const rows = plain ? table.getPrePaginationRowModel().rows : table.getPaginationRowModel().rows;
   const filteredCount = table.getFilteredRowModel().rows.length;
@@ -161,58 +157,62 @@ export function DataTable<TData, TValue>({
         hidden={plain}
       >
         {title ? (
-          <div className="flex min-h-11 items-center text-body font-bold text-[color:var(--ad-text)]">
+          <div className="flex min-h-11 items-center text-body font-bold text-foreground">
             {title}
           </div>
         ) : null}
         <div className="ms-auto flex flex-wrap items-center gap-2">
-        {toolbarExtra}
         {filterPlaceholder ? (
           <Input
             type="search"
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) => updateFilter(event.target.value)}
             placeholder={filterPlaceholder}
             aria-label={filterPlaceholder}
             className="w-56"
           />
         ) : null}
+        {toolbarExtra}
         {compact ? (
-          <span className="w-28">
+          <span className="w-32">
             <Select
               value={String(pageSize)}
-              onChange={(event) =>
-                table.setPageSize(Number(event.target.value))
-              }
-              aria-label="Baris per halaman"
+              onValueChange={(value) => table.setPageSize(Number(value))}
             >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size} baris
-                </option>
-              ))}
+              <SelectTrigger aria-label="Baris per halaman" className="h-11 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size} baris
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </span>
         ) : (
-          <label className="flex items-center gap-2 text-caption text-[color:var(--ad-muted)]">
+          <label className="flex items-center gap-2 whitespace-nowrap text-caption text-muted-foreground">
             Baris per halaman
             <Select
               value={String(pageSize)}
-              onChange={(event) =>
-                table.setPageSize(Number(event.target.value))
-              }
-              aria-label="Baris per halaman"
+              onValueChange={(value) => table.setPageSize(Number(value))}
             >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
+              <SelectTrigger aria-label="Baris per halaman" className="h-11 w-20">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </label>
         )}
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] px-3 text-body-sm font-bold text-[color:var(--ad-text)] transition-colors duration-fast hover:bg-[var(--ad-soft)]">
+          <DropdownMenuTrigger className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-border bg-card px-3 text-body-sm font-bold text-foreground transition-colors duration-fast hover:bg-muted">
               <Columns3Icon aria-hidden="true" className="size-4" />
             Kolom
           </DropdownMenuTrigger>
@@ -224,8 +224,8 @@ export function DataTable<TData, TValue>({
                 <DropdownMenuCheckboxItem
                   key={column.id}
                   checked={column.getIsVisible()}
-                    onCheckedChangeAction={(checked) =>
-                      column.toggleVisibility(checked)
+                    onCheckedChange={(checked) =>
+                      column.toggleVisibility(checked === true)
                     }
                 >
                     {typeof header === "string" ? header : column.id}
@@ -238,22 +238,12 @@ export function DataTable<TData, TValue>({
       </div>
 
       {!plain && subtitle ? (
-        <p className="text-caption text-[color:var(--ad-muted)]">{subtitle}</p>
+        <p className="text-caption text-muted-foreground">{subtitle}</p>
       ) : null}
 
-      {minWidth && overflows ? (
-        <p className="text-caption text-[color:var(--ad-muted)]">
-          Geser tabel ke samping untuk melihat semua kolom.
-        </p>
-      ) : null}
-      <div className="rounded-md border border-[var(--ad-border)]">
-        <Table
-          scrollRegionLabel={minWidth ? caption : undefined}
-          className={minWidth}
-          viewportRef={minWidth ? viewportRef : undefined}
-          measureKey={visibleCount}
-        >
-          <TableCaption>{caption}</TableCaption>
+      <div className="rounded-md border border-border">
+        <Table className={minWidth} scrollRegionLabel={minWidth ? caption : undefined}>
+          <TableCaption className="sr-only">{caption}</TableCaption>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -274,7 +264,7 @@ export function DataTable<TData, TValue>({
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-bold text-[color:var(--ad-muted)] transition-colors duration-fast hover:text-[color:var(--ad-text)]"
+                          className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-bold text-muted-foreground transition-colors duration-fast hover:text-foreground"
                         >
                           {flexRender(
                             header.column.columnDef.header,
@@ -293,7 +283,7 @@ export function DataTable<TData, TValue>({
                           ) : (
                             <ArrowUpDownIcon
                               aria-hidden="true"
-                              className="size-3.5 text-[color:var(--ad-icon-low)]"
+                              className="size-3.5 text-muted-foreground"
                             />
                           )}
                         </button>
@@ -330,7 +320,7 @@ export function DataTable<TData, TValue>({
               <TableRow className="hover:bg-transparent">
                 <TableCell
                   colSpan={columns.length}
-                  className="py-8 text-center text-[color:var(--ad-muted)]"
+                  className="py-8 text-center text-muted-foreground"
                 >
                   {filter.trim() ? "Tidak ada entri yang cocok dengan pencarian." : emptyMessage}
                 </TableCell>
@@ -344,7 +334,7 @@ export function DataTable<TData, TValue>({
         className="flex flex-wrap items-center justify-between gap-2"
         hidden={plain}
       >
-        <p className="text-caption text-[color:var(--ad-muted)]">
+        <p className="text-caption text-muted-foreground">
           {filteredCount} baris
           {filteredCount !== data.length ? ` dari ${data.length}` : ""}
           {pageCount > 1 ? ` · halaman ${pageIndex + 1} dari ${pageCount}` : ""}
@@ -352,7 +342,6 @@ export function DataTable<TData, TValue>({
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            size="sm"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
             aria-label="Halaman sebelumnya"
@@ -362,7 +351,6 @@ export function DataTable<TData, TValue>({
           </Button>
           <Button
             variant="outline"
-            size="sm"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
             aria-label="Halaman berikutnya"

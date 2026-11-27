@@ -422,7 +422,7 @@ Quick Color Reference:
 ```css
 @theme {
   --color-canvas: #ffffff;      --color-ink: #303135;
-  --color-muted: #71747d;       --color-border: #d8dce8;
+  --color-ink-muted: #71747d;   --color-border: #d8dce8;
   --color-action: #0064d2;      --color-action-hover: #0534c1;
   --color-action-soft: #e7f2ff;
   --color-danger: #c4382f;      --color-danger-soft: #ffdfdf;
@@ -449,6 +449,30 @@ Quick Color Reference:
   --shadow-overlay: 0 4px 12px 0 rgba(48, 49, 53, .20);
 }
 ```
+
+### shadcn/ui (registry)
+
+Design system dan komponen **mengikuti bawaan registry shadcn**; warna tetap token di atas.
+Sumber komponen: `pnpm dlx shadcn add <nama>`, lalu sesuaikan. Registry memakai nama token
+semantik shadcn (`bg-background`, `text-muted-foreground`, `border-border`, `border-input`,
+`ring-ring`, `bg-primary`, …); blok `@theme inline` di akhir `src/app/globals.css` memetakan
+semua nama itu ke token DESIGN.md, jadi tidak ada warna baru di luar dokumen ini.
+
+Penyesuaian yang berlaku untuk setiap komponen hasil registry:
+
+| Penyesuaian | Alasan |
+|---|---|
+| Import `cn` dari `../../lib/utils`, bukan `"cn"` | CLI shadcn v3 menulis specifier salah dan menginstal paket npm `cn`; `pnpm remove cn` |
+| Ikon memakai `runeicons-react` (`runeicons-react/icons/<Nama>`) | satu set ikon di seluruh app, bukan `lucide-react` |
+| Tinggi kontrol minimum 44px (`h-11`, `min-h-11`) | target sentuh DESIGN.md |
+| Kelas `dark:` mati lewat `@custom-variant dark` | app hanya punya tema terang; tanpa guard, `dark:` ikut `prefers-color-scheme` OS |
+| `CardHeader`/`CardAction` memakai container query `@md/card-header` | aksi turun ke bawah deskripsi saat kartu < 448px, bukan meluber ke samping judul |
+| Badge menambah varian `success`, `warning`, `danger` | status tabel Ringkasan/audit/integrasi; warna dari token status |
+
+`--color-muted` **milik shadcn** (permukaan abu-abu `N100`). Teks sekunder karena itu bernama
+`--color-ink-muted` / `text-ink-muted`, sementara shadcn membacanya sebagai
+`--color-muted-foreground`. `--color-input` (#8d919c) adalah nama semantik batas kontrol dan
+dibaca uji kontras `server/test/a11y-shell.test.ts`.
 
 ---
 

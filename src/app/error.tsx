@@ -7,7 +7,7 @@ export default function ErrorPage({ reset }: { error: Error & { digest?: string 
     <div className="grid min-h-screen place-items-center bg-n50 p-6">
       <Card className="w-full max-w-[480px]">
         <h1 className="text-h2 font-bold text-ink">Halaman gagal dimuat</h1>
-        <p className="mt-2 text-body text-muted">
+        <p className="mt-2 text-body text-ink-muted">
           Terjadi gangguan saat memuat data. Sesi dan data terbaru tidak dapat diverifikasi.
         </p>
         <button

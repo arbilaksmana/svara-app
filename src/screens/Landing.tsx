@@ -116,7 +116,7 @@ export function HomePage() {
                 Susun instrumen sekali.
                 <span className="block text-n600">Terbitkan per versi.</span>
               </h1>
-              <p className="max-w-[52ch] text-body text-muted">
+              <p className="max-w-[52ch] text-body text-ink-muted">
                 Kelola pertanyaan berskala dan isian singkat, bekukan menjadi versi, kirim tautan atau undangan,
                 lalu baca ringkasan per versi. Tanpa mengubah kode untuk tiap topik.
               </p>
@@ -158,7 +158,7 @@ export function HomePage() {
                   ))}
                 </Table>
               </div>
-              <p className="text-caption text-muted">
+              <p className="text-caption text-ink-muted">
                 {questionsFor(activeDemo.id).length} item pada versi aktif.
                 Formulir yang sudah terbuka tetap memakai versinya sendiri.
               </p>
@@ -170,7 +170,7 @@ export function HomePage() {
           <section aria-labelledby="kemampuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <h2 id="kemampuan" className="text-h2 font-bold text-ink wrap-anywhere">Yang membedakan dari formulir biasa</h2>
-              <p className="max-w-[65ch] text-body text-muted">
+              <p className="max-w-[65ch] text-body text-ink-muted">
                 Empat hal yang dipakai setiap hari oleh pengelola survei.
               </p>
             </div>
@@ -185,7 +185,7 @@ export function HomePage() {
                   </span>
                   <div className="min-w-0">
                     <p className="text-body font-bold text-ink">{item.title}</p>
-                    <p className="mt-1 max-w-[62ch] text-body-sm text-muted">{item.detail}</p>
+                    <p className="mt-1 max-w-[62ch] text-body-sm text-ink-muted">{item.detail}</p>
                   </div>
                   <TextLink to={item.to()}>{item.action}</TextLink>
                 </div>
@@ -197,32 +197,32 @@ export function HomePage() {
           <section aria-labelledby="persetujuan" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <h2 id="persetujuan" className="text-h2 font-bold text-ink wrap-anywhere">Persetujuan mengikuti kebutuhan survei</h2>
-              <p className="max-w-[65ch] text-body text-muted">
+              <p className="max-w-[65ch] text-body text-ink-muted">
                 Pemberitahuan dibaca dari profil organisasi atau platform pemilik survei; kebutuhan bukti pendukung ditetapkan per survei. Tidak ada asumsi sektor di dalam kode.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <Panel className="flex flex-col gap-2">
                 <p className="text-body font-bold text-ink">Pemberitahuan sebelum item pertama</p>
-                <p className="text-body-sm text-muted">
+                <p className="text-body-sm text-ink-muted">
                   Tujuan, jenis data, penerima, retensi, kontak, dan hak peserta tampil sebelum pengisian.
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
                 <p className="text-body font-bold text-ink">Persetujuan sesuai kebutuhan survei</p>
-                <p className="text-body-sm text-muted">
+                <p className="text-body-sm text-ink-muted">
                   Bila survei organisasi mewajibkan bukti pendukung, kiriman ditolak sampai pernyataan persetujuan dan referensi
                   buktinya diisi. Referensi dan berkas dicatat apa adanya, tidak diverifikasi aplikasi.
                 </p>
               </Panel>
               <Panel className="flex flex-col gap-2">
                 <p className="text-body font-bold text-ink">Izin dibaca terpisah</p>
-                <p className="text-body-sm text-muted">
+                <p className="text-body-sm text-ink-muted">
                   Baca jawaban individual, ekspor, dan teks bebas adalah tiga izin berbeda.
                 </p>
               </Panel>
             </div>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Nilai retensi, kontak, dan pengendali ditetapkan organisasi. Halaman ini tidak mengklaim sertifikasi apa pun.
             </p>
           </section>
@@ -237,7 +237,7 @@ export function HomePage() {
                     LANGKAH {i + 1}
                   </span>
                   <p className="text-body font-bold text-ink">{f.step}</p>
-                  <p className="text-body-sm text-muted">{f.detail}</p>
+                  <p className="text-body-sm text-ink-muted">{f.detail}</p>
                   <TextLink to={f.to()}>Coba di aplikasi</TextLink>
                 </li>
               ))}
@@ -248,7 +248,7 @@ export function HomePage() {
           <section aria-labelledby="contoh" className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <h2 id="contoh" className="text-h2 font-bold text-ink wrap-anywhere">Satu aplikasi, dua bentuk skala</h2>
-              <p className="max-w-[65ch] text-body text-muted">
+              <p className="max-w-[65ch] text-body text-ink-muted">
                 Jumlah titik dan label diatur per pertanyaan. Skala 5 titik menyediakan jawaban tengah, skala 4 titik
                 memaksa peserta memilih arah.
               </p>
@@ -267,7 +267,7 @@ export function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <p className="text-body-sm text-muted">Satu jawaban wajib per item. Nilai dan label disimpan bersama.</p>
+                <p className="text-body-sm text-ink-muted">Satu jawaban wajib per item. Nilai dan label disimpan bersama.</p>
               </Card>
               <Card className="flex min-w-0 flex-col gap-3">
                 <div className="self-start"><Badge tone="neutral">Skala 4 titik</Badge></div>
@@ -282,7 +282,7 @@ export function HomePage() {
                     </li>
                   ))}
                 </ul>
-                <p className="text-body-sm text-muted">Cocok bila jawaban netral tidak diinginkan. Item tetap boleh dilewati.</p>
+                <p className="text-body-sm text-ink-muted">Cocok bila jawaban netral tidak diinginkan. Item tetap boleh dilewati.</p>
               </Card>
             </div>
           </section>
@@ -298,7 +298,7 @@ export function HomePage() {
                     <span aria-hidden="true" className="font-mono text-caption text-n400 group-open:hidden">+</span>
                     <span aria-hidden="true" className="hidden font-mono text-caption text-n400 group-open:inline">−</span>
                   </summary>
-                  <p className="mt-2 max-w-[70ch] text-body-sm text-muted">{item.a}</p>
+                  <p className="mt-2 max-w-[70ch] text-body-sm text-ink-muted">{item.a}</p>
                 </details>
               ))}
             </div>
@@ -307,7 +307,7 @@ export function HomePage() {
           {/* Penutup */}
           <section aria-labelledby="penutup" className="flex flex-col items-start gap-4 rounded-lg border border-n200 bg-n50 p-6 lg:p-8">
             <h2 id="penutup" className="text-h2 font-bold text-ink wrap-anywhere">Siap menyusun instrumen pertama?</h2>
-            <p className="max-w-[60ch] text-body text-muted">
+            <p className="max-w-[60ch] text-body text-ink-muted">
               Masuk sebagai pengelola untuk membuat draf, atau isi contoh formulir lebih dulu untuk melihat alur responden.
             </p>
             <div className="flex flex-wrap items-center gap-3">

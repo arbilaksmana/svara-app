@@ -11,7 +11,7 @@ import { ROUTES, homeForRole } from '../lib/routes';
 import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
 import { activeNavTo, navPath, type NavEntry } from '../lib/nav';
-import { AdminSidebar } from './AdminSidebar';
+import { AdminShell } from './AdminSidebar';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
 export type { NavEntry };
@@ -358,30 +358,15 @@ export function Shell({
 
   if (!chromeless && usesAdminChrome && ADMIN_CHROME_PATHS.has(navPath(pathname))) {
     return (
-      <div className="admin-dash flex min-h-dvh flex-col bg-[var(--ad-bg)] text-[color:var(--ad-text)]">
-        <a
-          href="#konten-utama"
-          className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[60] focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-md focus:bg-action focus:px-4 focus:py-2 focus:text-n0"
-        >
-          Lewati ke konten utama
-        </a>
-
-        <AdminSidebar pathname={pathname} />
-
-        <div className="flex min-w-0 flex-1 flex-col lg:ps-64">
-          <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex-1 focus:outline-none">
-            <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 lg:px-8 lg:py-8">
-              {!hideHeading && (
-                <div className="flex flex-col gap-1.5">
-                  <h1 className="text-h1 font-bold wrap-break-word">{title}</h1>
-                  {subtitle && <p className="max-w-[70ch] text-body text-[color:var(--ad-muted)]">{subtitle}</p>}
-                </div>
-              )}
-              {children}
-            </div>
-          </main>
-        </div>
-      </div>
+      <AdminShell
+        pathname={pathname}
+        title={title}
+        subtitle={subtitle}
+        hideHeading={hideHeading}
+        mainRef={mainRef}
+      >
+        {children}
+      </AdminShell>
     );
   }
 
@@ -431,7 +416,7 @@ export function Shell({
               <div className="mt-6 hidden lg:block">
                 <p className="font-mono text-annotation tracking-mono text-n600">AKUN</p>
                 <p className="mt-1 text-body-sm font-bold text-ink">{session.name}</p>
-                <p className="text-caption text-muted">{session.email}</p>
+                <p className="text-caption text-ink-muted">{session.email}</p>
               </div>
             )}
           </aside>
@@ -441,7 +426,7 @@ export function Shell({
           {!hideHeading && (
             <div className="mb-6 flex flex-col gap-2">
               <h1 className="text-h1 font-bold text-ink wrap-break-word">{title}</h1>
-              {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
+              {subtitle && <p className="max-w-[70ch] text-body text-ink-muted">{subtitle}</p>}
             </div>
           )}
           {children}
@@ -454,7 +439,7 @@ export function Shell({
         <div className={`mx-auto flex max-w-[1200px] flex-col gap-2 px-4 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${bottomInset ? 'pt-6 pb-24 lg:pb-6' : 'py-6'}`}>
           <div>
             <p className="text-body-sm font-bold text-ink">Svara</p>
-            <p className="text-caption text-muted">Instrumen berskala dan isian singkat, dikelola per versi.</p>
+            <p className="text-caption text-ink-muted">Instrumen berskala dan isian singkat, dikelola per versi.</p>
           </div>
           <PolicyLinks />
         </div>

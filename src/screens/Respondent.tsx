@@ -204,7 +204,7 @@ export function PublicLoadError({ token, error, onRetry }: { token: string; erro
       <Card>
         <div role="alert">
           <p className="text-body font-bold text-ink">{failure.title}</p>
-          <p className="mt-2 text-body-sm text-muted">{failure.detail}</p>
+          <p className="mt-2 text-body-sm text-ink-muted">{failure.detail}</p>
         </div>
         {failure.blockedState && <div className="mt-4"><BlockedNotice state={failure.blockedState} /></div>}
         <div className="mt-4 flex flex-wrap gap-3">
@@ -236,7 +236,7 @@ function Progress({ step }: { step: 1 | 2 | 3 | 4 }) {
             >
               {n}
             </span>
-            <span className={`text-body-sm ${current ? 'font-bold text-ink' : 'text-muted'}`}>{label}</span>
+            <span className={`text-body-sm ${current ? 'font-bold text-ink' : 'text-ink-muted'}`}>{label}</span>
             {i < labels.length - 1 && <span aria-hidden="true" className="text-n400">·</span>}
           </li>
         );
@@ -332,7 +332,7 @@ export function UnsentAttemptChoiceView({
     <>
       <Card className="flex flex-col gap-3">
         <SectionTitle>Ada isian yang belum dikirim</SectionTitle>
-        <p className="text-body-sm text-muted">
+        <p className="text-body-sm text-ink-muted">
           Draf isian untuk survei ini tersimpan di perangkat ini dan belum terkirim. Lanjutkan isian itu, atau mulai
           sebagai responden baru untuk menghapusnya.
         </p>
@@ -428,12 +428,12 @@ export function IntroView({
               <Badge tone={guardianRequired ? 'warning' : 'neutral'}>{guardianRequired ? 'Dengan bukti pendukung' : 'Persetujuan diri'}</Badge>
             </div>
             <p className="text-body-sm text-ink"><span className="font-bold">Tujuan survei:</span> {survey.purpose}</p>
-            <p className="text-caption text-muted">Objek: {survey.object_label}</p>
+            <p className="text-caption text-ink-muted">Objek: {survey.object_label}</p>
           </Panel>
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Pemberitahuan sebelum item pertama</SectionTitle>
-            <p className="font-mono text-caption tracking-mono text-muted">Pemberitahuan versi {notice.version} · berlaku {notice.effective_date}</p>
+            <p className="font-mono text-caption tracking-mono text-ink-muted">Pemberitahuan versi {notice.version} · berlaku {notice.effective_date}</p>
             <dl className="flex flex-col gap-3">
               {[
                 ['Tujuan', notice.purpose],
@@ -446,12 +446,12 @@ export function IntroView({
                 ['Transfer lintas negara', notice.cross_border_text],
               ].map(([term, detail]) => (
                 <div key={term} className="border-b border-n200 pb-3 last:border-0 last:pb-0">
-                  <dt className="text-caption font-bold text-muted">{term}</dt>
+                  <dt className="text-caption font-bold text-ink-muted">{term}</dt>
                   <dd className="mt-1 break-words text-body-sm text-ink">{detail}</dd>
                 </div>
               ))}
               <div className="border-b border-n200 pb-3">
-                <dt className="text-caption font-bold text-muted">Kontak</dt>
+                <dt className="text-caption font-bold text-ink-muted">Kontak</dt>
                 {/* UIX-08: kanal = data_request_contact organisasi survei (fallback platform), bukan salinan teks notice. */}
                 <dd className="mt-1 break-words text-body-sm text-ink">
                   <ContactChannel contact={profileContact} empty="Belum ditetapkan pengendali; hubungi pengelola survei melalui kanal resmi organisasi." />
@@ -491,7 +491,7 @@ export function IntroView({
                 {guardianRequired && (
                   <div className="rounded-md border border-warning-soft bg-n50 p-3">
                     <p className="text-body-sm font-bold text-ink">Bukti pendukung wajib</p>
-                    <p className="mt-1 text-body-sm text-muted">
+                    <p className="mt-1 text-body-sm text-ink-muted">
                       Survei ini mewajibkan persetujuan disertai bukti pendukung. Unggah berkas bukti persetujuan Anda. Penyelenggara menyimpan
                       berkas apa adanya dan tidak memeriksa keasliannya; pengelola organisasi meninjau berkas setelah persetujuan dicatat.
                     </p>
@@ -524,7 +524,7 @@ export function IntroView({
                               className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 py-2 text-body-sm text-ink file:me-3 file:rounded-sm file:border-0 file:bg-action-soft file:px-3 file:py-2 file:text-body-sm file:font-bold file:text-action focus:border-action aria-invalid:border-2 aria-invalid:border-danger"
                             />
                             {guardianFile && (
-                              <p className="mt-1 text-caption text-muted">
+                              <p className="mt-1 text-caption text-ink-muted">
                                 Terpilih: {guardianFile.name} · {formatBytes(guardianFile.size)}
                               </p>
                             )}
@@ -549,10 +549,10 @@ export function IntroView({
                   </div>
                 )}
                 {!guardianRequired && (
-                  <p className="text-caption text-muted">Persetujuan diri tetap mencatat ConsentRecord dan versi notice.</p>
+                  <p className="text-caption text-ink-muted">Persetujuan diri tetap mencatat ConsentRecord dan versi notice.</p>
                 )}
                 {invitation && (
-                  <p className="text-caption text-muted">
+                  <p className="text-caption text-ink-muted">
                     Undangan individual: <Code>{invitation.code}</Code>. Status <Badge tone={invitation.status === 'active' ? 'success' : 'neutral'}>{INVITE_LABEL_ID[invitation.status]}</Badge>
                   </p>
                 )}
@@ -831,7 +831,7 @@ export function FormPage({ token }: { token: string }) {
 
           <Card className="flex flex-col gap-4">
             <SectionTitle>Petunjuk</SectionTitle>
-            <p className="text-body-sm text-muted">{survey.instructions || 'Pilih satu jawaban pada setiap pernyataan.'}</p>
+            <p className="text-body-sm text-ink-muted">{survey.instructions || 'Pilih satu jawaban pada setiap pernyataan.'}</p>
             <Divider />
             {items.map((q) => (
               <QuestionField
@@ -1033,14 +1033,14 @@ export function ReviewPage({ token }: { token: string }) {
               <Table head={['Item', 'Jawaban', 'Status']}>
                 {rows.map(({ q, value, opt, empty }) => (
                   <tr key={q.id}>
-                    <Th><Code>{q.code}</Code><span className="mt-1 block text-caption font-normal text-muted">{q.label}</span></Th>
+                    <Th><Code>{q.code}</Code><span className="mt-1 block text-caption font-normal text-ink-muted">{q.label}</span></Th>
                     <Td>
                       {opt ? (
                         <><span className="font-mono font-bold">{opt.value}</span> · {opt.label}</>
                       ) : value.text.trim() !== '' ? (
                         <span className="break-words">{value.text}</span>
                       ) : (
-                        <span className="text-muted">Kosong</span>
+                        <span className="text-ink-muted">Kosong</span>
                       )}
                     </Td>
                     <Td>
@@ -1058,7 +1058,7 @@ export function ReviewPage({ token }: { token: string }) {
                   <p className="font-mono text-caption font-bold text-ink"><Code>{q.code}</Code></p>
                   <p className="mt-1 text-body-sm text-ink">{q.label}</p>
                   <p className="mt-2 break-words text-body-sm text-ink">
-                    {opt ? <><span className="font-mono font-bold">{opt.value}</span> · {opt.label}</> : value.text.trim() || <span className="text-muted">Kosong</span>}
+                    {opt ? <><span className="font-mono font-bold">{opt.value}</span> · {opt.label}</> : value.text.trim() || <span className="text-ink-muted">Kosong</span>}
                   </p>
                   <div className="mt-2">
                     {empty ? <Badge tone="danger">Perlu diperbaiki</Badge>
@@ -1068,7 +1068,7 @@ export function ReviewPage({ token }: { token: string }) {
                 </li>
               ))}
             </ul>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Jawaban Anda ditampilkan pada tinjauan ini. Teks bebas tidak dimuat pada halaman publik lain.
             </p>
           </Card>
@@ -1076,17 +1076,17 @@ export function ReviewPage({ token }: { token: string }) {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Persetujuan dan pemberitahuan</SectionTitle>
             <dl className="grid gap-3 text-body-sm sm:grid-cols-2">
-              <div><dt className="text-caption font-bold text-muted">Versi pemberitahuan</dt><dd className="mt-1 text-ink">{consent?.notice_version ?? 'Tidak tercatat'}</dd></div>
-              <div><dt className="text-caption font-bold text-muted">Dasar persetujuan</dt><dd className="mt-1 text-ink">{consent?.basis ?? 'Tidak tercatat'}</dd></div>
-              <div><dt className="text-caption font-bold text-muted">Konfirmasi persetujuan</dt><dd className="mt-1 text-ink">{consent?.respondent_click ? 'Tercatat' : 'Tidak tercatat'}</dd></div>
-              <div><dt className="text-caption font-bold text-muted">Kelayakan konteks</dt><dd className="mt-1 text-ink">Terkonfirmasi pada pengantar</dd></div>
+              <div><dt className="text-caption font-bold text-ink-muted">Versi pemberitahuan</dt><dd className="mt-1 text-ink">{consent?.notice_version ?? 'Tidak tercatat'}</dd></div>
+              <div><dt className="text-caption font-bold text-ink-muted">Dasar persetujuan</dt><dd className="mt-1 text-ink">{consent?.basis ?? 'Tidak tercatat'}</dd></div>
+              <div><dt className="text-caption font-bold text-ink-muted">Konfirmasi persetujuan</dt><dd className="mt-1 text-ink">{consent?.respondent_click ? 'Tercatat' : 'Tidak tercatat'}</dd></div>
+              <div><dt className="text-caption font-bold text-ink-muted">Kelayakan konteks</dt><dd className="mt-1 text-ink">Terkonfirmasi pada pengantar</dd></div>
               <GuardianEvidenceSummary status={consent?.guardian_evidence_status ?? 'not_required'} />
             </dl>
           </Card>
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Kirim</SectionTitle>
-            <p className="text-body-sm text-muted">
+            <p className="text-body-sm text-ink-muted">
               Sistem memeriksa versi yang ditampilkan, periode, izin, persetujuan, dan kelengkapan item sebelum kirim.
             </p>
             <div className="flex flex-wrap gap-3">
@@ -1205,20 +1205,20 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
                   </Table>
                 </div>
                 <dl className="grid gap-3 sm:hidden">
-                  <div><dt className="text-caption font-bold text-muted">ID bukti</dt><dd className="mt-1 break-all"><Code>{receipt.response_id}</Code></dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Versi</dt><dd className="mt-1">{receipt.version_number}</dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Waktu server</dt><dd className="mt-1">{formatWIB(receipt.submitted_at)}</dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Status</dt><dd className="mt-1">{RECEIPT_STATUS_LABEL[receipt.status] ?? receipt.status}</dd></div>
-                  <div><dt className="text-caption font-bold text-muted">Kunci pengiriman</dt><dd className="mt-1 break-all"><Code>{receipt.idempotency_key}</Code></dd></div>
+                  <div><dt className="text-caption font-bold text-ink-muted">ID bukti</dt><dd className="mt-1 break-all"><Code>{receipt.response_id}</Code></dd></div>
+                  <div><dt className="text-caption font-bold text-ink-muted">Versi</dt><dd className="mt-1">{receipt.version_number}</dd></div>
+                  <div><dt className="text-caption font-bold text-ink-muted">Waktu server</dt><dd className="mt-1">{formatWIB(receipt.submitted_at)}</dd></div>
+                  <div><dt className="text-caption font-bold text-ink-muted">Status</dt><dd className="mt-1">{RECEIPT_STATUS_LABEL[receipt.status] ?? receipt.status}</dd></div>
+                  <div><dt className="text-caption font-bold text-ink-muted">Kunci pengiriman</dt><dd className="mt-1 break-all"><Code>{receipt.idempotency_key}</Code></dd></div>
                 </dl>
               </>
             ) : (
-              <p className="text-body-sm text-muted">
+              <p className="text-body-sm text-ink-muted">
                 Bukti untuk tautan ini tidak tersimpan di tab ini. Bila jawaban sudah terkirim dan Anda mencatat ID bukti
                 serta kunci pengiriman dari halaman bukti, pulihkan bukti di bawah.
               </p>
             )}
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Token, kredensial, dan isi jawaban tidak ditampilkan pada bukti maupun log audit.
             </p>
           </Card>
@@ -1226,7 +1226,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
           {receipt ? (
             <Card className="flex flex-col gap-3">
               <SectionTitle>Retry setelah waktu tunggu</SectionTitle>
-              <p className="text-body-sm text-muted">
+              <p className="text-body-sm text-ink-muted">
                 Bila jaringan gagal sesudah commit, klien mengirim ulang dengan kunci yang sama dan menerima bukti yang sama.
               </p>
               <div className="flex flex-wrap gap-3">
@@ -1244,7 +1244,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
           ) : (
             <Card className="flex flex-col gap-3">
               <SectionTitle>Pulihkan bukti</SectionTitle>
-              <p className="text-body-sm text-muted">
+              <p className="text-body-sm text-ink-muted">
                 Pemulihan hanya berhasil di browser yang sama dengan yang dipakai saat mengirim, sebelum browser itu ditutup.
                 Pemulihan tidak membuat respons baru.
               </p>
@@ -1264,7 +1264,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
                   <ActionLink to={ROUTES.respondentIntro(token)} variant="secondary">Kembali ke pengantar</ActionLink>
                 </div>
               </form>
-              <p className="text-caption text-muted">
+              <p className="text-caption text-ink-muted">
                 Bila pemulihan gagal, hubungi pengelola survei melalui kanal resmi organisasi:{' '}
                 <ContactChannel contact={ctx.profile.data_request_contact} empty="kontak pengendali belum ditetapkan." />
               </p>
@@ -1273,7 +1273,7 @@ export function ReceiptView({ token, ctx, stored }: { token: string; ctx: Public
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Setelah pengiriman</SectionTitle>
-            <p className="text-body-sm text-muted">
+            <p className="text-body-sm text-ink-muted">
               Jawaban final tidak dapat diubah oleh responden. Permintaan akses, koreksi, penarikan, atau penghapusan tetap diproses pihak berwenang melalui kanal resmi.
             </p>
             <PolicyLinks className="mt-1" />

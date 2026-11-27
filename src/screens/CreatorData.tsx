@@ -163,11 +163,11 @@ export function SharePage({ id }: { id: string }) {
                       {printedLink && l.status === 'active' ? (
                         <p className="font-mono text-body-sm font-bold tracking-mono text-ink break-all">/s/{printedLink}</p>
                       ) : (
-                        <p className="text-body-sm text-muted">Token tidak ditampilkan lagi setelah dibuat.</p>
+                        <p className="text-body-sm text-ink-muted">Token tidak ditampilkan lagi setelah dibuat.</p>
                       )}
                       <Badge tone={l.status === 'active' ? 'success' : 'warning'}>{l.status === 'active' ? 'Aktif' : 'Tidak aktif'}</Badge>
                     </div>
-                    <p className="mt-2 text-caption text-muted">{l.label}</p>
+                    <p className="mt-2 text-caption text-ink-muted">{l.label}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         variant="secondary"
@@ -196,14 +196,14 @@ export function SharePage({ id }: { id: string }) {
                         Buka sebagai responden
                       </ActionLink>
                       {l.status !== 'active' && (
-                        <span className="self-center text-caption text-muted">Tautan nonaktif tidak menerima jawaban.</span>
+                        <span className="self-center text-caption text-ink-muted">Tautan nonaktif tidak menerima jawaban.</span>
                       )}
                     </div>
                   </li>
                 ))}
               </ul>
             )}
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Token hanya disimpan sebagai hash. Simpan tautan yang dibagikan; menampilkan token menerbitkan token baru dan mematikan tautan sebelumnya.
             </p>
           </Card>
@@ -235,7 +235,7 @@ export function SharePage({ id }: { id: string }) {
                   </Th>
                   <Td>
                     {assignments.find((a) => a.id === i.assignment_id)?.label ?? 'Tanpa label'}
-                    <span className="mt-1 block font-mono text-caption text-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
+                    <span className="mt-1 block font-mono text-caption text-ink-muted">{assignments.find((a) => a.id === i.assignment_id)?.participant_ref ?? '—'}</span>
                   </Td>
                   <Td><Badge tone={INVITATION_STATUS_TONE[i.status]}>{INVITATION_STATUS_LABEL[i.status]}</Badge></Td>
                   <Td>{i.expires_at ? formatInvitationExpiry(i.expires_at) : 'Belum ada'}</Td>
@@ -254,12 +254,12 @@ export function SharePage({ id }: { id: string }) {
                       >
                         Cabut
                       </button>
-                    ) : <span className="text-caption text-muted">Tidak ada aksi</span>}
+                    ) : <span className="text-caption text-ink-muted">Tidak ada aksi</span>}
                   </Td>
                 </tr>
               ))}
             </Table>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Kode yang dipakai untuk mengisi berbeda dari ID pseudonim yang diekspor. Hash token tidak ditampilkan.
             </p>
           </Card>
@@ -267,10 +267,10 @@ export function SharePage({ id }: { id: string }) {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Buat undangan baru</SectionTitle>
             {!hasPublishedVersion && (
-              <p className="text-caption text-muted">Terbitkan satu versi terlebih dahulu; undangan hanya dapat dibuat untuk versi terbit.</p>
+              <p className="text-caption text-ink-muted">Terbitkan satu versi terlebih dahulu; undangan hanya dapat dibuat untuk versi terbit.</p>
             )}
             {hasPublishedVersion && !canInvite && (
-              <p className="text-caption text-muted">Survei sudah ditutup atau diarsipkan, sehingga undangan baru tidak dapat dibuat.</p>
+              <p className="text-caption text-ink-muted">Survei sudah ditutup atau diarsipkan, sehingga undangan baru tidak dapat dibuat.</p>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field id="penugasan-baru" label="Label penugasan">
@@ -501,7 +501,7 @@ export function ResultsPage({ id }: { id: string }) {
                 </p>
               </div>
             </div>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Jawaban opsional yang kosong tidak dihitung sebagai nilai nol.
             </p>
             {loadError && !denied && <Banner tone="danger" title="Ringkasan gagal dimuat">{loadError.message}</Banner>}
@@ -535,14 +535,14 @@ export function ResultsPage({ id }: { id: string }) {
                 <div>
                   {denied || !individualAllowed ? (
                     <>
-                      <p className="text-body-sm text-muted">Isian teks bebas hanya untuk penerima berizin.</p>
+                      <p className="text-body-sm text-ink-muted">Isian teks bebas hanya untuk penerima berizin.</p>
                       <p className="mt-2 text-body-sm text-ink">
                         {item.free_text_count > 0 ? `${item.free_text_count} isian teks dalam dataset.` : 'Belum ada jawaban'}
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="text-body-sm text-muted">Isian teks bebas untuk penerima berizin.</p>
+                      <p className="text-body-sm text-ink-muted">Isian teks bebas untuk penerima berizin.</p>
                       <p className="mt-2 text-body-sm text-ink">
                         {item.free_text_count > 0 ? `${item.free_text_count} isian teks dalam dataset.` : 'Belum ada jawaban'}
                       </p>
@@ -556,7 +556,7 @@ export function ResultsPage({ id }: { id: string }) {
                       <Code>{option.value ?? '—'}</Code>
                       <span className="min-w-0 flex-1 text-body-sm text-ink">{option.label}</span>
                       <span className="text-body-sm font-bold text-ink">{option.count}</span>
-                      <span className="w-12 text-right text-body-sm text-muted">
+                      <span className="w-12 text-right text-body-sm text-ink-muted">
                         {item.answered === 0 ? '—' : `${Math.round((option.count / item.answered) * 100)}%`}
                       </span>
                     </li>
@@ -574,7 +574,7 @@ export function ResultsPage({ id }: { id: string }) {
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Jawaban individual</SectionTitle>
-            <p className="text-body-sm text-muted">
+            <p className="text-body-sm text-ink-muted">
               Akses ini memerlukan izin membaca jawaban individual dan setiap pembacaan tercatat pada log audit.{' '}
               {freeTextAllowed
                 ? 'Isian teks bebas hanya untuk penerima berizin; akun ini sudah memegang izin itu.'
@@ -605,7 +605,7 @@ export function ResultsPage({ id }: { id: string }) {
               <ul className="flex flex-col gap-3">
                 {responses.map((response) => (
                   <li key={response.id} className="rounded-md border border-n200 p-3">
-                    <p className="font-mono text-caption text-muted">
+                    <p className="font-mono text-caption text-ink-muted">
                       {response.id} · {formatWIB(response.submitted_at)} · {COLLECTION_MODE_LABEL[response.collection_mode] ?? response.collection_mode}
                     </p>
                     <ul className="mt-2 flex flex-col gap-1">
@@ -704,7 +704,7 @@ export function ResultsPage({ id }: { id: string }) {
                 Unduh kodebook
               </Button>
             </div>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Teks bebas dan jawaban individual memerlukan izin terpisah; aktivitas ekspor tercatat pada log audit.
             </p>
           </Card>
@@ -776,7 +776,7 @@ export function SettingsPage({ id }: { id: string }) {
                 <tr><Th>Kebijakan dan ketentuan</Th><Td><PlainLink to={ROUTES.privacy} className="min-h-[44px]">Kebijakan privasi</PlainLink> · <PlainLink to={ROUTES.terms} className="min-h-[44px]">Ketentuan layanan</PlainLink></Td></tr>
               </Table>
             ) : (
-              <p className="text-body-sm text-muted">Profil kebijakan survei ini belum tersedia.</p>
+              <p className="text-body-sm text-ink-muted">Profil kebijakan survei ini belum tersedia.</p>
             )}
             <Banner tone="info" title="Sumber konfigurasi">
               {profile?.source === 'organization' ? 'Kebijakan organisasi' : 'Kebijakan platform'}
@@ -789,7 +789,7 @@ export function SettingsPage({ id }: { id: string }) {
             <SectionTitle>Pemberitahuan per survei</SectionTitle>
             {notice ? (
               <>
-                <p className="font-mono text-caption tracking-mono text-muted">Versi pemberitahuan: {notice.version}</p>
+                <p className="font-mono text-caption tracking-mono text-ink-muted">Versi pemberitahuan: {notice.version}</p>
                 <Table head={['Bagian', 'Isi']}>
                   <tr><Th>Tujuan</Th><Td>{notice.purpose}</Td></tr>
                   <tr><Th>Jenis data</Th><Td>{notice.data_categories}</Td></tr>
@@ -802,9 +802,9 @@ export function SettingsPage({ id }: { id: string }) {
                 </Table>
               </>
             ) : (
-              <p className="text-body-sm text-muted">Pemberitahuan untuk profil kebijakan survei ini belum tersedia.</p>
+              <p className="text-body-sm text-ink-muted">Pemberitahuan untuk profil kebijakan survei ini belum tersedia.</p>
             )}
-            <p className="text-caption text-muted">Perubahan material membuat versi notice baru; persetujuan lama tetap merujuk versi yang disetujui.</p>
+            <p className="text-caption text-ink-muted">Perubahan material membuat versi notice baru; persetujuan lama tetap merujuk versi yang disetujui.</p>
           </Card>
 
           <Card className="flex flex-col gap-3">
@@ -824,14 +824,14 @@ export function SettingsPage({ id }: { id: string }) {
                   value={consentRequired}
                   disabled={!organizationSurvey || state === 'loading' || state === 'closed'}
                   onChange={(event) => setConsentRequired(event.target.value as ConsentRequired)}
-                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink disabled:bg-n50 disabled:text-muted"
+                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink disabled:bg-n50 disabled:text-ink-muted"
                 >
                   <option value="tidak">{CONSENT_REQUIRED_LABEL.tidak}</option>
                   {organizationSurvey && <option value="wajib_upload">{CONSENT_REQUIRED_LABEL.wajib_upload}</option>}
                 </select>
               )}
             </Field>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Bukti yang diunggah dicatat sebagai pernyataan responden, bukan verifikasi otomatis. Tanpa bukti, kiriman pada
               survei yang mewajibkannya ditolak server.
             </p>
@@ -841,7 +841,7 @@ export function SettingsPage({ id }: { id: string }) {
             <SectionTitle>Akses hasil</SectionTitle>
             <Checkbox id="izin-agregat" label="Pembuat survei boleh melihat ringkasan agregat" checked={allowResults} onChange={setAllowResults} />
             <Checkbox id="izin-individual" label="Pembuat survei boleh membaca jawaban individual" checked={allowIndividual} onChange={setAllowIndividual} />
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               Izin baca individual, izin ekspor, dan izin teks bebas adalah tiga izin terpisah.
             </p>
             <div className="flex flex-wrap gap-3">
@@ -925,7 +925,7 @@ export function HistoryPage({ id }: { id: string }) {
             </ul>
             <Panel className="mt-2">
               <p className="text-body-sm font-bold text-ink">Contoh versi A dan B</p>
-              <p className="mt-1 text-body-sm text-muted">
+              <p className="mt-1 text-body-sm text-ink-muted">
                 Versi 2 berstatus draf. Formulir yang terbuka pada versi 1 tidak dipindahkan diam-diam ke versi 2.
               </p>
             </Panel>

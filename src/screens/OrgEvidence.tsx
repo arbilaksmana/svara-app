@@ -146,7 +146,7 @@ export function OrgEvidencePage() {
                 </select>
               )}
             </Field>
-            <p className="text-body-sm text-muted">
+            <p className="text-body-sm text-ink-muted">
               Berkas hanya dapat diunduh oleh admin organisasi pemilik survei; tautan unduhan memerlukan sesi aktif.
             </p>
 
@@ -166,7 +166,7 @@ export function OrgEvidencePage() {
                   <tr key={row.consent_id}>
                     <Td>
                       {formatWIB(row.recorded_at)}
-                      <span className="mt-1 block font-mono text-annotation tracking-mono text-muted"><Code>{row.consent_id}</Code></span>
+                      <span className="mt-1 block font-mono text-annotation tracking-mono text-ink-muted"><Code>{row.consent_id}</Code></span>
                     </Td>
                     <Td>{row.survey_title}</Td>
                     <Td>
@@ -190,20 +190,20 @@ export function OrgEvidencePage() {
                             >
                               Unduh berkas
                             </a>
-                            <p className="break-words text-caption text-muted">{fileLabel(row)}</p>
+                            <p className="break-words text-caption text-ink-muted">{fileLabel(row)}</p>
                           </div>
                         </div>
                       ) : (
-                        <span className="text-caption text-muted">Tanpa berkas</span>
+                        <span className="text-caption text-ink-muted">Tanpa berkas</span>
                       )}
                     </Td>
-                    <Td>{row.guardian_evidence_ref ?? <span className="text-muted">—</span>}</Td>
+                    <Td>{row.guardian_evidence_ref ?? <span className="text-ink-muted">—</span>}</Td>
                     <Td>
                       <Badge tone={GUARDIAN_EVIDENCE_STATUS_TONE[row.guardian_evidence_status] ?? 'neutral'}>
                         {GUARDIAN_EVIDENCE_STATUS_LABEL[row.guardian_evidence_status] ?? row.guardian_evidence_status}
                       </Badge>
                       {row.guardian_evidence_reviewed_at && (
-                        <p className="mt-1 text-caption text-muted">
+                        <p className="mt-1 text-caption text-ink-muted">
                           {formatWIB(row.guardian_evidence_reviewed_at)}
                           {row.guardian_evidence_reviewed_by && <> · <Code>{row.guardian_evidence_reviewed_by}</Code></>}
                         </p>
@@ -219,7 +219,7 @@ export function OrgEvidencePage() {
                           <Button variant="danger" onClick={() => openDecision(row, 'rejected')}>Tolak</Button>
                         </div>
                       ) : (
-                        <span className="text-caption text-muted">Sudah diputuskan</span>
+                        <span className="text-caption text-ink-muted">Sudah diputuskan</span>
                       )}
                     </Td>
                   </tr>
