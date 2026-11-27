@@ -52,12 +52,19 @@ function tokenHash(token: string): string {
 
 async function request(
   path: string,
-  options: { method?: string; body?: unknown; auth?: string | null; cookie?: string; idempotencyKey?: string } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    auth?: string | null;
+    cookie?: string;
+    idempotencyKey?: string;
+    csrfHeader?: boolean;
+  } = {},
 ): Promise<Result> {
   const headers: Record<string, string> = {
-    'X-Svara-Client': 'web',
     Accept: 'application/json',
   };
+  if (options.csrfHeader !== false) headers['X-Svara-Client'] = 'web';
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const auth = options.auth === undefined ? SERVICE_TOKEN : options.auth;
   if (auth !== null) headers.Authorization = `Bearer ${auth}`;
@@ -73,7 +80,7 @@ async function request(
 }
 
 function createInvitation(surveyId: string, body: Record<string, unknown>): Promise<Result> {
-  return request(`/integration/surveys/${surveyId}/invitations`, { method: 'POST', body });
+  return request(`/integration/surveys/${surveyId}/invitations`, { method: 'POST', body, csrfHeader: false });
 }
 
 /** Bentuk respons diperiksa di perbatasan HTTP sebelum field-nya dipakai. */
@@ -134,6 +141,7 @@ after(async () => {
 });
 
 test('POST layanan membuat undangan per peserta dan menyimpan participant_ref apa adanya', async () => {
+  // createInvitation sengaja TIDAK mengirim x-svara-client: klien BeCraft tidak boleh dimintai header web.
   const response = await createInvitation('s_demo1', {
     participant_ref: 'becraft-peserta-001',
     label: 'Kelas A · 01',
@@ -186,9 +194,11 @@ test('POST layanan membuat undangan per peserta dan menyimpan participant_ref ap
 });
 
 test('POST layanan menolak permintaan tanpa kredensial atau dengan bearer salah', async () => {
+  // Tanpa x-svara-client juga: pengecualian CSRF tidak boleh menjadi pengecualian autentikasi.
   const noHeader = await request('/integration/surveys/s_demo1/invitations', {
     method: 'POST',
     auth: null,
+    csrfHeader: false,
     body: { participant_ref: 'p-2', label: 'L-2' },
   });
   assert.equal(noHeader.status, 401, JSON.stringify(noHeader.json));
@@ -196,9 +206,31 @@ test('POST layanan menolak permintaan tanpa kredensial atau dengan bearer salah'
   const wrongBearer = await request('/integration/surveys/s_demo1/invitations', {
     method: 'POST',
     auth: 'not-the-service-token',
+    csrfHeader: false,
     body: { participant_ref: 'p-3', label: 'L-3' },
   });
   assert.equal(wrongBearer.status, 401, JSON.stringify(wrongBearer.json));
+});
+
+test('POST pengelola tetap menolak tanpa header x-svara-client (403 csrf_header_required)', async () => {
+  const sessionToken = 'sesi-csrf-manager-m13';
+  const now = new Date();
+  await run(
+    'INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
+    tokenHash(sessionToken),
+    'u_creator_a',
+    now.toISOString(),
+    new Date(now.getTime() + 3_600_000).toISOString(),
+  );
+  const blocked = await request('/surveys/s_demo1/invitations', {
+    method: 'POST',
+    auth: null,
+    cookie: `svara_session=${sessionToken}`,
+    csrfHeader: false,
+    body: { label: 'Regresi CSRF pengelola' },
+  });
+  assert.equal(blocked.status, 403, JSON.stringify(blocked.json));
+  assert.equal(blocked.json.code, 'csrf_header_required');
 });
 
 test('POST layanan menyamarkan survei di luar cakupan sebagai 404', async () => {
