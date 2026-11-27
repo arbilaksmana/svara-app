@@ -238,6 +238,10 @@ function sameOrigin(origin: string, host: string | undefined): boolean {
  */
 export function csrfGuard(req: AuthedRequest, res: Response, next: NextFunction): void {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  // Rute integrasi diautentikasi Bearer token layanan (serviceToken + integrationScope), bukan cookie sesi,
+  // sehingga tidak punya permukaan CSRF. Pengecualian sempit ini hanya untuk prefix integrasi; jangan
+  // melebarkannya ke /api/v1 lain yang memakai cookie.
+  if (req.originalUrl.startsWith('/api/v1/integration/')) return next();
   const client = req.get('x-svara-client');
   if (client !== 'web') {
     res.status(403).json({ error: 'Permintaan tanpa header klien Svara ditolak.', code: 'csrf_header_required' });
