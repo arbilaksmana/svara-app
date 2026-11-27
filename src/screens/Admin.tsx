@@ -256,15 +256,15 @@ export function AdminSummaryPage() {
   const { stats, statsError, error } = useStore();
   const [range, setRange] = useState<ChartRange>("30d");
   useEffect(() => {
-    void loadAdminStats(range);
+    void loadAdminStats();
     return cancelAdminStatsLoad;
-  }, [range]);
+  }, []);
 
   const failure = stats ? null : (statsError ?? error);
   const retry = () => {
     void (async () => {
       if (error) await loadBootstrap();
-      await loadAdminStats(range);
+      await loadAdminStats();
     })();
   };
 
@@ -435,31 +435,27 @@ function ResponsesAreaChart({
   range: ChartRange;
 }) {
   const ready = useChartsReady();
-  // Server saat ini hanya mengirim agregat per bulan; bila rentang lain dipilih dan `chart` absen,
-  // deret bulanan (6 bulan) yang dipakai agar kartu tidak kosong — pemilih tetap berfungsi.
-  const points =
-    stats.chart ??
-    stats.perMonth.map((row) => ({ point: row.month, responses: row.responses }));
+  const points = stats.chart ?? [];
   const data = points.map((row) => ({
-    label: pointLabel(row.point, stats.chart ? range : "6m"),
+    label: pointLabel(row.point, range),
     responses: row.responses,
   }));
   if (data.length === 0) {
     return (
       <p className="text-caption text-[color:var(--ad-muted)]">
-        Belum ada data respons.
+        Belum ada data respons untuk rentang ini.
       </p>
     );
   }
   const total = data.reduce((sum, row) => sum + row.responses, 0);
-  const windowLabel = stats.chart ? RANGE_LABEL[range] : "6 bulan terakhir";
+  const windowLabel = RANGE_LABEL[range];
   const summary = `Respons ${windowLabel} (total ${total}): ${data.map((row) => `${row.label} ${row.responses}`).join(", ")}.`;
   return (
     <>
       {!stats.chart && (
         <p className="mb-1 text-caption text-[color:var(--ad-muted)]">
-          Server hanya menyediakan agregat bulanan; grafik menampilkan 6 bulan
-          terakhir.
+          Server belum menyediakan deret untuk rentang ini; grafik terisi saat
+          data rentang tersedia.
         </p>
       )}
       <div role="img" aria-label={summary}>

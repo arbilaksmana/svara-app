@@ -374,24 +374,15 @@ export async function adminRetryEvent(id: string): Promise<void> {
 /** Rentang agregat grafik respons: hari ini (per jam), 7/30 hari (per hari), 6 bulan (per bulan). */
 export type ChartRange = 'today' | '7d' | '30d' | '6m';
 
-/** Jumlah entri baru pada 30 hari terakhir (current) dan 30 hari sebelumnya (previous). */
-export interface StatsDelta {
-  current: number;
-  previous: number;
-}
-
 export interface AdminStats {
   accounts: number;
   surveys: number;
   responses: number;
   pendingRequests: number;
-  /** Tren kartu ringkasan; previous = 0 berarti periode pembanding belum punya data. */
-  delta: { accounts: StatsDelta; surveys: StatsDelta; responses: StatsDelta; requests: StatsDelta };
-  /** 6 bulan kalender terakhir termasuk bulan berjalan; bulan kosong bernilai 0. Kunci 'YYYY-MM'. */
-  perMonth: Array<{ month: string; responses: number }>;
   /**
    * Deret agregat respons sesuai rentang terpilih; periode kosong bernilai 0.
-   * Kunci 'YYYY-MM-DDTHH' (today), 'YYYY-MM-DD' (7d/30d), atau 'YYYY-MM' (6m). Opsional pada payload lama.
+   * Kunci 'YYYY-MM-DDTHH' (today), 'YYYY-MM-DD' (7d/30d), atau 'YYYY-MM' (6m).
+   * Saat ini hanya mode preview UI yang mengirim field ini.
    */
   chart?: Array<{ point: string; responses: number }>;
   perCreator: Array<{ id: string; display_name: string; surveys: number; responses: number }>;
@@ -444,8 +435,8 @@ export async function updateDataRequest(id: string, input: DataRequestUpdate): P
   });
 }
 
-export async function adminStats(range: ChartRange = '6m'): Promise<AdminStats> {
-  return call<AdminStats>(`/admin/stats?range=${range}`);
+export async function adminStats(): Promise<AdminStats> {
+  return call<AdminStats>('/admin/stats');
 }
 
 export interface PublicContextData {

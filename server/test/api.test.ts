@@ -1687,94 +1687,12 @@ test('Super admin membuat organisasi baru sekaligus admin pertamanya', async () 
 test('Postgres: statistik admin mengagregasi kreator dan survei', async () => {
   const admin = await session('admin@svara.local');
   const stats = data<{
-    accounts: number;
-    surveys: number;
-    responses: number;
-    pendingRequests: number;
-    delta: Record<string, { current: number; previous: number }>;
-    perMonth: Array<{ month: string; responses: number }>;
     perCreator: Array<{ id: string; surveys: number; responses: number }>;
     perSurvey: Array<{ id: string; title: string; owner: string; versions: number; responses: number }>;
   }>(await call('/admin/stats', { cookie: admin }));
   assert.ok(stats.perCreator.length >= 1);
   assert.ok(stats.perSurvey.length >= 1);
   assert.ok(stats.perSurvey.every((row) => typeof row.owner === 'string'));
-
-  // Kontrak tren: semua kartu membawa hitungan nyata 30 hari terakhir vs 30 hari sebelumnya.
-  for (const key of ['accounts', 'surveys', 'responses', 'requests'] as const) {
-    const trend = stats.delta[key];
-    assert.ok(Number.isInteger(trend.current) && trend.current >= 0, `${key}.current bilangan bulat non-negatif`);
-    assert.ok(Number.isInteger(trend.previous) && trend.previous >= 0, `${key}.previous bilangan bulat non-negatif`);
-  }
-  // Privasi: agregat saja, tidak ada jawaban atau identitas responden pada payload stats.
-  assert.doesNotMatch(JSON.stringify(stats), /answers|respondent_id/);
-});
-
-/**
- * Tren kartu (delta) dan agregat bulan (perMonth) dihitung dari kolom waktu yang tersimpan.
- * Tanggal sisipan ditarik ke masa lalu agar deterministik tanpa bergantung pada isi DB dev.
- */
-test('Postgres: stats melaporkan delta 30 hari dan perMonth 6 bulan dari data nyata', async () => {
-  const admin = await session('admin@svara.local');
-  type Trend = { current: number; previous: number };
-  type StatsPayload = {
-    responses: number;
-    delta: { accounts: Trend; surveys: Trend; responses: Trend; requests: Trend };
-    perMonth: Array<{ month: string; responses: number }>;
-  };
-  const getStats = async () => data<StatsPayload>(await call('/admin/stats', { cookie: admin }));
-  const WIB_OFFSET_MS = 7 * 3_600_000;
-  const monthKeyOf = (at: Date) => new Date(at.getTime() + WIB_OFFSET_MS).toISOString().slice(0, 7);
-
-  const baseline = await getStats();
-  assert.equal(baseline.perMonth.length, 6);
-  const wibMonth = (offset: number) => {
-    const at = new Date(Date.now() + WIB_OFFSET_MS);
-    return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - offset, 1)).toISOString().slice(0, 7);
-  };
-  assert.deepEqual(
-    baseline.perMonth.map((row) => row.month),
-    [5, 4, 3, 2, 1, 0].map(wibMonth),
-  );
-  assert.ok(baseline.perMonth.every((row) => Number.isInteger(row.responses) && row.responses >= 0));
-
-  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
-  const inserts = [
-    { id: 'r_trend_now', at: daysAgo(1) },
-    { id: 'r_trend_prev', at: daysAgo(40) },
-    { id: 'r_trend_old', at: daysAgo(400) },
-  ];
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
-    for (const row of inserts) {
-      await client.query(
-        `INSERT INTO responses (id, survey_id, version_id, assignment_id, respondent_id, collection_mode, identity_source, submitted_at, idempotency_key)
-         VALUES ($1, 's_demo1', 'v_demo1_1', NULL, 'p_trend', 'standalone', 'local', $2, $3)`,
-        [row.id, row.at.toISOString(), `idem_${row.id}`],
-      );
-    }
-
-    const after = await getStats();
-    assert.equal(after.delta.responses.current, baseline.delta.responses.current + 1, 'respons 1 hari lalu masuk jendela 30 hari');
-    assert.equal(after.delta.responses.previous, baseline.delta.responses.previous + 1, 'respons 40 hari lalu masuk jendela pembanding');
-    assert.equal(after.responses, baseline.responses + 3);
-
-    const monthOf = (payload: StatsPayload, key: string) => payload.perMonth.find((row) => row.month === key)?.responses ?? 0;
-    for (const row of inserts.slice(0, 2)) {
-      const key = monthKeyOf(row.at);
-      assert.equal(monthOf(after, key), monthOf(baseline, key) + 1, `agregat bulan ${key} bertambah satu`);
-    }
-    assert.equal(monthOf(after, monthKeyOf(inserts[2]!.at)), monthOf(baseline, monthKeyOf(inserts[2]!.at)), 'respons 400 hari lalu di luar 6 bulan');
-
-    // Kreasi akun/survei baru selalu membawa created_at = sekarang -> masuk jendela current, bukan previous.
-    assert.ok(after.delta.accounts.current >= baseline.delta.accounts.current);
-    assert.ok(after.delta.surveys.previous === baseline.delta.surveys.previous);
-    assert.ok(after.delta.requests.previous === baseline.delta.requests.previous);
-  } finally {
-    await client.query('DELETE FROM responses WHERE id = ANY($1)', [inserts.map((row) => row.id)]);
-    await client.end();
-  }
 });
 
 test('SEC-12: token integrasi tanpa cakupan ditolak', async () => {

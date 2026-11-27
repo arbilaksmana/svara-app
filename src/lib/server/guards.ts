@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { UI_MOCK } from '../mock-preview';
 
 /**
  * Server-side role gates. Reads the existing session cookie, forwards it to the
@@ -43,19 +42,11 @@ export async function accountForCookie(cookie: string): Promise<ServerAccount | 
   return payload.data?.account ?? null;
 }
 
-/** Akun pengganti saat mode preview UI (NEXT_PUBLIC_UI_MOCK=1) aktif: tanpa backend/login. */
-const MOCK_ACCOUNT: ServerAccount = {
-  id: 'u_admin',
-  email: 'admin@svara.local',
-  display_name: 'Rani Wijaya',
-  role: 'super_admin',
-  status: 'active',
-  organization_id: null,
-};
-
 async function fetchAccount(): Promise<ServerAccount | null> {
-  if (UI_MOCK) return MOCK_ACCOUNT;
-  return accountForCookie((await cookies()).toString());
+  const cookie = (await cookies()).toString();
+  if (cookie) return accountForCookie(cookie);
+  const mock = await import('./guards.mock');
+  return mock.UI_MOCK ? mock.fetchMockAccount() : accountForCookie(cookie);
 }
 
 /**
