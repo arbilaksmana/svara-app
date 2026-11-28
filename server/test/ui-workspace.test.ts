@@ -189,8 +189,9 @@ test('UIX-18/UIX-20: permintaan data berhasil dimuat memakai label jenis dan sta
   assert.doesNotMatch(html, /gagal dimuat/);
   assert.doesNotMatch(html, REQUEST_EMPTY_COPY);
   const item = row(html, 'dr_hapus');
-  assert.match(item, /<dd\b[^>]*>Penghapusan data<\/dd>/);
-  assert.doesNotMatch(item, />deletion</, 'Jenis permintaan mentah tidak boleh tampil');
+  assert.match(item, />Penghapusan data</, 'Jenis permintaan tampil sebagai label manusiawi');
+  assert.match(item, />Diproses</, 'Status permintaan tampil sebagai label manusiawi');
+  assert.doesNotMatch(item, />\s*(?:deletion|in_progress)\s*</, 'Enum jenis/status mentah tidak boleh tampil');
   assert.doesNotMatch(item, ISO_DATE);
 });
 
@@ -266,11 +267,18 @@ test('UIX-20: pemilih peran akun memakai label manusiawi, bukan enum mentah', as
   });
 
   const html = render(createElement(AdminAccountsPage), '/admin/accounts');
+  // Radix Select merender pilihan di portal, tetapi trigger memakai `items` sehingga label terpilih
+  // muncul di HTML server sebagai teks tombol.
+  const page = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   for (const label of ['Creator', 'Admin organisasi', 'Super admin']) {
-    assert.match(html, new RegExp(`<option\\b[^>]*>${label}</option>`), `Opsi peran "${label}" harus tersedia`);
+    assert.ok(page.includes(label), `Opsi peran "${label}" harus tersedia`);
   }
-  assert.doesNotMatch(html, /<option\b[^>]*>(creator|org_admin|admin|super_admin)<\/option>/, 'Enum peran mentah tidak boleh tampil');
-  assert.match(html, /<option value="admin" selected="">Super admin<\/option>/, 'Nilai yang dikirim ke server tidak berubah');
+  for (const value of ['creator', 'org_admin', 'super_admin']) {
+    assert.equal(new RegExp(`>\\s*${value}\\s*<`).test(html), false, `Enum peran mentah "${value}" tidak boleh tampil`);
+  }
+  for (const name of ['Super Admin', 'Creator Lapangan', 'Admin Sekolah']) {
+    assert.match(html, new RegExp(`aria-label="Peran ${name}"`), `Pemilih peran ${name} punya label aksesibel`);
+  }
 });
 
 test('UIX-20: daftar survei, undangan, dan riwayat versi memakai tanggal WIB, bukan ISO', async (t) => {

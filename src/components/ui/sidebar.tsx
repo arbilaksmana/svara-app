@@ -304,9 +304,10 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   )
 }
 
-function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
+/** Bingkai konten: `div`, bukan `main` — halaman memberi satu landmark `<main id="konten-utama">` sendiri. */
+function SidebarInset({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <main
+    <div
       data-slot="sidebar-inset"
       className={cn(
         "relative flex w-full flex-1 flex-col bg-background",

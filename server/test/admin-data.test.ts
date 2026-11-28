@@ -71,7 +71,9 @@ function controls(html: string): string[] {
   const body = main(html);
   const buttons = [...body.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map(([, inner]) => `button:${text(inner!)}`);
   const fields = [...body.matchAll(/<(select|input|textarea)\b/g)].map(([, tag]) => tag!);
-  return [...buttons, ...fields];
+  // Radix Select: kontrolnya <button role="combobox">, bukan <select>.
+  const comboboxes = [...body.matchAll(/<button\b[^>]*\brole="combobox"/g)].map(() => 'combobox');
+  return [...buttons, ...fields, ...comboboxes];
 }
 
 function row(html: string, needle: string): string {
@@ -182,9 +184,9 @@ test('NEW-UX-A/D: bootstrap berhasil hanya merender baris server dan aktor audit
   assert.equal([...main(audit).matchAll(/<tr\b/g)].length - 1, AUDIT.length, 'Hanya baris audit dari server yang dirender');
 
   const known = cells(row(audit, 'Masuk akun'))[1]!;
-  assert.match(text(known), /^Lestari Wulandari/, 'Aktor yang dikenal tampil sebagai nama akun, bukan ID mentah');
+  assert.match(text(known), /Lestari Wulandari/, 'Aktor yang dikenal tampil sebagai nama akun, bukan ID mentah');
   assert.ok(text(known).includes(ADMIN.id), 'ID akun tetap tersedia sebagai keterangan');
-  assert.match(text(cells(row(audit, 'Ubah profil organisasi'))[1]!), /^Yoga Prasetyo/);
+  assert.match(text(cells(row(audit, 'Ubah profil organisasi'))[1]!), /Yoga Prasetyo/);
 
   const removed = cells(row(audit, 'Ekspor CSV'))[1]!;
   assert.equal(text(removed), REMOVED_ACCOUNT_ID, 'Aktor yang tidak ada di daftar akun tampil sebagai ID');
@@ -196,15 +198,23 @@ test('NEW-UX-A/D: bootstrap berhasil hanya merender baris server dan aktor audit
   for (const name of ['Lestari Wulandari', 'Yoga Prasetyo', 'Maya Kartika', 'SMP Negeri 4 Sukamaju', 'Survei Iklim Kelas 2026']) {
     assert.ok(accountsHtml.includes(name), `${name} dari bootstrap harus tampil di akun dan izin`);
   }
-  const activate = /<button\b([^>]*)>Aktifkan<\/button>/.exec(row(accountsHtml, 'Maya Kartika'));
+  const activate = /<button\b([^>]*aria-label="Aktifkan Maya Kartika"[^>]*)>/.exec(row(accountsHtml, 'Maya Kartika'));
   assert.ok(activate, 'Tombol Aktifkan harus dirender untuk akun nonaktif dari server');
   assert.doesNotMatch(activate[1]!, /\sdisabled=""/, 'Kontrol aksi aktif setelah data server tersedia');
-  assert.match(row(accountsHtml, 'Lestari Wulandari'), /<select\b[^>]*\sdisabled=""/, 'Akun sendiri tetap tidak dapat diubah');
+  const own = row(accountsHtml, 'Lestari Wulandari');
+  const ownRole = /<button\b([^>]*aria-label="Peran Lestari Wulandari"[^>]*)>/.exec(own)?.[1];
+  assert.ok(ownRole, 'Pemilih peran akun sendiri dirender');
+  assert.match(ownRole, /\sdisabled=""/, 'Peran akun sendiri tidak dapat diubah');
+  const ownStatus = /<button\b([^>]*aria-label="Nonaktifkan Lestari Wulandari"[^>]*)>/.exec(own)?.[1];
+  assert.ok(ownStatus, 'Tombol status akun sendiri dirender');
+  assert.match(ownStatus, /\sdisabled=""/, 'Status akun sendiri tidak dapat diubah');
 
   const integration = render(AdminIntegrationPage, '/admin/integration');
   assertNoFixture(integration, '/admin/integration');
-  assert.match(row(integration, 'ev_8b75f080e96e18ec'), /Ulangi event/);
-  assert.equal([...main(integration).matchAll(/Ulangi event/g)].length, EVENTS.length, 'Hanya event server yang dirender');
+  assert.match(row(integration, 'ev_8b75f080e96e18ec'), /<button\b[^>]*>Ulangi<\/button>/);
+  // Tabel desktop dan daftar mobile sama-sama dirender (disembunyikan via CSS), jadi tiap event muncul dua kali.
+  const ulangi = [...main(integration).matchAll(/<button\b[^>]*>Ulangi<\/button>/g)].length;
+  assert.equal(ulangi / EVENTS.length, 2, 'Hanya event server yang dirender');
 });
 
 /* ---------- 4. Log organisasi (NEW-UX-D) ---------- */

@@ -12,6 +12,7 @@ import { ResultsPage } from '../../src/screens/CreatorData.tsx';
 import { ToastProvider } from '../../src/components/Toast.tsx';
 import * as store from '../../src/lib/store.ts';
 import { ApiError, updateDataRequest, type BootstrapData, type DataRequest } from '../../src/lib/api.ts';
+import { requestChannelOptions } from '../../src/lib/request-channels.ts';
 import type { AccessGrant, Account, Survey, SurveyVersion } from '../../src/lib/types.ts';
 import { surveys, versions } from '../../src/lib/fixtures/surveys.ts';
 
@@ -76,22 +77,6 @@ function row(html: string, text: string): string {
   return match[0];
 }
 
-interface SelectOption { value: string; label: string; selected: boolean }
-
-/** Select yang dilabeli `<label for>` berteks `label`; undefined bila tidak dirender. */
-function labelledSelect(html: string, label: string): { attrs: string; options: SelectOption[] } | undefined {
-  const forId = new RegExp(`<label\\b[^>]*for="([^"]+)"[^>]*>${label}\\b`).exec(html)?.[1];
-  if (!forId) return undefined;
-  const select = new RegExp(`<select\\b([^>]*\\bid="${forId}"[^>]*)>([\\s\\S]*?)</select>`).exec(html);
-  assert.ok(select, `Label "${label}" harus menunjuk select dengan id ${forId}`);
-  const options = [...select[2]!.matchAll(/<option\b([^>]*)>([^<]*)<\/option>/g)].map(([, attrs, text]) => ({
-    value: /value="([^"]*)"/.exec(attrs!)?.[1] ?? text!,
-    label: text!,
-    selected: /\bselected=""/.test(attrs!),
-  }));
-  return { attrs: select[1]!, options };
-}
-
 function button(html: string, label: string): string {
   const match = new RegExp(`<button\\b([^>]*)>\\s*${label}\\s*</button>`).exec(html);
   assert.ok(match, `Tombol "${label}" harus dirender`);
@@ -117,7 +102,7 @@ function request(id: string, overrides: Partial<DataRequest> = {}): DataRequest 
   };
 }
 
-test('M2: kanal balasan wajib hanya muncul untuk permintaan berstatus Selesai, dan kanal tersimpan tidak hilang', async (t) => {
+test('M2: kanal balasan tampil untuk permintaan Selesai saja, dan kanal tersimpan tidak hilang', async (t) => {
   const rows = [
     request('dr_menunggu'),
     request('dr_diproses', { status: 'in_progress' }),
@@ -131,25 +116,17 @@ test('M2: kanal balasan wajib hanya muncul untuk permintaan berstatus Selesai, d
   t.mock.method(globalThis, 'fetch', async () => Response.json({ data: rows }));
   await store.loadDataRequests();
   const html = renderRequests();
+  const plain = (id: string) => row(html, id).replace(/<[^>]+>/g, ' ');
 
   for (const id of ['dr_menunggu', 'dr_diproses', 'dr_ditolak']) {
-    assert.equal(labelledSelect(row(html, id), 'Kanal balasan'), undefined, `${id}: status selain Selesai tidak meminta kanal balasan`);
+    assert.doesNotMatch(plain(id), /Kanal balasan/, `${id}: status selain Selesai tidak menampilkan kanal balasan`);
   }
+  assert.doesNotMatch(plain('dr_selesai_lama'), /Kanal balasan/, 'Baris lama tanpa jejak balasan tidak menampilkan kanal');
+  assert.match(plain('dr_selesai_email'), /Email/, 'Kanal tersimpan tampil sebagai label manusiawi');
+  assert.match(plain('dr_selesai_lain'), /Telepon kantor TU/, 'Kanal teks bebas tampil apa adanya');
 
-  const legacy = labelledSelect(row(html, 'dr_selesai_lama'), 'Kanal balasan');
-  assert.ok(legacy, 'Status Selesai harus meminta kanal balasan');
-  assert.match(legacy.attrs, /aria-required="true"/, 'Kanal balasan wajib untuk status Selesai');
-  const chosen = legacy.options.filter((option) => option.value !== '');
-  assert.ok(chosen.length >= 2, 'Kanal balasan harus menawarkan pilihan kanal');
-  assert.deepEqual(legacy.options.filter((option) => option.selected).map((option) => option.value), [''],
-    'Baris lama tanpa jejak balasan tidak boleh diisi kanal otomatis');
-
-  const email = labelledSelect(row(html, 'dr_selesai_email'), 'Kanal balasan');
-  assert.deepEqual(email?.options.filter((option) => option.selected).map((option) => option.value), ['email']);
-
-  const other = labelledSelect(row(html, 'dr_selesai_lain'), 'Kanal balasan');
-  assert.deepEqual(other?.options.filter((option) => option.selected).map((option) => option.value), ['Telepon kantor TU'],
-    'Kanal tersimpan di luar daftar pilihan tetap terpilih agar simpan ulang tidak menggantinya');
+  // Dialog tindak lanjut membuka form; pilihan kanalnya hanya lima kanal balasan (bukan nilai sistem).
+  assert.deepEqual(requestChannelOptions('email').map(([value]) => value), ['email', 'phone', 'messaging', 'letter', 'in_person']);
 });
 
 /** Meneruskan fetch klien (`/api/v1/...`) ke server in-process dengan sesi admin, sambil mencatat body yang dikirim. */
@@ -193,7 +170,7 @@ test('M2: body updateDataRequest untuk status Selesai diterima server dan tercat
   const sent: Array<{ method: string; path: string; body: unknown }> = [];
   routeToServer(t.mock, sent);
   await store.loadDataRequests();
-  assert.equal(labelledSelect(row(renderRequests(), id), 'Kanal balasan'), undefined, 'Permintaan baru (Menunggu) belum meminta kanal');
+  assert.doesNotMatch(row(renderRequests(), id).replace(/<[^>]+>/g, ' '), /Kanal balasan/, 'Permintaan baru (Menunggu) belum menampilkan kanal');
 
   const note = 'Data dihapus; konfirmasi dikirim ke email pemohon.';
   const failure = await rejection(updateDataRequest(id, { status: 'handled', outcome_note: note, response_channel: 'email' }));
@@ -213,15 +190,13 @@ test('M2: body updateDataRequest untuk status Selesai diterima server dan tercat
 
   // Antrean dimuat ulang dari server: kanal tersimpan terbaca kembali oleh UI.
   await store.loadDataRequests();
-  const saved = labelledSelect(row(renderRequests(), id), 'Kanal balasan');
-  assert.ok(saved, 'Permintaan berstatus Selesai menampilkan kanal balasan');
-  assert.deepEqual(saved.options.filter((option) => option.selected).map((option) => option.value), ['email']);
+  assert.match(row(renderRequests(), id).replace(/<[^>]+>/g, ' '), /Email/, 'Kanal tersimpan terbaca kembali oleh UI');
 
   // Setiap kanal yang ditawarkan UI diterima server apa adanya.
-  for (const option of saved.options.filter((entry) => entry.value !== '')) {
-    const rejected = await rejection(updateDataRequest(id, { status: 'handled', outcome_note: note, response_channel: option.value }));
-    assert.equal(rejected, null, `Kanal "${option.label}" harus diterima server, bukan ${rejected}`);
-    assert.equal((await storedRequest(id))?.response_channel, option.value);
+  for (const [value, label] of requestChannelOptions('email')) {
+    const rejected = await rejection(updateDataRequest(id, { status: 'handled', outcome_note: note, response_channel: value }));
+    assert.equal(rejected, null, `Kanal "${label}" harus diterima server, bukan ${rejected}`);
+    assert.equal((await storedRequest(id))?.response_channel, value);
   }
 
   // Status lain tidak mengirim kanal balasan.

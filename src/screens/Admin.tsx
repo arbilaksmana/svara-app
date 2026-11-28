@@ -119,6 +119,10 @@ import {
 } from "../lib/api";
 import { parseRetentionDays } from "../lib/retention";
 import {
+  channelLabel,
+  requestChannelOptions,
+} from "../lib/request-channels";
+import {
   ACCOUNT_STATUS_LABEL,
   DATA_REQUEST_TYPE_LABEL,
   ORGANIZATION_TYPE_LABEL,
@@ -1256,7 +1260,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                         aria-label={`Peran ${a.display_name}`}
                         className="h-11 w-full font-normal"
                       >
-                        <SelectValue />
+                        <SelectValue>{ROLE_LABEL[a.role]}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="creator">{ROLE_LABEL.creator}</SelectItem>
@@ -1287,7 +1291,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                         aria-label={`Organisasi ${a.display_name}`}
                         className="h-11 w-full font-normal"
                       >
-                        <SelectValue />
+                        <SelectValue>{organizations.find((organization) => organization.id === a.organization_id)?.name ?? "Tanpa organisasi"}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none">Tanpa organisasi</SelectItem>
@@ -1550,7 +1554,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 </Field>
               </div>
               {orgError && (
-                <Alert variant="destructive" role="status">
+                <Alert variant="destructive">
                   <AlertTitle>Tidak dapat membuat organisasi</AlertTitle>
                   <AlertDescription>{orgError}</AlertDescription>
                 </Alert>
@@ -1977,11 +1981,14 @@ function auditColumnDefs(names: ReadonlyMap<string, string>): ColumnDef<AuditLog
         const name = names.get(row.original.actor);
         return (
           <div className="flex items-center gap-2.5">
-            <Avatar className="size-8 bg-muted">
-              <AvatarFallback className="text-annotation font-bold text-muted-foreground">
-                {initials(name ?? row.original.actor)}
-              </AvatarFallback>
-            </Avatar>
+            {/* Inisial hanya bermakna untuk aktor yang dikenal; ID mentah tampil tanpa avatar. */}
+            {name ? (
+              <Avatar className="size-8 bg-muted">
+                <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+                  {initials(name)}
+                </AvatarFallback>
+              </Avatar>
+            ) : null}
             <span className="min-w-0 font-bold text-foreground">
               <AuditActor actor={row.original.actor} names={names} />
             </span>
@@ -2700,24 +2707,6 @@ const REQUEST_LABELS: Record<DataRequestStatus, string> = {
   rejected: "Ditolak",
 };
 
-/** Kanal yang dipakai pengelola untuk membalas pemohon; server mencatatnya sebagai jejak balasan `response_channel`. */
-const RESPONSE_CHANNEL_LABELS: Record<string, string> = {
-  email: "Email",
-  phone: "Telepon",
-  messaging: "Pesan singkat (SMS/WhatsApp)",
-  letter: "Surat",
-  in_person: "Tatap muka",
-};
-
-/**
- * Nilai kanonis yang dicatat server, bukan pilihan balasan admin: job retensi mengganti kanal teks bebas
- * dengan `dianonimkan`. Baris lama tetap menampilkannya sebagai label manusiawi, tanpa menawarkannya
- * sebagai pilihan kanal baru.
- */
-const SYSTEM_CHANNEL_LABELS: Record<string, string> = {
-  dianonimkan: "Dianonimkan",
-};
-
 const CHANNEL_REQUIRED =
   "Pilih kanal yang dipakai untuk membalas pemohon. Kanal ini dicatat sebagai bukti bahwa permintaan sudah dibalas.";
 
@@ -2847,17 +2836,15 @@ function requestColumns(
       header: "Status",
       cell: ({ row }) => {
         const request = row.original;
-        const channelLabel = request.response_channel
-          ? (RESPONSE_CHANNEL_LABELS[request.response_channel] ??
-            SYSTEM_CHANNEL_LABELS[request.response_channel] ??
-            request.response_channel)
+        const channelText = request.response_channel
+          ? channelLabel(request.response_channel)
           : null;
         return (
           <div className="flex flex-col items-start gap-1">
             <RequestStatusBadge status={request.status} />
-            {channelLabel ? (
+            {channelText ? (
               <span className="text-caption text-muted-foreground">
-                {channelLabel}
+                {channelText}
               </span>
             ) : null}
           </div>
@@ -2899,17 +2886,7 @@ function RequestForm({
   const fieldId = `request-${request.id}`;
   const channelId = `${fieldId}-channel`;
   // Kanal tersimpan di luar daftar (mis. teks bebas lewat API) tetap dapat dipilih agar simpan ulang tidak menggantinya.
-  const storedChannel = request.response_channel;
-  const channelOptions =
-    storedChannel && !Object.hasOwn(RESPONSE_CHANNEL_LABELS, storedChannel)
-      ? [
-          [
-            storedChannel,
-            SYSTEM_CHANNEL_LABELS[storedChannel] ?? storedChannel,
-          ],
-          ...Object.entries(RESPONSE_CHANNEL_LABELS),
-        ]
-    : Object.entries(RESPONSE_CHANNEL_LABELS);
+  const channelOptions = requestChannelOptions(request.response_channel);
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -3034,7 +3011,9 @@ function RequestForm({
                     aria-label={`Kanal balasan permintaan ${request.id}`}
                     className="h-11 w-full"
                   >
-                    <SelectValue placeholder="Pilih kanal" />
+                    <SelectValue placeholder="Pilih kanal">
+                      {channel ? channelLabel(channel) : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {channelOptions.map(([value, label]) => (
@@ -3061,7 +3040,7 @@ function RequestForm({
           </div>
         </div>
         {saveError && (
-          <Alert variant="destructive" role="status">
+          <Alert variant="destructive">
             <AlertTitle>Perubahan belum tersimpan</AlertTitle>
             <AlertDescription>{saveError}</AlertDescription>
           </Alert>
@@ -3244,7 +3223,14 @@ export function AdminRequestsPage() {
                                   request.type}
                               </span>
                             </div>
-                            <RequestStatusBadge status={request.status} />
+                            <div className="flex flex-col items-end gap-1">
+                              <RequestStatusBadge status={request.status} />
+                              {request.response_channel ? (
+                                <span className="text-caption text-muted-foreground">
+                                  {channelLabel(request.response_channel)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                           <div className="flex flex-col gap-1 text-body-sm">
                             <span className="break-all text-foreground">
