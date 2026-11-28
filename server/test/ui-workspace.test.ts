@@ -104,9 +104,20 @@ const ORG_AUDIT: OrgAuditRow[] = [
 function orgFetch(mock: TestContext['mock']): void {
   mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
     const url = String(input);
-    if (url.includes('/org/profile')) return Response.json({ data: { source: 'organization', profile: ORG_PROFILE } });
+    if (url.includes('/org/profile')) {
+      return Response.json({
+        data: {
+          source: 'organization',
+          profile: ORG_PROFILE,
+          notices: [
+            { version: '1.0', effective_date: '2026-01-01' },
+            { version: '1.1', effective_date: '2026-06-01' },
+          ],
+        },
+      });
+    }
     if (url.includes('/org/members')) return Response.json({ data: { members: ORG_MEMBERS } });
-    if (url.includes('/org/invitations')) return Response.json({ data: { invitations: ORG_INVITATIONS, ttl_days: 14 } });
+    if (url.includes('/org/invitations')) return Response.json({ data: { invitations: ORG_INVITATIONS, ttl_days: 21 } });
     if (url.includes('/org/audit')) return Response.json({ data: { rows: ORG_AUDIT } });
     throw new Error(`Permintaan tak terduga: ${url}`);
   });
@@ -144,6 +155,28 @@ test('UIX-18/UIX-20: Coba lagi yang berhasil memulihkan data dan peran anggota m
   assert.match(row(html, 'Admin Sekolah'), /Dinonaktifkan/);
   assert.doesNotMatch(html, /<td\b[^>]*>(creator|org_admin|super_admin)<\/td>/, 'Enum peran mentah tidak boleh tampil');
   assert.doesNotMatch(html, ORG_EMPTY_COPY);
+});
+
+test('UIX-26: masa berlaku undangan mengikuti ttl_days server, bukan angka hardcoded', async (t) => {
+  orgFetch(t.mock);
+  await store.loadOrgWorkspace();
+
+  const html = renderOrg();
+  assert.match(html, /Setiap kode berlaku 21 hari/, 'Copy masa berlaku harus membaca ttl_days dari server');
+  assert.doesNotMatch(html, /berlaku 14 hari/, 'Angka hardcoded lama tidak boleh tersisa');
+});
+
+test('UIX-26: pemilih versi notice menampilkan versi terpasang dan kode undangan aktif dapat disalin', async (t) => {
+  orgFetch(t.mock);
+  await store.loadOrgWorkspace();
+
+  const html = renderOrg();
+  // Nilai terpilih Radix baru terisi setelah hydration; di SSR cukup field dan trigger-nya yang terkunci.
+  assert.match(html, /<label\b[^>]*>Versi pemberitahuan responden<\/label>/, 'Field versi pemberitahuan harus dirender dari katalog notice');
+  assert.match(html, /aria-label="Versi pemberitahuan responden"/, 'Trigger pemilih versi pemberitahuan harus bernama');
+  assert.match(html, /aria-label="Salin kode undangan ORG-KODE-1"/, 'Kode aktif menawarkan tombol salin');
+  assert.match(html, /meminta konfirmasi/, 'Hint retensi memperingatkan konsekuensi perpendekan');
+  assert.doesNotMatch(html, /Kontak permintaan data tidak boleh kosong/, 'Copy validasi lama yang tidak akurat harus hilang');
 });
 
 test('UIX-18: respons organisasi yang tiba setelah layar dilepas tidak membalik UI ke galat', async (t) => {

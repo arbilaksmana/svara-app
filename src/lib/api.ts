@@ -7,6 +7,7 @@ import type {
   OrgGuardianEvidence,
   OrgInvitation,
   OrgMember,
+  OrgNoticeVersion,
   OrgProfile,
   OrganizationSummary,
   PlatformProfile,
@@ -607,8 +608,8 @@ export async function adminCreateOrganization(
 }
 
 /** Halaman organisasi: organisasi selalu ditentukan sesi server, bukan parameter klien. */
-export async function getOrgProfile(): Promise<{ source: string; profile: OrgProfile }> {
-  return call<{ source: string; profile: OrgProfile }>('/org/profile');
+export async function getOrgProfile(): Promise<{ source: string; profile: OrgProfile; notices: OrgNoticeVersion[] }> {
+  return call<{ source: string; profile: OrgProfile; notices: OrgNoticeVersion[] }>('/org/profile');
 }
 
 export type OrgProfileInput = Partial<
@@ -620,8 +621,13 @@ export type OrgProfileInput = Partial<
     | 'terms_url'
     | 'retention_days'
     | 'data_request_contact'
+    | 'notice_version'
   >
-> & { cross_border_transfer?: boolean | null };
+> & {
+  cross_border_transfer?: boolean | null;
+  /** BF-06: wajib true saat retention_days baru lebih pendek; server menolak 409 tanpa konfirmasi ini. */
+  confirm_retention_shrink?: boolean;
+};
 
 export async function saveOrgProfile(input: OrgProfileInput): Promise<{ source: string; profile: OrgProfile }> {
   return call<{ source: string; profile: OrgProfile }>('/org/profile', { method: 'PUT', body: input });

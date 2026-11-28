@@ -54,8 +54,19 @@ orgRouter.get('/org/profile', async (req: AuthedRequest, res: Response) => {
       ? await get<OrgProfileRow>(`SELECT ${ORG_COLUMNS} FROM organizations WHERE id = ?`, req.account.organization_id)
       : await get<PlatformProfileRow>(`SELECT ${PLATFORM_COLUMNS} FROM platform_profile WHERE id = 'platform'`);
     if (!row) fail(404, 'profile_missing', 'Profil organisasi belum dikonfigurasi.');
+    // Katalog versi notice yang sah untuk notice_version: organisasi membaca salinannya sendiri,
+    // pemilik profil platform membaca katalog platform. Teks notice tidak dibocorkan di sini; daftar
+    // ini hanya memuat versi + tanggal efektif untuk pemilih di formulir profil.
+    const notices = req.account.organization_id
+      ? await all<{ version: string; effective_date: string }>(
+          'SELECT version, effective_date FROM organization_notices WHERE organization_id = ? ORDER BY version',
+          req.account.organization_id,
+        )
+      : await all<{ version: string; effective_date: string }>(
+          'SELECT version, effective_date FROM platform_notices ORDER BY version',
+        );
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: { source: req.account.organization_id ? 'organization' : 'platform', profile: row } });
+    res.json({ data: { source: req.account.organization_id ? 'organization' : 'platform', profile: row, notices } });
   } catch (error) {
     sendError(res, error);
   }

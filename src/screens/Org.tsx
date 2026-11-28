@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from '../components/ui/card';
 import { CheckboxField } from '../components/ui/checkbox';
+import { DataTable } from '../components/data-table';
 import {
   Dialog,
   DialogContent,
@@ -33,16 +34,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '../components/ui/table';
+import { Check } from 'runeicons-react/icons/Check';
+import { Copy } from 'runeicons-react/icons/Copy';
 import { UserMinus } from 'runeicons-react/icons/UserMinus';
 import { UserPlus } from 'runeicons-react/icons/UserPlus';
+import { X } from 'runeicons-react/icons/X';
 import { withIconClass } from '../components/rune-icon';
 import { StateView, SuccessBanner, ValidationSummary } from '../components/StateView';
 import { useScreenState } from '../lib/state';
@@ -67,14 +63,19 @@ import { cancelOrgWorkspaceLoad, loadOrgWorkspace, useStore } from '../lib/store
 import { AuditActor } from './Admin';
 import { formatWIB } from '../lib/summary';
 import { cn } from '../lib/utils';
-import type { OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
+import type { ColumnDef } from '@tanstack/react-table';
+import type { OrgAuditRow, OrgInvitation, OrgMember, OrgProfile, OrganizationType } from '../lib/types';
 
 const SuspendedMemberIcon = withIconClass(UserMinus);
 const ActivatedMemberIcon = withIconClass(UserPlus);
+const CopyIcon = withIconClass(Copy);
+const CheckIcon = withIconClass(Check);
+const XIcon = withIconClass(X);
 
 /** Pesan field per kode validasi server (PRD §1.2). */
-const FIELD_FOR_CODE: Record<string, 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact'> = {
+const FIELD_FOR_CODE: Record<string, 'organization_name' | 'organization_type' | 'policy_url' | 'terms_url' | 'retention_days' | 'cross_border_transfer' | 'data_request_contact' | 'notice_version'> = {
   validation_error: 'organization_name',
+  notice_version_unavailable: 'notice_version',
 };
 
 interface FormState {
@@ -85,6 +86,7 @@ interface FormState {
   retention_days: string;
   data_request_contact: string;
   cross_border_transfer: boolean;
+  notice_version: string;
 }
 
 function formFrom(profile: OrgProfile): FormState {
@@ -96,12 +98,14 @@ function formFrom(profile: OrgProfile): FormState {
     retention_days: profile.retention_days === null ? '' : String(profile.retention_days),
     data_request_contact: profile.data_request_contact ?? '',
     cross_border_transfer: profile.cross_border_transfer === 1,
+    notice_version: profile.notice_version,
   };
 }
 
-function payloadFrom(form: FormState): OrgProfileInput {
+/** notice_version hanya dikirim bila berubah: versi terpasang yang tidak berubah tidak perlu divalidasi ulang katalog. */
+function payloadFrom(form: FormState, profile: OrgProfile): OrgProfileInput {
   const retention = form.retention_days.trim();
-  return {
+  const payload: OrgProfileInput = {
     organization_name: form.organization_name.trim(),
     organization_type: form.organization_type,
     policy_url: form.policy_url.trim(),
@@ -110,6 +114,215 @@ function payloadFrom(form: FormState): OrgProfileInput {
     data_request_contact: form.data_request_contact.trim() || null,
     cross_border_transfer: form.cross_border_transfer,
   };
+  if (form.notice_version !== profile.notice_version) payload.notice_version = form.notice_version;
+  return payload;
+}
+
+/** Cermin aturan server (BF-06): batas baru selalu lebih pendek bila sebelumnya tanpa batas. */
+function isRetentionShrink(current: number | null, next: number | null): boolean {
+  return next !== null && (current === null || next < current);
+}
+
+function retentionLabel(days: number | null): string {
+  return days === null ? 'tanpa batas' : `${days} hari`;
+}
+
+function memberColumns(toggle: (member: OrgMember) => void, busyId: string | null): ColumnDef<OrgMember>[] {
+  return [
+    {
+      accessorKey: 'display_name',
+      header: 'Nama',
+      cell: ({ row }) => (
+        <div className="min-w-0">
+          <p className="font-bold text-foreground">{row.original.display_name}</p>
+          <p className="font-mono text-annotation tracking-mono text-muted-foreground">
+            <Code>{row.original.id}</Code>
+          </p>
+        </div>
+      ),
+    },
+    { accessorKey: 'email', header: 'Email' },
+    {
+      id: 'role',
+      header: 'Peran',
+      enableSorting: false,
+      cell: ({ row }) => ROLE_LABEL[row.original.role],
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const member = row.original;
+        return (
+          <Badge
+            variant={member.status === 'active' ? 'success' : 'secondary'}
+            className="gap-1.5"
+            title={ACCOUNT_STATUS_LABEL[member.status]}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'size-1.5 rounded-full',
+                member.status === 'active' ? 'bg-emerald-600' : 'bg-muted-foreground',
+              )}
+            />
+            {member.status === 'active' ? (
+              ACCOUNT_STATUS_LABEL[member.status]
+            ) : (
+              <>
+                <SuspendedMemberIcon className="size-3" />
+                <span className="sr-only">{ACCOUNT_STATUS_LABEL[member.status]}</span>
+              </>
+            )}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      header: '',
+      enableSorting: false,
+      enableHiding: false,
+      /** Aksi tetap terjangkau saat tabel bergulir horizontal di layar sempit. */
+      meta: { className: 'sticky right-0 z-10 border-l border-border bg-card sm:static sm:border-l-0' },
+      cell: ({ row }) => {
+        const member = row.original;
+        return (
+          <div className="flex justify-end">
+            <BusyButton
+              variant="ghost"
+              size="icon"
+              className={
+                member.status === 'active'
+                  ? 'text-destructive hover:bg-destructive/10 hover:text-destructive'
+                  : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800'
+              }
+              aria-label={`${member.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'} ${member.display_name}`}
+              title={`${member.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'} ${member.display_name}`}
+              loading={busyId === member.id}
+              disabled={member.role !== 'creator' || busyId === member.id}
+              onClick={() => toggle(member)}
+            >
+              {member.status === 'active' ? (
+                <SuspendedMemberIcon className="size-4" />
+              ) : (
+                <ActivatedMemberIcon className="size-4" />
+              )}
+            </BusyButton>
+          </div>
+        );
+      },
+    },
+  ];
+}
+
+function invitationColumns(
+  copyCode: (code: string) => void,
+  askRevoke: (row: OrgInvitation) => void,
+  busy: boolean,
+): ColumnDef<OrgInvitation>[] {
+  return [
+    {
+      accessorKey: 'code',
+      header: 'Kode',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1 font-mono tracking-mono">
+          <Code>{row.original.code}</Code>
+          {row.original.status === 'active' && (
+            <BusyButton
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label={`Salin kode undangan ${row.original.code}`}
+              title="Salin kode"
+              onClick={() => copyCode(row.original.code)}
+            >
+              <CopyIcon className="size-3.5" />
+            </BusyButton>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Badge variant={INVITATION_STATUS_TONE[row.original.status]}>
+          {INVITATION_STATUS_LABEL[row.original.status]}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: 'created_at',
+      header: 'Dibuat',
+      cell: ({ row }) => formatWIB(row.original.created_at),
+    },
+    {
+      accessorKey: 'expires_at',
+      header: 'Kedaluwarsa',
+      cell: ({ row }) => formatWIB(row.original.expires_at),
+    },
+    {
+      id: 'actions',
+      header: '',
+      enableSorting: false,
+      enableHiding: false,
+      meta: { className: 'sticky right-0 z-10 border-l border-border bg-card sm:static sm:border-l-0' },
+      cell: ({ row }) =>
+        row.original.status === 'active' ? (
+          <div className="flex justify-end">
+            <BusyButton
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy}
+              onClick={() => askRevoke(row.original)}
+            >
+              Cabut
+            </BusyButton>
+          </div>
+        ) : (
+          <span className="block text-end text-caption text-muted-foreground">—</span>
+        ),
+    },
+  ];
+}
+
+function auditColumns(names: Map<string, string>): ColumnDef<OrgAuditRow>[] {
+  return [
+    {
+      accessorKey: 'at',
+      header: 'Waktu',
+      cell: ({ row }) => formatWIB(row.original.at),
+    },
+    {
+      id: 'actor',
+      header: 'Aktor',
+      enableSorting: false,
+      cell: ({ row }) => <AuditActor actor={row.original.actor} names={names} />,
+    },
+    {
+      accessorKey: 'action',
+      header: 'Tindakan',
+    },
+    {
+      accessorKey: 'object',
+      header: 'Objek',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="font-mono tracking-mono">
+          <Code>{row.original.object}</Code>
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'outcome',
+      header: 'Hasil',
+      enableSorting: false,
+    },
+  ];
 }
 
 export function AdminOrgPage() {
@@ -126,6 +339,8 @@ export function AdminOrgPage() {
   const [memberBusy, setMemberBusy] = useState<string | null>(null);
   const [invitationBusy, setInvitationBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<OrgInvitation | null>(null);
+  const [shrinkPayload, setShrinkPayload] = useState<OrgProfileInput | null>(null);
+  const [freshInvitation, setFreshInvitation] = useState<OrgInvitation | null>(null);
 
   useEffect(() => {
     // Muat sekali saat halaman dibuka; aksi pengguna memuat ulang secara eksplisit.
@@ -147,19 +362,25 @@ export function AdminOrgPage() {
     setSaved(false);
   };
 
-  const onSave = () => {
-    if (!form) return;
+  const performSave = (payload: OrgProfileInput, confirmShrink = false) => {
     setBusy(true);
     setFieldErrors({});
     setSaved(false);
-    void saveOrgProfile(payloadFrom(form))
+    const body = confirmShrink ? { ...payload, confirm_retention_shrink: true } : payload;
+    void saveOrgProfile(body)
       .then((result) => {
         setDraft(formFrom(result.profile));
         setSaved(true);
+        setShrinkPayload(null);
         notify('Profil organisasi disimpan.');
         return loadOrgWorkspace();
       })
       .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === 'retention_shrink_confirmation_required') {
+          // Server tetap meminta konfirmasi (mis. profil berubah di sesi lain): buka dialog yang sama.
+          setShrinkPayload(payload);
+          return;
+        }
         if (error instanceof ApiError && error.code) {
           // Tampilkan di dekat field, bukan hanya toast.
           setFieldErrors({ [FIELD_FOR_CODE[error.code] ?? 'organization_name']: error.message });
@@ -167,6 +388,28 @@ export function AdminOrgPage() {
         notify(error instanceof Error ? error.message : 'Profil gagal disimpan.', 'danger');
       })
       .finally(() => setBusy(false));
+  };
+
+  const onSave = () => {
+    if (!form || !profile) return;
+    const payload = payloadFrom(form, profile);
+    const nextRetention = payload.retention_days === undefined ? profile.retention_days : payload.retention_days;
+    // BF-06: memperpendek masa simpan menghapus data lama pada run retensi berikutnya, jadi
+    // konfirmasi destruktif dimuka; server tetap menjadi penjaga terakhir lewat confirm_retention_shrink.
+    if (isRetentionShrink(profile.retention_days, nextRetention ?? null)) {
+      setShrinkPayload(payload);
+      return;
+    }
+    performSave(payload);
+  };
+
+  const copyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      notify('Kode undangan disalin ke papan klip.');
+    } catch {
+      notify(`Salin kode undangan: ${code}`, 'info');
+    }
   };
 
   const toggleMember = (member: OrgMember) => {
@@ -184,7 +427,8 @@ export function AdminOrgPage() {
   const createInvitation = () => {
     setInvitationBusy(true);
     void inviteOrgMember()
-      .then(() => {
+      .then((invitation) => {
+        setFreshInvitation(invitation);
         notify('Kode undangan organisasi dibuat.');
         return loadOrgWorkspace();
       })
@@ -238,8 +482,13 @@ export function AdminOrgPage() {
       </Shell>
     );
   }
-  const { members, invitations, audit } = org;
+  const { members, invitations, audit, notices, invitationTtlDays } = org;
   const memberNames = new Map(members.map((member) => [member.id, member.display_name]));
+  // Versi terpasang yang tidak ada di katalog tetap dapat dipilih agar pemilih tidak kosong;
+  // server menolak versi di luar katalog saat penyimpanan.
+  const noticeVersions = notices.some((row) => row.version === profile?.notice_version) || !profile
+    ? notices
+    : [...notices, { version: profile.notice_version, effective_date: '' }];
 
   return (
     <Shell kind="admin" title="Organisasi" subtitle="Profil kebijakan, anggota, undangan, dan audit lingkup organisasi Anda.">
@@ -250,7 +499,7 @@ export function AdminOrgPage() {
       >
         <div className="flex flex-col gap-5">
           {state === 'success' && <SuccessBanner title="Profil tersimpan">Profil organisasi diperbarui.</SuccessBanner>}
-          {state === 'validation' && <ValidationSummary items={['Nama organisasi tidak boleh kosong.', 'Kontak permintaan data tidak boleh kosong.']} />}
+          {state === 'validation' && <ValidationSummary items={['Nama organisasi tidak boleh kosong.', 'URL kebijakan privasi tidak boleh kosong.']} />}
 
           <Card>
             <CardHeader>
@@ -324,7 +573,7 @@ export function AdminOrgPage() {
                   <Field
                     id="org-retention"
                     label="Masa retensi (hari)"
-                    hint="Kosongkan bila masih menunggu keputusan pengendali."
+                    hint="Kosongkan bila masih menunggu keputusan pengendali. Memperpendek masa simpan menghapus data yang lebih tua pada run retensi berikutnya dan meminta konfirmasi."
                     error={fieldErrors.retention_days}
                   >
                     {(aria) => (
@@ -347,6 +596,32 @@ export function AdminOrgPage() {
                       />
                     )}
                   </Field>
+                  {noticeVersions.length > 0 && (
+                    <Field
+                      id="org-notice-version"
+                      label="Versi pemberitahuan responden"
+                      hint="Draf yang belum pernah dijawab mengikuti versi baru; versi yang sudah disetujui responden tidak berubah."
+                      error={fieldErrors.notice_version}
+                    >
+                      {(aria) => (
+                        <Select
+                          value={form.notice_version}
+                          onValueChange={(value) => setField('notice_version', value)}
+                        >
+                          <SelectTrigger {...aria} aria-label="Versi pemberitahuan responden" className="h-11 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {noticeVersions.map((row) => (
+                              <SelectItem key={row.version} value={row.version}>
+                                Versi {row.version}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </Field>
+                  )}
                   <div className="md:col-span-2">
                     <CheckboxField
                       id="org-cross-border"
@@ -374,6 +649,31 @@ export function AdminOrgPage() {
             </CardContent>
           </Card>
 
+          <Dialog open={shrinkPayload !== null} onOpenChange={(next) => !next && !busy && setShrinkPayload(null)}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Perpendek masa retensi?</DialogTitle>
+                <DialogDescription>
+                  {shrinkPayload && profile
+                    ? `Masa retensi berubah dari ${retentionLabel(profile.retention_days)} menjadi ${retentionLabel(shrinkPayload.retention_days ?? null)}. Data yang lebih tua dari batas baru akan dihapus pada run retensi berikutnya dan tidak dapat dikembalikan.`
+                    : ''}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <BusyButton variant="outline" onClick={() => setShrinkPayload(null)} disabled={busy}>
+                  Batal
+                </BusyButton>
+                <BusyButton
+                  variant="destructive"
+                  loading={busy}
+                  onClick={() => shrinkPayload && performSave(shrinkPayload, true)}
+                >
+                  Perpendek retensi
+                </BusyButton>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Card>
             <CardHeader>
               <CardTitle>Anggota</CardTitle>
@@ -383,82 +683,14 @@ export function AdminOrgPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {members.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border p-6 text-center text-body-sm text-muted-foreground">
-                  Belum ada anggota.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nama</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Peran</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-end">Aksi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {members.map((member) => (
-                      <TableRow key={member.id}>
-                        <TableCell>
-                          <p className="font-bold text-foreground">{member.display_name}</p>
-                          <p className="font-mono text-annotation tracking-mono text-muted-foreground">
-                            <Code>{member.id}</Code>
-                          </p>
-                        </TableCell>
-                        <TableCell>{member.email}</TableCell>
-                        <TableCell>{ROLE_LABEL[member.role]}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={member.status === 'active' ? 'success' : 'secondary'}
-                            className="gap-1.5"
-                            title={ACCOUNT_STATUS_LABEL[member.status]}
-                          >
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                'size-1.5 rounded-full',
-                                member.status === 'active' ? 'bg-emerald-600' : 'bg-muted-foreground',
-                              )}
-                            />
-                            {member.status === 'active' ? (
-                              ACCOUNT_STATUS_LABEL[member.status]
-                            ) : (
-                              <>
-                                <SuspendedMemberIcon className="size-3" />
-                                <span className="sr-only">{ACCOUNT_STATUS_LABEL[member.status]}</span>
-                              </>
-                            )}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-end">
-                          <BusyButton
-                            variant="ghost"
-                            size="icon"
-                            className={
-                              member.status === 'active'
-                                ? 'text-destructive hover:bg-destructive/10 hover:text-destructive'
-                                : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800'
-                            }
-                            aria-label={`${member.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'} ${member.display_name}`}
-                            title={`${member.status === 'active' ? 'Nonaktifkan' : 'Aktifkan'} ${member.display_name}`}
-                            loading={memberBusy === member.id}
-                            disabled={member.role !== 'creator' || memberBusy === member.id}
-                            onClick={() => toggleMember(member)}
-                          >
-                            {member.status === 'active' ? (
-                              <SuspendedMemberIcon className="size-4" />
-                            ) : (
-                              <ActivatedMemberIcon className="size-4" />
-                            )}
-                          </BusyButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+              <DataTable
+                columns={memberColumns(toggleMember, memberBusy)}
+                data={members}
+                caption="Anggota organisasi: peran, status, dan aksi"
+                emptyMessage="Belum ada anggota."
+                filterPlaceholder="Cari nama atau email"
+                filterText={(member) => `${member.display_name} ${member.email} ${ROLE_LABEL[member.role]}`}
+              />
             </CardContent>
           </Card>
 
@@ -467,7 +699,7 @@ export function AdminOrgPage() {
               <CardTitle>Undangan creator</CardTitle>
               <CardDescription>
                 Kode undangan dipakai sekali saat pendaftaran dan menautkan akun baru ke organisasi
-                ini. Setiap kode berlaku 14 hari dan dapat dicabut sebelum dipakai.
+                ini. Setiap kode berlaku {invitationTtlDays} hari dan dapat dicabut sebelum dipakai.
               </CardDescription>
               <CardAction>
                 <BusyButton
@@ -480,54 +712,43 @@ export function AdminOrgPage() {
                 </BusyButton>
               </CardAction>
             </CardHeader>
-            <CardContent>
-              {invitations.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border p-6 text-center text-body-sm text-muted-foreground">
-                  Belum ada kode undangan.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Kode</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Dibuat</TableHead>
-                      <TableHead>Kedaluwarsa</TableHead>
-                      <TableHead className="text-end">Aksi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invitations.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-mono tracking-mono">
-                          <Code>{row.code}</Code>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={INVITATION_STATUS_TONE[row.status]}>
-                            {INVITATION_STATUS_LABEL[row.status]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{formatWIB(row.created_at)}</TableCell>
-                        <TableCell>{formatWIB(row.expires_at)}</TableCell>
-                        <TableCell className="text-end">
-                          {row.status === 'active' ? (
-                            <BusyButton
-                              variant="ghost"
-                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              disabled={invitationBusy}
-                              onClick={() => setRevokeTarget(row)}
-                            >
-                              Cabut
-                            </BusyButton>
-                          ) : (
-                            <span className="text-caption text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+            <CardContent className="flex flex-col gap-4">
+              {freshInvitation && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <CheckIcon aria-hidden="true" className="size-4 shrink-0 text-emerald-700" />
+                  <p className="min-w-0 flex-1 text-body-sm text-foreground">
+                    Kode undangan baru:{' '}
+                    <span className="font-mono tracking-mono">
+                      <Code>{freshInvitation.code}</Code>
+                    </span>
+                  </p>
+                  <BusyButton
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void copyCode(freshInvitation.code)}
+                  >
+                    <CopyIcon aria-hidden="true" className="size-3.5" />
+                    Salin kode
+                  </BusyButton>
+                  <BusyButton
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label="Tutup pemberitahuan kode baru"
+                    onClick={() => setFreshInvitation(null)}
+                  >
+                    <XIcon className="size-4" />
+                  </BusyButton>
+                </div>
               )}
+              <DataTable
+                columns={invitationColumns((code) => void copyCode(code), setRevokeTarget, invitationBusy)}
+                data={invitations}
+                caption="Kode undangan creator: status, masa berlaku, dan aksi"
+                emptyMessage="Belum ada kode undangan."
+                filterPlaceholder="Cari kode undangan"
+                filterText={(row) => `${row.code} ${INVITATION_STATUS_LABEL[row.status]}`}
+              />
             </CardContent>
           </Card>
 
@@ -565,38 +786,14 @@ export function AdminOrgPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {audit.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border p-6 text-center text-body-sm text-muted-foreground">
-                  Belum ada aktivitas organisasi.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Waktu</TableHead>
-                      <TableHead>Aktor</TableHead>
-                      <TableHead>Tindakan</TableHead>
-                      <TableHead>Objek</TableHead>
-                      <TableHead>Hasil</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {audit.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>{formatWIB(row.at)}</TableCell>
-                        <TableCell>
-                          <AuditActor actor={row.actor} names={memberNames} />
-                        </TableCell>
-                        <TableCell>{row.action}</TableCell>
-                        <TableCell className="font-mono tracking-mono">
-                          <Code>{row.object}</Code>
-                        </TableCell>
-                        <TableCell>{row.outcome}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+              <DataTable
+                columns={auditColumns(memberNames)}
+                data={audit}
+                caption="Log audit organisasi: waktu, aktor, tindakan, dan hasil"
+                emptyMessage="Belum ada aktivitas organisasi."
+                filterPlaceholder="Cari tindakan atau objek"
+                filterText={(row) => `${row.action} ${row.object} ${row.actor} ${row.outcome}`}
+              />
             </CardContent>
           </Card>
         </div>

@@ -228,6 +228,12 @@ export interface OrgProfile {
   notice_version: string;
 }
 
+/** Versi notice yang sah dipilih untuk notice_version profil; teksnya tampil ke responden di formulir publik. */
+export interface OrgNoticeVersion {
+  version: string;
+  effective_date: string;
+}
+
 /** Profil platform dipakai akun tanpa organisasi; diedit super_admin lewat /admin/platform. */
 export interface PlatformProfile {
   id: string;
