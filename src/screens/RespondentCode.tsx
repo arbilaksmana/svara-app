@@ -19,7 +19,7 @@ export function RespondentCodePage() {
         <div className="text-center">
           <p className="font-mono text-caption font-bold tracking-mono text-n600">RESPONDEN</p>
           <h1 className="mt-2 text-h2 font-bold text-ink">Buka undangan</h1>
-          <p className="mt-2 text-body-sm text-muted">
+          <p className="mt-2 text-body-sm text-ink-muted">
             Masukkan kode undangan yang Anda terima. Tidak perlu akun.
           </p>
         </div>
@@ -79,7 +79,7 @@ export function RespondentCodePage() {
         </Card>
 
         <div className="flex flex-col items-center gap-3 text-center">
-          <p className="max-w-[38ch] text-caption text-muted">
+          <p className="max-w-[38ch] text-caption text-ink-muted">
             Punya tautan langsung dari creator? Buka tautan itu; kode tidak diperlukan.
           </p>
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">

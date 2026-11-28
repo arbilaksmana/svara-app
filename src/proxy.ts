@@ -39,7 +39,10 @@ export function proxy(request: NextRequest): NextResponse {
     // 'strict-dynamic' lets the nonced Next.js bootstrap load chunks; 'self'
     // remains as the fallback for browsers without strict-dynamic support.
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
-    `style-src 'self' 'nonce-${nonce}'`,
+    // Inline `style` attributes stay allowed: Radix positions popovers/dialogs with
+    // them, and the shadcn sidebar exposes its width via CSS custom properties.
+    // A nonce here would disable 'unsafe-inline' (CSP3), so styles use no nonce.
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",

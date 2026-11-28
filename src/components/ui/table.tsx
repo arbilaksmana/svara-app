@@ -1,75 +1,122 @@
-import type { ComponentProps, Ref } from 'react';
-import { cn } from '../../lib/utils';
+"use client"
 
-/** Primitif tabel gaya shadcn bertoken Svara; perilaku (sorting, pagination) ada di data-table. */
-export function Table({
+import * as React from "react"
+import { cn } from "@/lib/utils"
+
+function Table({
   className,
   scrollRegionLabel,
-  viewportRef,
-  measureKey,
   ...props
-}: ComponentProps<'table'> & {
-  /**
-   * Bila diisi, kontainer geser menjadi region berfokus dan berlabel, sehingga pengguna keyboard
-   * bisa menggeser kolom yang berada di luar viewport.
-   */
-  scrollRegionLabel?: string;
-  /** Kontainer geser; pemanggil mengukurnya untuk tahu isi tabel melebihi lebar. */
-  viewportRef?: Ref<HTMLDivElement>;
-  /**
-   * Dipakai sebagai dependency effect pengukuran: visibilitas kolom, jumlah baris, dan lebar
-   * sel berubah tanpa mengubah ukuran kontainer, jadi ResizeObserver saja akan basi.
-   */
-  measureKey?: unknown;
-}) {
-  void measureKey; // dependency effect di pemanggil (`useOverflowX`), bukan sisi DOM
+}: React.ComponentProps<"table"> & { scrollRegionLabel?: string }) {
   return (
     <div
-      ref={viewportRef}
       data-slot="table-container"
-      className="relative w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ad-accent)]"
-      {...(scrollRegionLabel
-        ? { role: 'region', 'aria-label': scrollRegionLabel, tabIndex: 0 }
-        : {})}
+      className="relative w-full overflow-x-auto"
+      role={scrollRegionLabel ? "region" : undefined}
+      aria-label={scrollRegionLabel}
+      tabIndex={scrollRegionLabel ? 0 : undefined}
     >
-      <table data-slot="table" className={cn('w-full caption-top text-body-sm', className)} {...props} />
+      <table
+        data-slot="table"
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
     </div>
-  );
+  )
 }
 
-export function TableHeader({ className, ...props }: ComponentProps<'thead'>) {
-  return <thead data-slot="table-header" className={cn('[&_tr]:border-b [&_tr]:border-[var(--ad-border)]', className)} {...props} />;
+function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+  return (
+    <thead
+      data-slot="table-header"
+      className={cn("[&_tr]:border-b", className)}
+      {...props}
+    />
+  )
 }
 
-export function TableBody({ className, ...props }: ComponentProps<'tbody'>) {
-  return <tbody data-slot="table-body" className={cn('[&_tr:last-child]:border-0', className)} {...props} />;
+function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
+  return (
+    <tbody
+      data-slot="table-body"
+      className={cn("[&_tr:last-child]:border-0", className)}
+      {...props}
+    />
+  )
 }
 
-export function TableRow({ className, ...props }: ComponentProps<'tr'>) {
+function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
+  return (
+    <tfoot
+      data-slot="table-footer"
+      className={cn(
+        "border-t bg-muted/50 font-medium [&>tr]:last:border-b-0",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   return (
     <tr
       data-slot="table-row"
-      className={cn('border-b border-[var(--ad-border)] transition-colors duration-fast hover:bg-[var(--ad-soft)] data-[state=selected]:bg-[var(--ad-soft)]', className)}
+      className={cn(
+        "border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        className
+      )}
       {...props}
     />
-  );
+  )
 }
 
-export function TableHead({ className, scope = 'col', ...props }: ComponentProps<'th'>) {
+function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
-      scope={scope}
-      className={cn('h-11 px-3 text-start align-middle text-caption font-bold whitespace-nowrap text-[color:var(--ad-muted)]', className)}
+      className={cn(
+        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        className
+      )}
       {...props}
     />
-  );
+  )
 }
 
-export function TableCell({ className, ...props }: ComponentProps<'td'>) {
-  return <td data-slot="table-cell" className={cn('px-3 py-2.5 align-middle text-[color:var(--ad-text)]', className)} {...props} />;
+function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+  return (
+    <td
+      data-slot="table-cell"
+      className={cn(
+        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        className
+      )}
+      {...props}
+    />
+  )
 }
 
-export function TableCaption({ className, ...props }: ComponentProps<'caption'>) {
-  return <caption data-slot="table-caption" className={cn('sr-only', className)} {...props} />;
+function TableCaption({
+  className,
+  ...props
+}: React.ComponentProps<"caption">) {
+  return (
+    <caption
+      data-slot="table-caption"
+      className={cn("mt-4 text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableCaption,
 }

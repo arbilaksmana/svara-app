@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { all, get, nowIso, run, withTx } from '../db.ts';
+import { ORGANIZATION_TYPE_SET, ORGANIZATION_TYPES } from '../organization-types.ts';
 import { noticeVersionForNewOrganization, provisionNoticesForNewOrganization } from '../notice-provisioning.ts';
 import type { AuthedRequest } from '../security.ts';
 import { hashPassword, passwordPolicyError, redactAuditRow, requireRole, revokeSessionsOnStatusChange } from '../security.ts';
@@ -153,7 +154,6 @@ adminRouter.patch('/admin/accounts/:id', async (req: AuthedRequest, res: Respons
 });
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ORGANIZATION_TYPE: Record<string, true> = { school: true, organization: true };
 
 /**
  * Onboarding satu langkah: organisasi baru langsung dengan admin pertamanya.
@@ -166,8 +166,8 @@ adminRouter.post('/admin/organizations', async (req: AuthedRequest, res: Respons
     const name = asString(body.name ?? '', 'name', 200);
     if (!name) fail(422, 'validation_error', 'name wajib diisi.');
     const organizationType = asString(body.organization_type ?? '', 'organization_type', 50);
-    if (!ORGANIZATION_TYPE[organizationType]) {
-      fail(422, 'validation_error', 'organization_type harus school atau organization.');
+    if (!ORGANIZATION_TYPE_SET.has(organizationType)) {
+      fail(422, 'validation_error', `organization_type harus salah satu: ${ORGANIZATION_TYPES.join(', ')}.`);
     }
     const policyUrl =
       body.policy_url === undefined ? '/kebijakan-privasi' : asString(body.policy_url, 'policy_url', 500);

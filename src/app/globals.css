@@ -1,13 +1,20 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* Semua token di bawah bersumber dari DESIGN.md §Quick Start.
-   Tidak ada warna, font, radius, atau shadow baru di luar dokumen itu. */
+/* App hanya punya tema terang: `dark:` dari registry shadcn tidak boleh ikut preferensi OS.
+   Varian ini hanya aktif di bawah kelas `.dark`, yang tidak pernah dipasang. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Foundation default shadcn/ui: token semantik netral (oklch, base color neutral) di :root,
+   dipetakan ke utility Tailwind lewat @theme inline di bawah. Token merek Svara (n0..n800,
+   action, danger, success) tetap tersedia untuk halaman yang belum ikut foundation ini. */
 @theme {
   /* Neutrals */
   --color-n0: #ffffff;
   --color-n50: #fbfcff;
   --color-n100: #f4f7fe;
   --color-n200: #d8dce8;
+  /* Batas kontrol form halaman lama; foundation shadcn memakai --input (default netral). */
   --color-control-border: #8d919c;
   --color-n400: #aeb2be;
   --color-n600: #686b74;
@@ -35,14 +42,17 @@
   /* Alias pendek dari DESIGN.md §Tailwind v4 */
   --color-canvas: #ffffff;
   --color-ink: #303135;
-  --color-muted: #64676f;
+  /* Teks sekunder. Dinamai -ink-* karena `muted` di shadcn/ui berarti permukaan abu-abu. */
+  --color-ink-muted: #64676f;
   --color-border: #d8dce8;
+  /* Batas kontrol form: dibaca `border-input` pada komponen registry. */
+  --color-input: #8d919c;
   --color-danger: #b52d24;
   --color-success: #0a7a3b;
 
-  /* Tipografi */
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Tipografi: Geist (dimuat di layout lewat paket `geist`). */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --text-display: 3.5rem;
   --text-display--line-height: 1.11;
@@ -75,6 +85,8 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 16px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
   --radius-full: 999px;
 
   /* Elevation */
@@ -135,9 +147,11 @@
   color-scheme: light;
 }
 
+/* Token semantik shadcn tidak dideklarasikan ulang di sini: `@theme inline` di bawah
+   memetakan setiap nama langsung ke token DESIGN.md, sehingga tidak ada warna baru. */
+
 button:not(:disabled), label[for] { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-
 
 html {
   font-family: var(--font-sans);
@@ -196,27 +210,45 @@ button {
 }
 
 /*
- * Scope chrome baru halaman Ringkasan super admin (/admin). Variabel lokal ini hanya dipakai
- * komponen di bawah scope .admin-dash, sehingga halaman lain tidak terpengaruh. Hanya tema
- * terang: app belum punya mode gelap.
+ * Jembatan foundation shadcn/ui → utility Tailwind (pola @theme inline standar shadcn).
+ * Komponen registry memakai nama semantik (bg-background, border-input, ring-ring, chart-1..5).
  */
-.admin-dash {
-  --ad-bg: var(--color-canvas);
-  --ad-surface: var(--color-n0);
-  --ad-soft: var(--color-n100);
-  --ad-border: var(--color-n200);
-  /* Batas kontrol form (input/select) wajib ≥ 3:1 terhadap permukaannya, jadi memakai token kontrol. */
-  --ad-control-border: var(--color-control-border);
-  --ad-text: var(--color-ink);
-  --ad-muted: var(--color-muted);
-  --ad-accent: var(--color-action);
-  --ad-accent-contrast: var(--color-n0);
-  --ad-accent-soft: var(--color-action-soft);
-  --ad-success: var(--color-success-text);
-  --ad-success-soft: var(--color-success-soft);
-  --ad-warning-soft: var(--color-warning-soft);
-  --ad-danger: var(--color-danger-text);
-  --ad-danger-soft: var(--color-danger-soft);
-  /* Ikon penanda keadaan (mis. glif urut netral) wajib ≥ 3:1 sebagai grafik, bukan dekorasi. */
-  --ad-icon-low: var(--color-n600);
+@theme inline {
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-n0);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-n0);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-action);
+  --color-primary-foreground: var(--color-n0);
+  --color-secondary: var(--color-n100);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-n100);
+  --color-muted-foreground: var(--color-ink-muted);
+  --color-accent: var(--color-action-soft);
+  --color-accent-foreground: var(--color-ink);
+  --color-destructive: var(--color-danger);
+  --color-ring: var(--color-action);
+  --color-chart-1: var(--color-action);
+  --color-chart-2: var(--color-action-light);
+  --color-chart-3: var(--color-success-fill);
+  --color-chart-4: var(--color-analytic-icon);
+  --color-chart-5: var(--color-danger-fill);
+  --color-sidebar: var(--color-n50);
+  --color-sidebar-foreground: var(--color-ink);
+  --color-sidebar-primary: var(--color-action);
+  --color-sidebar-primary-foreground: var(--color-n0);
+  --color-sidebar-accent: var(--color-action-soft);
+  --color-sidebar-accent-foreground: var(--color-action-hover);
+  --color-sidebar-border: var(--color-n200);
+  --color-sidebar-ring: var(--color-action);
+}
+
+/* Preflight Tailwind v4 memakai `currentColor` sebagai border default; registry shadcn
+   mengandalkan border netral. Utility `border-*` eksplisit tetap menang (layer utilities). */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }

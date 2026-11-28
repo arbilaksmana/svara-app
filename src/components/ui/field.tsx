@@ -20,23 +20,23 @@ export interface AdminFieldProps {
 }
 
 /**
- * Field gaya shadcn bertoken Svara untuk formulir di chrome admin. Kontrak ARIA sama dengan
- * `Field` lama (id, aria-describedby, aria-invalid, aria-required, hint/error bertaut id),
- * jadi pemeriksaan aksesibilitas lama tetap berlaku; hanya tampilannya ikut token `--ad-*`.
+ * Field berlabel untuk formulir di chrome admin, memakai token semantik default shadcn.
+ * Kontrak ARIA sama dengan `Field` lama (id, aria-describedby, aria-invalid, aria-required,
+ * hint/error bertaut id), jadi pemeriksaan aksesibilitas lama tetap berlaku.
  */
 export function Field({ id, label, hint, error, required, announceError = true, className, children }: AdminFieldProps) {
   const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(' ') || undefined;
   return (
     <div className={cn('flex min-w-0 flex-col gap-1.5', className)}>
-      <label htmlFor={id} className="text-body-sm font-bold text-[color:var(--ad-text)]">
+      <label htmlFor={id} className="text-body-sm font-bold text-foreground">
         {label}
-        {required && <span className="text-[color:var(--ad-danger)]"> *</span>}
+        {required && <span className="text-destructive"> *</span>}
         {required && <span className="sr-only"> (wajib)</span>}
       </label>
       {children({ id, 'aria-describedby': describedBy, 'aria-invalid': Boolean(error), 'aria-required': required || undefined })}
-      {hint && <p id={`${id}-hint`} className="text-caption text-[color:var(--ad-muted)]">{hint}</p>}
+      {hint && <p id={`${id}-hint`} className="text-caption text-muted-foreground">{hint}</p>}
       {error && (
-        <p id={`${id}-error`} role={announceError ? 'alert' : undefined} className="text-caption font-bold text-[color:var(--ad-danger)]">
+        <p id={`${id}-error`} role={announceError ? 'alert' : undefined} className="text-caption font-bold text-destructive">
           {error}
         </p>
       )}

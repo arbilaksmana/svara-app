@@ -4,21 +4,33 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Shell } from "../components/Shell";
 import {
   ActionLink,
-  Banner,
-  Button,
-  Checkbox,
   Code,
-  ErrorState,
-  LoadingState,
+  Spinner,
 } from "../components/ui";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
+import { CheckboxField } from "../components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Skeleton } from "../components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../components/ui/tooltip";
 import {
   StateView,
   SuccessBanner,
   ValidationSummary,
 } from "../components/StateView";
 import { useScreenState } from "../lib/state";
+import { cn } from "../lib/utils";
 import { ROUTES } from "../lib/routes";
-import { formatWIB } from "../lib/summary";
+import { formatWIBDate, formatWIBTime } from "../lib/summary";
 import { useToast } from "../components/Toast";
 import {
   Area,
@@ -31,19 +43,32 @@ import {
 } from "recharts";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+  Card,
   CardAction,
-  Card as DashCard,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Button as DashButton } from "../components/ui/button";
 import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { Separator } from "../components/ui/separator";
-import { Select } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
 import {
   ChartContainer,
   ChartLegend,
@@ -52,6 +77,19 @@ import {
   ChartTooltipContent,
 } from "../components/ui/chart";
 import { DataTable } from "../components/data-table";
+import { Plus } from "runeicons-react/icons/Plus";
+import { ChartBar } from "runeicons-react/icons/ChartBar";
+import { ChartLine } from "runeicons-react/icons/ChartLine";
+import { Clock } from "runeicons-react/icons/Clock";
+import { Users } from "runeicons-react/icons/Users";
+import { Group } from "runeicons-react/icons/Group";
+import { ShieldCheck } from "runeicons-react/icons/ShieldCheck";
+import { Check } from "runeicons-react/icons/Check";
+import { UserMinus } from "runeicons-react/icons/UserMinus";
+import { UserPlus } from "runeicons-react/icons/UserPlus";
+import { Eye } from "runeicons-react/icons/Eye";
+import { EyeClosed } from "runeicons-react/icons/EyeClosed";
+import { withIconClass } from "../components/rune-icon";
 import {
   cancelAdminStatsLoad,
   cancelDataRequestsLoad,
@@ -71,16 +109,24 @@ import {
   adminSaveAccount,
   adminSaveGrants,
   ApiError,
+  getPlatformProfile,
+  savePlatformProfile,
   updateDataRequest,
   type AdminStats,
   type ChartRange,
   type DataRequest,
   type DataRequestStatus,
 } from "../lib/api";
+import { parseRetentionDays } from "../lib/retention";
+import {
+  channelLabel,
+  requestChannelOptions,
+} from "../lib/request-channels";
 import {
   ACCOUNT_STATUS_LABEL,
   DATA_REQUEST_TYPE_LABEL,
   ORGANIZATION_TYPE_LABEL,
+  ORGANIZATION_TYPES,
   ROLE_LABEL,
 } from "../lib/labels";
 import type {
@@ -93,20 +139,105 @@ import type {
   OrganizationType,
 } from "../lib/types";
 
-/** Kartu ringan tanpa elevasi untuk kartu di dalam grid (DESIGN.md: shadow hanya untuk kartu melayang). */
-function SoftCard({
+/* ---------------- Dialog form ---------------- */
+
+const PlusIcon = withIconClass(Plus);
+const SurveysIcon = withIconClass(ChartBar);
+const ResponsesIcon = withIconClass(ChartLine);
+const AccountsIcon = withIconClass(Users);
+const ActiveAccountsIcon = withIconClass(ShieldCheck);
+const SuspendedAccountsIcon = withIconClass(UserMinus);
+const ActivatedAccountsIcon = withIconClass(UserPlus);
+const ActiveStatusIcon = withIconClass(Check);
+const EyeIcon = withIconClass(Eye);
+const EyeClosedIcon = withIconClass(EyeClosed);
+const OrganizationsIcon = withIconClass(Group);
+const PendingIcon = withIconClass(Clock);
+
+/**
+ * Dialog modal bawaan browser: fokus terperangkap, Esc menutup, dan latar
+ * `backdrop:` dari `showModal` — tanpa dependensi baru.
+ */
+function FormDialog({
+  open,
+  title,
+  description,
+  onClose,
   children,
-  className = "",
 }: {
+  open: boolean;
+  title: string;
+  description: string;
+  onClose: () => void;
   children: ReactNode;
-  className?: string;
 }) {
   return (
-    <section
-      className={`flex flex-col gap-3 rounded-lg border border-[var(--ad-border)] bg-[var(--ad-soft)] p-4 sm:p-6 ${className}`}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ---------------- Primitif halaman ---------------- */
+
+/** Tombol aksi admin: varian lama dipetakan ke varian Button shadcn; `loading` = spinner + aria-busy. */
+function BusyButton({
+  variant = "primary",
+  loading = false,
+  block = false,
+  disabled,
+  className,
+  children,
+  ...rest
+}: Omit<React.ComponentProps<typeof DashButton>, "variant" | "children"> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  loading?: boolean;
+  block?: boolean;
+  children?: ReactNode;
+}) {
+  const mapped = variant === "primary" ? "default" : variant === "danger" ? "destructive" : variant;
+  return (
+    <DashButton
+      {...rest}
+      variant={mapped}
+      disabled={disabled ?? loading}
+      aria-busy={loading || undefined}
+      className={cn(block && "w-full", className)}
     >
+      {loading && <Spinner />}
       {children}
-    </section>
+    </DashButton>
+  );
+}
+
+/** Placeholder muat: Skeleton shadcn, tetap aria-busy + aria-live untuk pembaca layar. */
+function LoadingState({ label = "Memuat data contoh…", rows = 3 }: { label?: string; rows?: number }) {
+  return (
+    <div aria-busy="true" aria-live="polite" className="flex flex-col gap-3">
+      <p className="text-body-sm text-ink-muted">{label}</p>
+      {Array.from({ length: rows }, (_, i) => (
+        <Skeleton key={i} className="h-12 w-full rounded-md" />
+      ))}
+    </div>
+  );
+}
+
+/** Galat layar: Alert shadcn varian danger. */
+function ErrorState({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
+  return (
+    <Alert variant="destructive" className="flex flex-col items-start gap-3">
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription className="text-body-sm">
+        <p>{detail}</p>
+        {action}
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -114,7 +245,19 @@ function SoftCard({
 
 const ROLE_VALUES = ["creator", "org_admin", "admin"] as const;
 
-/** Kolom daftar akun: select peran/organisasi, status, jumlah cakupan, dan aksi status. */
+/** Inisial dua huruf untuk avatar daftar akun. */
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]!.toUpperCase())
+      .join("") || "?"
+  );
+}
+
+/** Kolom daftar akun: identitas ber-avatar, select peran/organisasi, status, jumlah cakupan, dan aksi status. */
 function accountColumns({
   organizations,
   grantCounts,
@@ -140,11 +283,25 @@ function accountColumns({
       accessorKey: "display_name",
       header: "Akun",
       cell: ({ row }) => (
-        <div className="min-w-0">
-          <p className="font-bold text-[color:var(--ad-text)]">{row.original.display_name}</p>
-          <span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-[color:var(--ad-muted)]">
-            <Code>{row.original.id}</Code>
-          </span>
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar className="size-9 bg-muted">
+            <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+              {initials(row.original.display_name)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 font-bold text-foreground">
+              <span className="truncate">{row.original.display_name}</span>
+              {sessionId === row.original.id && (
+                <Badge variant="outline" className="px-1.5 text-annotation">
+                  Anda
+                </Badge>
+              )}
+            </p>
+            <span className="mt-0.5 block font-mono text-annotation font-normal tracking-mono text-muted-foreground">
+              <Code>{row.original.id}</Code>
+            </span>
+          </div>
         </div>
       ),
     },
@@ -155,22 +312,29 @@ function accountColumns({
         const account = row.original;
         return (
           <Select
-            aria-label={`Peran ${account.display_name}`}
             value={account.role === "super_admin" ? "admin" : account.role}
+            onValueChange={(value) =>
+              onChangeRole(account.id, account.display_name, value)
+            }
             disabled={
               accountBusy === account.id ||
               sessionId === account.id ||
               mutationsBlocked
             }
-            onChange={(event) =>
-              onChangeRole(account.id, account.display_name, event.target.value)
-            }
           >
-            {ROLE_VALUES.map((value) => (
-              <option key={value} value={value}>
-                {ROLE_LABEL[value === "admin" ? "super_admin" : value]}
-              </option>
-            ))}
+<SelectTrigger
+                aria-label={`Peran ${account.display_name}`}
+                className="h-11 w-44"
+              >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ROLE_VALUES.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {ROLE_LABEL[value === "admin" ? "super_admin" : value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         );
       },
@@ -182,29 +346,35 @@ function accountColumns({
         const account = row.original;
         return (
           <Select
-            aria-label={`Organisasi ${account.display_name}`}
-            className="w-56"
-            value={account.organization_id ?? ""}
+            value={account.organization_id ?? "__none"}
+            onValueChange={(value) =>
+              onChangeOrganization(
+                account.id,
+                account.display_name,
+                value === "__none" ? "" : value,
+              )
+            }
             disabled={
               accountBusy === account.id ||
               sessionId === account.id ||
               mutationsBlocked ||
               account.role === "super_admin"
             }
-            onChange={(event) =>
-              onChangeOrganization(
-                account.id,
-                account.display_name,
-                event.target.value,
-              )
-            }
           >
-            <option value="">Tanpa organisasi</option>
-            {organizations.map((organization) => (
-              <option key={organization.id} value={organization.id}>
-                {organization.name}
-              </option>
-            ))}
+            <SelectTrigger
+              aria-label={`Organisasi ${account.display_name}`}
+              className="h-11 w-56"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">Tanpa organisasi</SelectItem>
+              {organizations.map((organization) => (
+                <SelectItem key={organization.id} value={organization.id}>
+                  {organization.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         );
       },
@@ -213,8 +383,24 @@ function accountColumns({
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => (
-        <Badge variant={row.original.status === "active" ? "success" : "secondary"}>
-          {ACCOUNT_STATUS_LABEL[row.original.status]}
+        <Badge
+          variant={row.original.status === "active" ? "success" : "secondary"}
+          className="gap-1.5"
+          title={ACCOUNT_STATUS_LABEL[row.original.status]}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-1.5 rounded-full",
+              row.original.status === "active" ? "bg-emerald-600" : "bg-muted-foreground",
+            )}
+          />
+          {row.original.status === "active" ? (
+            <ActiveStatusIcon className="size-3" />
+          ) : (
+            <SuspendedAccountsIcon className="size-3" />
+          )}
+          <span className="sr-only">{ACCOUNT_STATUS_LABEL[row.original.status]}</span>
         </Badge>
       ),
     },
@@ -222,7 +408,7 @@ function accountColumns({
       id: "grants",
       header: "Cakupan",
       cell: ({ row }) => (
-        <span className="tabular-nums">{grantCounts[row.original.id] ?? 0} grant</span>
+        <span className="tabular-nums">{grantCounts[row.original.id] ?? 0} cakupan</span>
       ),
     },
     {
@@ -231,25 +417,46 @@ function accountColumns({
       cell: ({ row }) => {
         const account = row.original;
         return (
-          <Button
-            variant="ghost"
-            loading={accountBusy === account.id}
-            disabled={
-              accountBusy === account.id ||
-              sessionId === account.id ||
-              mutationsBlocked
-            }
-            onClick={() =>
-              onToggleStatus(account.id, account.display_name, account.status)
-            }
-          >
-            {account.status === "active" ? "Nonaktifkan" : "Aktifkan"}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <BusyButton
+                variant="ghost"
+                size="icon"
+                className={
+                  account.status === "active"
+                    ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    : "text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                }
+                aria-label={`${account.status === "active" ? "Nonaktifkan" : "Aktifkan"} ${account.display_name}`}
+                loading={accountBusy === account.id}
+                disabled={
+                  accountBusy === account.id ||
+                  sessionId === account.id ||
+                  mutationsBlocked
+                }
+                onClick={() =>
+                  onToggleStatus(account.id, account.display_name, account.status)
+                }
+              >
+                {account.status === "active" ? (
+                  <SuspendedAccountsIcon className="size-4" />
+                ) : (
+                  <ActivatedAccountsIcon className="size-4" />
+                )}
+              </BusyButton>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {account.status === "active" ? "Nonaktifkan akun" : "Aktifkan akun"}
+            </TooltipContent>
+          </Tooltip>
         );
       },
     },
   ];
 }
+
+/** Label tipe organisasi dengan kunci bebas; nilai di luar enum tampil apa adanya. */
+const ORGANIZATION_TYPE_TEXT: Record<string, string> = ORGANIZATION_TYPE_LABEL;
 
 export function AdminSummaryPage() {
   const { state } = useScreenState("admin-summary");
@@ -279,9 +486,9 @@ export function AdminSummaryPage() {
           title="Ringkasan operasional gagal dimuat"
           detail={`${failure} Tidak ada angka yang ditampilkan sampai data berhasil dimuat.`}
           action={
-            <Button variant="secondary" onClick={retry}>
+            <BusyButton variant="secondary" onClick={retry}>
               Coba lagi
-            </Button>
+            </BusyButton>
           }
         />
       ) : !stats ? (
@@ -295,76 +502,110 @@ export function AdminSummaryPage() {
           permissionDetail="Akses ringkasan memerlukan peran super admin."
         >
           <div className="flex flex-col gap-5">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Jumlah survei" value={stats.surveys} />
-              <StatCard label="Total respons final" value={stats.responses} />
-              <StatCard label="Akun pengelola" value={stats.accounts} />
-              <StatCard label="Permintaan menunggu" value={stats.pendingRequests} />
+            <section
+              aria-label="Metrik utama"
+              className="grid grid-cols-1 gap-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs @xl/main:grid-cols-2 @5xl/main:grid-cols-4"
+            >
+              <StatCard label="Jumlah survei" value={stats.surveys} icon={<SurveysIcon aria-hidden="true" className="size-4" />} />
+              <StatCard label="Total respons final" value={stats.responses} icon={<ResponsesIcon aria-hidden="true" className="size-4" />} />
+              <StatCard label="Akun pengelola" value={stats.accounts} icon={<AccountsIcon aria-hidden="true" className="size-4" />} />
+              <StatCard label="Permintaan menunggu" value={stats.pendingRequests} icon={<PendingIcon aria-hidden="true" className="size-4" />} />
+            </section>
+
+            <div className="grid gap-4 xl:grid-cols-5">
+              <Tabs
+                value={range}
+                onValueChange={(value) => setRange(value as ChartRange)}
+                asChild
+              >
+                <Card className="xl:col-span-3">
+                  <CardHeader>
+                    <CardTitle>Tren respons</CardTitle>
+                    <CardDescription>
+                      Agregat respons final; periode tanpa data bernilai nol.
+                    </CardDescription>
+                    <CardAction>
+                      <TabsList aria-label="Rentang waktu grafik tren respons">
+                        {RANGE_OPTIONS.map((option) => (
+                          <TabsTrigger key={option.value} value={option.value}>
+                            {option.short}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent className="px-2 sm:px-6">
+                    {RANGE_OPTIONS.map((option) => (
+                      <TabsContent key={option.value} value={option.value}>
+                        <ResponsesAreaChart stats={stats} range={option.value} />
+                      </TabsContent>
+                    ))}
+                  </CardContent>
+                </Card>
+              </Tabs>
+              <div className="flex flex-col gap-4 xl:col-span-2">
+                <Card className="flex-1">
+                  <CardHeader>
+                    <CardTitle>Respons per survei</CardTitle>
+                    <CardDescription>
+                      Total respons final tiap survei.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsesPerSurveyChart stats={stats} />
+                  </CardContent>
+                </Card>
+                <Card className="gap-2">
+                  <CardHeader>
+                    <CardTitle>Antrean tindakan</CardTitle>
+                    <CardDescription>
+                      Permintaan data yang belum ditindaklanjuti.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-2xl font-semibold leading-none tabular-nums">
+                      {stats.pendingRequests}
+                    </p>
+                    <ActionLink to={ROUTES.adminRequests}>Lihat antrean</ActionLink>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <DashCard>
+            <Tabs defaultValue="creators" asChild>
+              <Card>
                 <CardHeader>
-                  <CardTitle>Tren respons</CardTitle>
+                  <CardTitle>Metrik detail</CardTitle>
                   <CardDescription>
-                    Agregat respons final; periode tanpa data bernilai nol.
+                    Agregat per creator dan per survei; tanpa data jawaban individual.
                   </CardDescription>
                   <CardAction>
-                    <Select
-                      value={range}
-                      onChange={(event) =>
-                        setRange(event.target.value as ChartRange)
-                      }
-                      aria-label="Rentang waktu grafik tren respons"
-                    >
-                      {RANGE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
+                    <TabsList aria-label="Tabel metrik">
+                      <TabsTrigger value="creators">Per creator</TabsTrigger>
+                      <TabsTrigger value="surveys">Per survei</TabsTrigger>
+                    </TabsList>
                   </CardAction>
                 </CardHeader>
                 <CardContent>
-                  <ResponsesAreaChart stats={stats} range={range} />
+                  <TabsContent value="creators">
+                    <DataTable
+                      columns={creatorColumns}
+                      data={stats.perCreator}
+                      caption="Jumlah survei dan respons per creator"
+                      emptyMessage="Belum ada creator."
+                    />
+                  </TabsContent>
+                  <TabsContent value="surveys">
+                    <DataTable
+                      columns={surveyColumns}
+                      data={stats.perSurvey}
+                      caption="Jumlah versi dan respons per survei"
+                      emptyMessage="Belum ada survei."
+                    />
+                  </TabsContent>
                 </CardContent>
-              </DashCard>
-              <DashCard>
-                <CardHeader>
-                  <CardTitle>Respons per survei</CardTitle>
-                  <CardDescription>
-                    Total respons final tiap survei.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsesPerSurveyChart stats={stats} />
-                </CardContent>
-              </DashCard>
-            </div>
-
-            <DashCard className="gap-3">
-              <CardContent>
-                <DataTable
-                  title="Metrik per creator"
-                  columns={creatorColumns}
-                  data={stats.perCreator}
-                  caption="Jumlah survei dan respons per creator"
-                  emptyMessage="Belum ada creator."
-                />
-              </CardContent>
-            </DashCard>
-
-            <DashCard className="gap-3">
-              <CardContent>
-                <DataTable
-                  title="Metrik per survei"
-                  columns={surveyColumns}
-                  data={stats.perSurvey}
-                  caption="Jumlah versi dan respons per survei"
-                  emptyMessage="Belum ada survei."
-                />
-              </CardContent>
-            </DashCard>
+              </Card>
+            </Tabs>
           </div>
         </StateView>
       )}
@@ -374,17 +615,33 @@ export function AdminSummaryPage() {
 
 /* ---------------- Ringkasan: kartu tren, grafik, dan tabel data ---------------- */
 
-/** Kartu KPI: label dan angka saja. */
-function StatCard({ label, value }: { label: string; value: number }) {
+/** Kartu KPI: label, angka besar, dan ikon penanda (pola SectionCards block dashboard-01). */
+function StatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: number;
+  icon: ReactNode;
+}) {
   return (
-    <DashCard className="gap-2 py-5">
+    <Card className="@container/card">
       <CardHeader>
-        <CardDescription className="min-w-0">{label}</CardDescription>
-        <CardTitle className="text-h1 leading-none tabular-nums">
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
           {value}
         </CardTitle>
+        <CardAction>
+          <span
+            aria-hidden="true"
+            className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground"
+          >
+            {icon}
+          </span>
+        </CardAction>
       </CardHeader>
-    </DashCard>
+    </Card>
   );
 }
 
@@ -395,11 +652,12 @@ function useChartsReady(): boolean {
   return ready;
 }
 
-const RANGE_OPTIONS: Array<{ value: ChartRange; label: string }> = [
-  { value: "today", label: "Hari ini" },
-  { value: "7d", label: "7 hari terakhir" },
-  { value: "30d", label: "30 hari terakhir" },
-  { value: "6m", label: "6 bulan terakhir" },
+/** `short` dipakai tab pemilih rentang; `label` tetap dipakai kalimat aksesibel grafik. */
+const RANGE_OPTIONS: Array<{ value: ChartRange; label: string; short: string }> = [
+  { value: "today", label: "Hari ini", short: "Hari ini" },
+  { value: "7d", label: "7 hari terakhir", short: "7 hari" },
+  { value: "30d", label: "30 hari terakhir", short: "30 hari" },
+  { value: "6m", label: "6 bulan terakhir", short: "6 bulan" },
 ];
 
 const RANGE_LABEL: Record<ChartRange, string> = {
@@ -442,7 +700,7 @@ function ResponsesAreaChart({
   }));
   if (data.length === 0) {
     return (
-      <p className="text-caption text-[color:var(--ad-muted)]">
+      <p className="text-caption text-muted-foreground">
         Belum ada data respons untuk rentang ini.
       </p>
     );
@@ -456,9 +714,9 @@ function ResponsesAreaChart({
         {ready && (
           <ChartContainer
             config={{
-              responses: { label: "Respons", color: "var(--ad-accent)" },
+              responses: { label: "Respons", color: "var(--color-chart-1)" },
             }}
-            className="h-64"
+            className="aspect-auto h-[250px] w-full"
           >
             <AreaChart
               data={data}
@@ -472,14 +730,14 @@ function ResponsesAreaChart({
                 axisLine={false}
                 tickMargin={8}
                 minTickGap={24}
-                tick={{ fill: "var(--ad-muted)", fontSize: 12 }}
+                tick={{ fill: "var(--color-muted-foreground)", fontSize: 12 }}
               />
               <YAxis
                 allowDecimals={false}
                 width={36}
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: "var(--ad-muted)", fontSize: 12 }}
+                tick={{ fill: "var(--color-muted-foreground)", fontSize: 12 }}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
               <ChartLegend content={<ChartLegendContent />} />
@@ -518,9 +776,9 @@ function ResponsesPerSurveyChart({ stats }: { stats: AdminStats }) {
         {ready && (
           <ChartContainer
             config={{
-              responses: { label: "Respons", color: "var(--ad-accent)" },
+              responses: { label: "Respons", color: "var(--color-chart-2)" },
             }}
-            className="h-64 min-w-[20rem]"
+            className="aspect-auto h-64 min-w-[20rem]"
           >
             <BarChart
               data={data}
@@ -534,7 +792,7 @@ function ResponsesPerSurveyChart({ stats }: { stats: AdminStats }) {
                 allowDecimals={false}
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: "var(--ad-muted)", fontSize: 12 }}
+                tick={{ fill: "var(--color-muted-foreground)", fontSize: 12 }}
               />
               <YAxis
                 type="category"
@@ -542,7 +800,7 @@ function ResponsesPerSurveyChart({ stats }: { stats: AdminStats }) {
                 width={112}
                 tickLine={false}
                 axisLine={false}
-                tick={{ fill: "var(--ad-muted)", fontSize: 12 }}
+                tick={{ fill: "var(--color-muted-foreground)", fontSize: 12 }}
                 tickFormatter={shortCategory}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
@@ -576,7 +834,7 @@ const creatorColumns: ColumnDef<CreatorRow>[] = [
     cell: ({ row }) => (
       <>
         {row.original.display_name}
-        <span className="mt-1 block font-mono text-annotation tracking-mono text-[color:var(--ad-muted)]">
+        <span className="mt-1 block font-mono text-annotation tracking-mono text-muted-foreground">
           <Code>{row.original.id}</Code>
         </span>
       </>
@@ -615,9 +873,9 @@ function AdminDataGate({
         title={`${subject} gagal dimuat`}
         detail={`${error} Tidak ada data yang ditampilkan sampai data berhasil dimuat.`}
         action={
-          <Button variant="secondary" onClick={() => void loadBootstrap()}>
+          <BusyButton variant="secondary" onClick={() => void loadBootstrap()}>
             Coba lagi
-          </Button>
+          </BusyButton>
         }
       />
     );
@@ -641,7 +899,7 @@ export function AuditActor({
   return (
     <>
       {name}
-      <span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-[color:var(--ad-muted)]">
+      <span className="mt-1 block font-mono text-annotation font-normal tracking-mono text-muted-foreground">
         <Code>{actor}</Code>
       </span>
     </>
@@ -685,12 +943,16 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
   );
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [scopeAccount, setScopeAccount] = useState("");
+  const [scopeAccount, setScopeAccount] = useState<string | null>(null);
   const [scopeSurvey, setScopeSurvey] = useState(surveys[0]?.id ?? "");
   const [scopeRead, setScopeRead] = useState(false);
   const [scopeExport, setScopeExport] = useState(false);
   const [scopeText, setScopeText] = useState(false);
   const [scopeBusy, setScopeBusy] = useState(false);
+  const [orgTypeFilter, setOrgTypeFilter] = useState<"all" | OrganizationType>(
+    "all",
+  );
+  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
   const [orgForm, setOrgForm] = useState({
     name: "",
     organization_type: "school" as OrganizationType,
@@ -699,7 +961,13 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
     adminPassword: "",
   });
   const [orgBusy, setOrgBusy] = useState(false);
+  const [orgPasswordVisible, setOrgPasswordVisible] = useState(false);
   const [orgError, setOrgError] = useState<string | null>(null);
+  const organizationsShown = organizations.filter(
+    (organization) =>
+      orgTypeFilter === "all" ||
+      organization.organization_type === orgTypeFilter,
+  );
   const grantCounts = accessGrants.reduce<Record<string, number>>(
     (counts, grant) => ({
       ...counts,
@@ -713,6 +981,9 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
     "closed",
     "permission-denied",
   ].includes(state);
+  const activeCount = accounts.filter(
+    (account) => account.status === "active",
+  ).length;
 
   useEffect(() => {
     setGrants(
@@ -819,6 +1090,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
         notify(
           `Organisasi ${created.organization.name} dibuat dengan admin ${created.account.display_name}.`,
         );
+        setOrgDialogOpen(false);
         setOrgForm({
           name: "",
           organization_type: "school",
@@ -861,12 +1133,38 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
             />
           )}
 
-          <DashCard className="gap-4">
+          <section
+            aria-label="Ringkasan akun dan izin"
+            className="grid grid-cols-2 gap-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs sm:gap-4 xl:grid-cols-4"
+          >
+            <StatCard
+              label="Total akun"
+              value={accounts.length}
+              icon={<AccountsIcon aria-hidden="true" className="size-4" />}
+            />
+            <StatCard
+              label="Akun aktif"
+              value={activeCount}
+              icon={<ActiveAccountsIcon aria-hidden="true" className="size-4" />}
+            />
+            <StatCard
+              label="Akun nonaktif"
+              value={accounts.length - activeCount}
+              icon={<SuspendedAccountsIcon aria-hidden="true" className="size-4" />}
+            />
+            <StatCard
+              label="Organisasi"
+              value={organizations.length}
+              icon={<OrganizationsIcon aria-hidden="true" className="size-4" />}
+            />
+          </section>
+
+          <Card>
             <CardHeader>
-              <CardTitle>Daftar akun</CardTitle>
+              <CardTitle>Akun pengelola</CardTitle>
               <CardDescription>
-                Peran, organisasi, status, dan jumlah cakupan tiap akun. Akun
-                sendiri tidak dapat diubah.
+                Peran, organisasi, dan status menentukan apa yang bisa dibaca tiap
+                akun. Akun Anda sendiri tidak dapat diubah.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -883,9 +1181,18 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                     onToggleStatus: toggleStatus,
                   })}
                   data={accounts}
+                  compact
+                  filterPlaceholder="Cari nama, peran, atau organisasi"
+                  filterText={(account) => {
+                    const organization =
+                      organizations.find(
+                        (item) => item.id === account.organization_id,
+                      )?.name ?? "";
+                    return `${account.display_name} ${account.id} ${ROLE_LABEL[account.role]} ${organization} ${ACCOUNT_STATUS_LABEL[account.status]}`;
+                  }}
                   caption="Akun pengelola: peran, organisasi, status, cakupan, dan aksi"
                   emptyMessage="Belum ada akun."
-                  plain
+                  cellClassName="px-3"
                 />
               </div>
 
@@ -893,141 +1200,228 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
               {accounts.map((a) => (
                 <li
                   key={a.id}
-                  className="flex flex-col gap-3 rounded-md border border-[var(--ad-border)] p-3"
+                  className="flex flex-col gap-3 rounded-lg border border-border p-3"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-body font-bold text-[color:var(--ad-text)]">
-                        {a.display_name}
-                      </p>
-                      <p className="font-mono text-annotation tracking-mono text-[color:var(--ad-muted)]">
-                        <Code>{a.id}</Code>
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar className="size-9 bg-muted">
+                        <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+                          {initials(a.display_name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-body font-bold text-foreground">
+                          <span className="truncate">{a.display_name}</span>
+                          {session?.id === a.id && (
+                            <Badge variant="outline" className="px-1.5 text-annotation">
+                              Anda
+                            </Badge>
+                          )}
+                        </p>
+                        <p className="font-mono text-annotation tracking-mono text-muted-foreground">
+                          <Code>{a.id}</Code>
+                        </p>
+                      </div>
                     </div>
-                    <Badge variant={a.status === "active" ? "success" : "secondary"}>
-                      {ACCOUNT_STATUS_LABEL[a.status]}
+                    <Badge
+                      variant={a.status === "active" ? "success" : "secondary"}
+                      className="gap-1.5"
+                      title={ACCOUNT_STATUS_LABEL[a.status]}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          a.status === "active" ? "bg-emerald-600" : "bg-muted-foreground",
+                        )}
+                      />
+                      {a.status === "active" ? (
+                        <ActiveStatusIcon className="size-3" />
+                      ) : (
+                        <SuspendedAccountsIcon className="size-3" />
+                      )}
+                      <span className="sr-only">{ACCOUNT_STATUS_LABEL[a.status]}</span>
                     </Badge>
                   </div>
-                  <label className="flex flex-col gap-1 text-caption font-bold text-[color:var(--ad-muted)]">
+                  <label className="flex flex-col gap-1 text-caption font-bold text-muted-foreground">
                     Peran
                     <Select
-                      aria-label={`Peran ${a.display_name}`}
                       value={a.role === "super_admin" ? "admin" : a.role}
                       disabled={
                         accountBusy === a.id ||
                         session?.id === a.id ||
                         mutationsBlocked
                       }
-                      onChange={(event) =>
-                        changeRole(a.id, a.display_name, event.target.value)
+                      onValueChange={(value) =>
+                        changeRole(a.id, a.display_name, value)
                       }
-                      className="min-h-[44px] w-full font-normal"
                     >
-                      <option value="creator">{ROLE_LABEL.creator}</option>
-                      <option value="org_admin">{ROLE_LABEL.org_admin}</option>
-                      <option value="admin">{ROLE_LABEL.super_admin}</option>
+                      <SelectTrigger
+                        aria-label={`Peran ${a.display_name}`}
+                        className="h-11 w-full font-normal"
+                      >
+                        <SelectValue>{ROLE_LABEL[a.role]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="creator">{ROLE_LABEL.creator}</SelectItem>
+                        <SelectItem value="org_admin">{ROLE_LABEL.org_admin}</SelectItem>
+                        <SelectItem value="admin">{ROLE_LABEL.super_admin}</SelectItem>
+                      </SelectContent>
                     </Select>
                   </label>
-                  <label className="flex flex-col gap-1 text-caption font-bold text-[color:var(--ad-muted)]">
+                  <label className="flex flex-col gap-1 text-caption font-bold text-muted-foreground">
                     Organisasi
                     <Select
-                      aria-label={`Organisasi ${a.display_name}`}
-                      value={a.organization_id ?? ""}
+                      value={a.organization_id ?? "__none"}
                       disabled={
                         accountBusy === a.id ||
                         session?.id === a.id ||
                         mutationsBlocked ||
                         a.role === "super_admin"
                       }
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         changeOrganization(
                           a.id,
                           a.display_name,
-                          event.target.value,
+                          value === "__none" ? "" : value,
                         )
                       }
-                      className="min-h-[44px] w-full font-normal"
                     >
-                      <option value="">Tanpa organisasi</option>
-                      {organizations.map((organization) => (
-                        <option key={organization.id} value={organization.id}>
-                          {organization.name}
-                        </option>
-                      ))}
+                      <SelectTrigger
+                        aria-label={`Organisasi ${a.display_name}`}
+                        className="h-11 w-full font-normal"
+                      >
+                        <SelectValue>{organizations.find((organization) => organization.id === a.organization_id)?.name ?? "Tanpa organisasi"}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Tanpa organisasi</SelectItem>
+                        {organizations.map((organization) => (
+                          <SelectItem key={organization.id} value={organization.id}>
+                            {organization.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                   </label>
-                  <p className="text-body-sm text-[color:var(--ad-muted)]">
-                    {accessGrants.filter((g) => g.account_id === a.id).length}{" "}
-                    grant
-                  </p>
-                  <Button
-                    variant="secondary"
-                    block
-                    loading={accountBusy === a.id}
-                    disabled={
-                      accountBusy === a.id ||
-                      session?.id === a.id ||
-                      mutationsBlocked
-                    }
-                    onClick={() => toggleStatus(a.id, a.display_name, a.status)}
-                  >
-                    {a.status === "active" ? "Nonaktifkan" : "Aktifkan"}
-                  </Button>
+                  <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+                    <span className="text-caption text-muted-foreground">
+                      {grantCounts[a.id] ?? 0} cakupan
+                    </span>
+                    <BusyButton
+                      variant="secondary"
+                      loading={accountBusy === a.id}
+                      disabled={
+                        accountBusy === a.id ||
+                        session?.id === a.id ||
+                        mutationsBlocked
+                      }
+                      onClick={() => toggleStatus(a.id, a.display_name, a.status)}
+                    >
+                      {a.status === "active" ? "Nonaktifkan" : "Aktifkan"}
+                    </BusyButton>
+                  </div>
                 </li>
               ))}
             </ul>
             </CardContent>
-          </DashCard>
+          </Card>
 
-          <DashCard className="gap-4">
+          <Card>
             <CardHeader>
               <CardTitle>Organisasi</CardTitle>
               <CardDescription>
-                Organisasi baru langsung mendapat admin pertama yang mengatur
-                profil, anggota, dan undangannya. Responden dewasa dengan
-                persetujuan diri dipakai sebagai awal; admin organisasi dapat
-                mengubahnya di halaman Organisasi.
+                Setiap organisasi menaungi akun dan surveinya sendiri; jumlah akun
+                dihitung dari daftar di atas.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <ul className="flex flex-col gap-2">
-                {organizations.map((organization) => (
-                  <li
-                    key={organization.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] p-3"
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-caption text-muted-foreground">
+                  {organizationsShown.length} dari {organizations.length} organisasi
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="w-40 max-w-full">
+                    <Select
+                      value={orgTypeFilter}
+                      onValueChange={(value) =>
+                        setOrgTypeFilter(value as "all" | OrganizationType)
+                      }
+                    >
+                      <SelectTrigger
+                        aria-label="Saring organisasi berdasarkan tipe"
+                        className="h-11 w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Semua tipe</SelectItem>
+                        {ORGANIZATION_TYPES.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {ORGANIZATION_TYPE_TEXT[value]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <BusyButton
+                    onClick={() => setOrgDialogOpen(true)}
+                    disabled={mutationsBlocked}
                   >
-                    <div className="min-w-0">
-                      <p className="text-body font-bold text-[color:var(--ad-text)]">
-                        {organization.name}
-                      </p>
-                      <p className="mt-1 font-mono text-annotation tracking-mono text-[color:var(--ad-muted)]">
-                        <Code>{organization.id}</Code>
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">
-                        {ORGANIZATION_TYPE_LABEL[organization.organization_type]}
-                      </Badge>
-                      <span className="text-caption text-[color:var(--ad-muted)]">
-                        {
-                          accounts.filter(
-                            (a) => a.organization_id === organization.id,
-                          ).length
-                        }{" "}
-                        akun
-                      </span>
-                    </div>
-                  </li>
-                ))}
-                {organizations.length === 0 && (
-                  <li className="text-body-sm text-[color:var(--ad-muted)]">
-                    Belum ada organisasi.
+                    <PlusIcon aria-hidden="true" className="size-4" />
+                    Tambah organisasi
+                  </BusyButton>
+                </div>
+              </div>
+              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {organizationsShown.map((organization) => {
+                  const memberCount = accounts.filter(
+                    (a) => a.organization_id === organization.id,
+                  ).length;
+                  return (
+                    <li
+                      key={organization.id}
+                      className="flex flex-col gap-3 rounded-lg border border-border p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <Avatar className="size-10 rounded-md bg-muted">
+                          <AvatarFallback className="rounded-md text-muted-foreground">
+                            <OrganizationsIcon aria-hidden="true" className="size-5" />
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-bold text-foreground">
+                            {organization.name}
+                          </p>
+                          <p className="font-mono text-annotation tracking-mono text-muted-foreground">
+                            <Code>{organization.id}</Code>
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                        <Badge variant="secondary">
+                          {ORGANIZATION_TYPE_TEXT[organization.organization_type] ??
+                            organization.organization_type}
+                        </Badge>
+                        <span className="text-caption tabular-nums text-muted-foreground">
+                          {memberCount} akun
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+                {organizationsShown.length === 0 && (
+                  <li className="rounded-lg border border-dashed border-border p-6 text-center text-body-sm text-muted-foreground sm:col-span-2 xl:col-span-3">
+                    Tidak ada organisasi yang cocok dengan tipe ini.
                   </li>
                 )}
               </ul>
             </CardContent>
-            <CardContent className="flex flex-col gap-4">
-              <Separator />
+            <FormDialog
+              open={orgDialogOpen}
+              title="Organisasi baru"
+              description="Admin pertama mengatur profil, anggota, dan undangan. Responden dewasa dengan persetujuan diri dipakai sebagai awal."
+              onClose={() => setOrgDialogOpen(false)}
+            >
             <form
               className="flex flex-col gap-4"
               noValidate
@@ -1052,24 +1446,28 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 <Field id="org-new-type" label="Tipe organisasi" required>
                   {(aria) => (
                     <Select
-                      {...aria}
                       value={orgForm.organization_type}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setOrgForm((current) => ({
                           ...current,
-                          organization_type: event.target
-                            .value as OrganizationType,
+                          organization_type: value as OrganizationType,
                         }))
                       }
-                      className="min-h-[44px] w-full"
                     >
-                      {(["school", "organization"] as OrganizationType[]).map(
-                        (value) => (
-                          <option key={value} value={value}>
+                      <SelectTrigger
+                        {...aria}
+                        aria-label="Tipe organisasi"
+                        className="h-11 w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ORGANIZATION_TYPES.map((value) => (
+                          <SelectItem key={value} value={value}>
                             {ORGANIZATION_TYPE_LABEL[value]}
-                          </option>
-                        ),
-                      )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                     </Select>
                   )}
                 </Field>
@@ -1120,69 +1518,128 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                   hint="12–256 karakter, minimal tiga dari: huruf kecil, huruf besar, angka, simbol."
                 >
                   {(aria) => (
-                    <Input
-                      {...aria}
-                      type="password"
-                      value={orgForm.adminPassword}
-                      onChange={(event) =>
-                        setOrgForm((current) => ({
-                          ...current,
-                          adminPassword: event.target.value,
-                        }))
-                      }
-                      autoComplete="new-password"
-                    />
+                    <div className="relative">
+                      <Input
+                        {...aria}
+                        type={orgPasswordVisible ? "text" : "password"}
+                        className="pr-11"
+                        value={orgForm.adminPassword}
+                        onChange={(event) =>
+                          setOrgForm((current) => ({
+                            ...current,
+                            adminPassword: event.target.value,
+                          }))
+                        }
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        aria-label={
+                          orgPasswordVisible
+                            ? "Sembunyikan kata sandi"
+                            : "Tampilkan kata sandi"
+                        }
+                        aria-pressed={orgPasswordVisible}
+                        onClick={() => setOrgPasswordVisible((value) => !value)}
+                        className="absolute inset-y-0 end-1 my-auto inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                      >
+                        {orgPasswordVisible ? (
+                          <EyeClosedIcon className="size-4" />
+                        ) : (
+                          <EyeIcon className="size-4" />
+                        )}
+                      </button>
+                    </div>
                   )}
                 </Field>
               </div>
               {orgError && (
-                <Banner tone="danger" title="Tidak dapat membuat organisasi">
-                  {orgError}
-                </Banner>
+                <Alert variant="destructive">
+                  <AlertTitle>Tidak dapat membuat organisasi</AlertTitle>
+                  <AlertDescription>{orgError}</AlertDescription>
+                </Alert>
               )}
-              <Button
+              <BusyButton
                 type="submit"
                 loading={orgBusy}
                 disabled={orgBusy || mutationsBlocked}
               >
                 Buat organisasi
-              </Button>
+              </BusyButton>
             </form>
-            </CardContent>
-          </DashCard>
+            </FormDialog>
+          </Card>
 
-          <DashCard className="gap-4">
+          <Card>
             <CardHeader>
-              <CardTitle>Izin terpisah per grant</CardTitle>
+              <CardTitle>Cakupan izin</CardTitle>
               <CardDescription>
-                Setiap grant mengatur akses baca, ekspor, dan teks bebas secara
-                terpisah per akun.
+                Satu cakupan menghubungkan satu akun dengan satu survei. Atur akses
+                baca, ekspor, dan teks bebasnya secara terpisah.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-caption text-muted-foreground">
+                {accessGrants.length} cakupan untuk{" "}
+                {new Set(accessGrants.map((grant) => grant.account_id)).size} akun
+              </p>
+              <BusyButton
+                onClick={() =>
+                  setScopeAccount(
+                    accounts.find((a) => a.role !== "super_admin")?.id ?? null,
+                  )
+                }
+              >
+                <PlusIcon aria-hidden="true" className="size-4" />
+                Tambah cakupan
+              </BusyButton>
+            </div>
+            {accessGrants.length === 0 && (
+              <p className="rounded-lg border border-dashed border-border p-6 text-center text-body-sm text-muted-foreground">
+                Belum ada cakupan. Tambahkan cakupan untuk memberi satu akun akses
+                ke satu survei.
+              </p>
+            )}
+            <div className="grid gap-3 xl:grid-cols-2">
             {accessGrants.map((g) => {
               const acc = accounts.find((a) => a.id === g.account_id);
+              const survey = surveys.find((s) => s.id === g.survey_id);
               const current = grants[g.id] ?? {
                 read: false,
                 export: false,
                 text: false,
               };
               return (
-                <div
+                <article
                   key={g.id}
-                  className="rounded-md border border-[var(--ad-border)] bg-[var(--ad-surface)] p-4"
+                  className="flex flex-col gap-3 rounded-lg border border-border p-4"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-body font-bold text-[color:var(--ad-text)]">
-                      {acc?.display_name ?? g.account_id}
-                    </p>
-                    <Badge variant="secondary">
-                      <Code>{g.survey_id ?? "semua"}</Code>
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Avatar className="size-8 bg-muted">
+                        <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+                          {initials(acc?.display_name ?? g.account_id)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <p className="truncate text-body font-bold text-foreground">
+                          {acc?.display_name ?? g.account_id}
+                        </p>
+                        <p className="text-caption text-muted-foreground">
+                          {acc ? ROLE_LABEL[acc.role] : "Akun tidak ditemukan"}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="max-w-60">
+                      <span className="truncate">
+                        {survey?.title ?? "Semua survei"}
+                      </span>
                     </Badge>
                   </div>
-                  <Separator className="my-3" />
+                  <Separator />
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <Checkbox
+                    <CheckboxField
                       id={`${g.id}-read`}
                       label="Baca jawaban individual"
                       checked={current.read}
@@ -1193,7 +1650,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                         }))
                       }
                     />
-                    <Checkbox
+                    <CheckboxField
                       id={`${g.id}-export`}
                       label="Ekspor data"
                       checked={current.export}
@@ -1204,7 +1661,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                         }))
                       }
                     />
-                    <Checkbox
+                    <CheckboxField
                       id={`${g.id}-text`}
                       label="Baca teks bebas"
                       checked={current.text}
@@ -1216,70 +1673,84 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                       }
                     />
                   </div>
-                </div>
+                </article>
               );
             })}
+            </div>
 
-            <div className="rounded-md border border-dashed border-[var(--ad-border)] p-4">
-              <h2 className="text-body font-bold text-[color:var(--ad-text)]">
-                Tambah atau perbarui cakupan
-              </h2>
+            <FormDialog
+              open={scopeAccount !== null}
+              title="Tambah cakupan izin"
+              description="Pilih akun dan survei, lalu tentukan akses baca, ekspor, dan teks bebasnya."
+              onClose={() => setScopeAccount(null)}
+            >
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
-                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-[color:var(--ad-muted)]">
+                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-muted-foreground">
                   Akun
                   <Select
-                    aria-label="Akun untuk cakupan baru"
-                    value={scopeAccount}
-                    onChange={(event) => setScopeAccount(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 font-normal"
+                    value={scopeAccount ?? undefined}
+                    onValueChange={setScopeAccount}
                   >
-                    <option value="">Pilih akun</option>
-                    {accounts
-                      .filter((a) => a.role !== "super_admin")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.display_name}
-                        </option>
-                      ))}
+                    <SelectTrigger
+                      aria-label="Akun untuk cakupan baru"
+                      className="h-11 w-full min-w-0 font-normal"
+                    >
+                      <SelectValue placeholder="Pilih akun" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts
+                        .filter((a) => a.role !== "super_admin")
+                        .map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.display_name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
                   </Select>
                 </label>
-                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-[color:var(--ad-muted)]">
+                <label className="flex min-w-0 flex-col gap-1 text-caption font-bold text-muted-foreground">
                   Survei
                   <Select
-                    aria-label="Survei untuk cakupan baru"
                     value={scopeSurvey}
-                    onChange={(event) => setScopeSurvey(event.target.value)}
-                    className="min-h-[44px] w-full min-w-0 font-normal"
+                    onValueChange={setScopeSurvey}
                   >
-                    {surveys.map((survey) => (
-                      <option key={survey.id} value={survey.id}>
-                        {survey.title}
-                      </option>
-                    ))}
+                    <SelectTrigger
+                      aria-label="Survei untuk cakupan baru"
+                      className="h-11 w-full min-w-0 font-normal"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {surveys.map((survey) => (
+                        <SelectItem key={survey.id} value={survey.id}>
+                          {survey.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </label>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                <Checkbox
+                <CheckboxField
                   id="scope-read"
                   label="Baca jawaban individual"
                   checked={scopeRead}
                   onChange={setScopeRead}
                 />
-                <Checkbox
+                <CheckboxField
                   id="scope-export"
                   label="Ekspor data"
                   checked={scopeExport}
                   onChange={setScopeExport}
                 />
-                <Checkbox
+                <CheckboxField
                   id="scope-text"
                   label="Baca teks bebas"
                   checked={scopeText}
                   onChange={setScopeText}
                 />
               </div>
-              <Button
+              <BusyButton
                 className="mt-3"
                 variant="secondary"
                 loading={scopeBusy}
@@ -1287,6 +1758,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                   scopeBusy || mutationsBlocked || !scopeAccount || !scopeSurvey
                 }
                 onClick={() => {
+                  if (!scopeAccount) return;
                   const accountId = scopeAccount;
                   const surveyId = scopeSurvey;
                   const rows = accessGrants
@@ -1333,6 +1805,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                           },
                         }));
                       }
+                      setScopeAccount(null);
                       notify("Cakupan izin berhasil disimpan.");
                     })
                     .catch((error: unknown) =>
@@ -1347,17 +1820,21 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 }}
               >
                 Simpan cakupan
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button
+              </BusyButton>
+            </FormDialog>
+            <Separator />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-caption text-muted-foreground">
+                Perubahan berlaku pada workspace ini setelah disimpan.
+              </p>
+              <BusyButton
                 onClick={() => {
-                setBusy(true);
-                void saveGrants(grants)
-                  .then(() => {
-                    setSaved(true);
+                  setBusy(true);
+                  void saveGrants(grants)
+                    .then(() => {
+                      setSaved(true);
                       notify("Izin akun berhasil disimpan.");
-                  })
+                    })
                     .catch((error: unknown) =>
                       notify(
                         error instanceof Error
@@ -1366,7 +1843,7 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                         "danger",
                       ),
                     )
-                  .finally(() => setBusy(false));
+                    .finally(() => setBusy(false));
                 }}
                 disabled={
                   state === "loading" ||
@@ -1377,27 +1854,15 @@ function AdminAccountsContent({ data }: { data: AdminData }) {
                 loading={busy}
               >
                 Simpan izin
-              </Button>
-              <ActionLink to={ROUTES.adminAudit} variant="secondary">
-                Lihat log perubahan izin
-              </ActionLink>
+              </BusyButton>
             </div>
             {saved && (
-              <Banner tone="success" title="Izin tersimpan">
+              <SuccessBanner title="Izin tersimpan">
                 Perubahan berlaku pada workspace ini.
-              </Banner>
+              </SuccessBanner>
             )}
             </CardContent>
-          </DashCard>
-
-          <SoftCard>
-            <h2 className="text-body font-bold text-[color:var(--ad-text)]">Teks bebas</h2>
-            <p className="text-body-sm text-[color:var(--ad-muted)]">
-              Teks bebas dapat memuat identitas yang ditulis responden. Batasi
-              dan periksa sebelum dibagikan; hanya penerima berizin yang boleh
-              membacanya.
-            </p>
-          </SoftCard>
+          </Card>
         </div>
       </StateView>
     </>
@@ -1413,41 +1878,138 @@ const AUDIT_OUTCOME_VARIANT: Record<AuditOutcome, "success" | "danger" | "warnin
   dimulai: "default",
 };
 
-/** Aktor audit: nama akun plus ID bila dikenal, ID sebagai kode bila tidak. */
+const AUDIT_OUTCOME_LABEL: Record<AuditOutcome, string> = {
+  berhasil: "Berhasil",
+  ditolak: "Ditolak",
+  gagal: "Gagal",
+  dimulai: "Dimulai",
+};
+
+const AUDIT_OUTCOME_DOT: Record<AuditOutcome, string> = {
+  berhasil: "bg-emerald-600",
+  ditolak: "bg-destructive",
+  gagal: "bg-amber-600",
+  dimulai: "bg-muted-foreground",
+};
+
+const AUDIT_FILTERS = [
+  { value: "all", label: "Semua hasil" },
+  { value: "berhasil", label: "Berhasil" },
+  { value: "ditolak", label: "Ditolak" },
+  { value: "gagal", label: "Gagal" },
+  { value: "dimulai", label: "Dimulai" },
+] as const;
+
+type AuditFilter = (typeof AUDIT_FILTERS)[number]["value"];
+
+/** Pemilih hasil audit ala Select shadcn; dipakai di header desktop dan baris kontrol mobile. */
+function AuditOutcomeSelect({
+  outcome,
+  counts,
+  total,
+  onOutcome,
+  className,
+}: {
+  outcome: AuditFilter;
+  counts: Record<AuditOutcome, number>;
+  total: number;
+  onOutcome: (value: AuditFilter) => void;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={outcome}
+      onValueChange={(value) => onOutcome(value as AuditFilter)}
+    >
+      <SelectTrigger
+        aria-label="Saring entri menurut hasil"
+        className={cn("h-11", className)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {AUDIT_FILTERS.map((filter) => {
+          const count = filter.value === "all" ? total : counts[filter.value];
+          return (
+            <SelectItem key={filter.value} value={filter.value}>
+              {`${filter.label} (${count})`}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Badge hasil dengan titik status; label naik huruf agar sama dengan status lain di admin. */
+function OutcomeBadge({ outcome }: { outcome: AuditOutcome }) {
+  return (
+    <Badge variant={AUDIT_OUTCOME_VARIANT[outcome]} className="gap-1.5">
+      <span
+        aria-hidden="true"
+        className={cn("size-1.5 rounded-full", AUDIT_OUTCOME_DOT[outcome])}
+      />
+      {AUDIT_OUTCOME_LABEL[outcome]}
+    </Badge>
+  );
+}
+
+/**
+ * Kolom tabel audit: jam dan tanggal ditumpuk, aktor ber-avatar, aksi bercampur objeknya,
+ * dan hasil memakai badge. Ringkas supaya empat kolom tidak melebar di layar sedang.
+ */
 function auditColumnDefs(names: ReadonlyMap<string, string>): ColumnDef<AuditLog>[] {
   return [
     {
       accessorKey: "at",
-      header: "Waktu (WIB)",
-      cell: ({ row }) => formatWIB(row.original.at),
+      header: "Waktu",
+      cell: ({ row }) => (
+        <div className="flex flex-col">
+          <span className="tabular-nums font-bold text-foreground">
+            {formatWIBTime(row.original.at)}
+          </span>
+          <span className="text-annotation text-muted-foreground">
+            {formatWIBDate(row.original.at)}
+          </span>
+        </div>
+      ),
     },
     {
       accessorKey: "actor",
       header: "Aktor",
-      cell: ({ row }) => (
-        <span className="font-bold text-[color:var(--ad-text)]">
-          <AuditActor actor={row.original.actor} names={names} />
-        </span>
-      ),
+      cell: ({ row }) => {
+        const name = names.get(row.original.actor);
+        return (
+          <div className="flex items-center gap-2.5">
+            {/* Inisial hanya bermakna untuk aktor yang dikenal; ID mentah tampil tanpa avatar. */}
+            {name ? (
+              <Avatar className="size-8 bg-muted">
+                <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+                  {initials(name)}
+                </AvatarFallback>
+              </Avatar>
+            ) : null}
+            <span className="min-w-0 font-bold text-foreground">
+              <AuditActor actor={row.original.actor} names={names} />
+            </span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "action",
-      header: "Aksi",
-      cell: ({ row }) => row.original.action,
-    },
-    {
-      accessorKey: "object",
-      header: "Objek",
-      cell: ({ row }) => <Code>{row.original.object}</Code>,
+      header: "Kejadian",
+      cell: ({ row }) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-bold text-foreground">{row.original.action}</span>
+          <Code>{row.original.object}</Code>
+        </div>
+      ),
     },
     {
       accessorKey: "outcome",
       header: "Hasil",
-      cell: ({ row }) => (
-        <Badge variant={AUDIT_OUTCOME_VARIANT[row.original.outcome]}>
-          {row.original.outcome}
-        </Badge>
-      ),
+      cell: ({ row }) => <OutcomeBadge outcome={row.original.outcome} />,
     },
   ];
 }
@@ -1460,7 +2022,7 @@ export function AdminAuditPage() {
     <Shell
       kind="admin"
       title="Log audit"
-      subtitle="Catatan aktivitas memuat aktor, aksi, objek, hasil, dan waktu tanpa isi jawaban."
+      subtitle="Telusuri siapa melakukan apa dan hasilnya, lalu saring kejadian yang perlu ditinjau."
     >
       <AdminDataGate subject="Log audit">
         {(data) => <AdminAuditContent data={data} />}
@@ -1469,13 +2031,129 @@ export function AdminAuditPage() {
   );
 }
 
+/**
+ * Masa retensi platform. Halaman Profil platform dihapus: hanya nilai operasional ini yang
+ * dipakai, dan konteksnya cocok dengan Log audit karena batch penghapusan tercatat di sana.
+ */
+function RetentionCard() {
+  const notify = useToast();
+  const [raw, setRaw] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    void getPlatformProfile()
+      .then((profile) => {
+        setRaw(profile.retention_days === null ? "" : String(profile.retention_days));
+      })
+      .catch(() => setError("Masa retensi gagal dimuat."));
+  }, []);
+
+  const onSave = (event: FormEvent) => {
+    event.preventDefault();
+    const days = parseRetentionDays(raw);
+    if (days === undefined) {
+      setError("Masa retensi harus bilangan bulat 0 atau lebih.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    void savePlatformProfile({ retention_days: days })
+      .then((profile) => {
+        setRaw(profile.retention_days === null ? "" : String(profile.retention_days));
+        setSaved(true);
+        notify("Masa retensi tersimpan.");
+      })
+      .catch((failure: unknown) =>
+        notify(failure instanceof Error ? failure.message : "Masa retensi gagal disimpan.", "danger"),
+      )
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Retensi data</CardTitle>
+        <CardDescription>
+          Survei tanpa organisasi; yang berorganisasi memakai retensi organisasinya.
+          Kosong atau 0 berarti tanpa penghapusan otomatis.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSave} className="flex flex-wrap items-start gap-3">
+          <div className="flex w-40 flex-col gap-1">
+            <Input
+              aria-label="Masa retensi (hari)"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "platform-retention-error" : undefined}
+              inputMode="numeric"
+              placeholder="Hari, mis. 30"
+              value={raw}
+              disabled={busy}
+              onChange={(event) => {
+                setSaved(false);
+                setError("");
+                setRaw(event.target.value);
+              }}
+            />
+            {error && (
+              <p
+                id="platform-retention-error"
+                role="alert"
+                className="text-caption font-bold text-destructive"
+              >
+                {error}
+              </p>
+            )}
+          </div>
+          <DashButton type="submit" disabled={busy}>
+            {busy ? "Menyimpan…" : "Simpan"}
+          </DashButton>
+          {saved && (
+            <p role="status" className="text-caption font-bold text-emerald-600">
+              Tersimpan.
+            </p>
+          )}
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 function AdminAuditContent({ data }: { data: AdminData }) {
   const { auditLogs, accounts } = data;
   const { state } = useScreenState("admin-audit");
+  const [outcome, setOutcome] = useState<AuditFilter>("all");
+  const [query, setQuery] = useState("");
   const names = new Map(
     accounts.map((account) => [account.id, account.display_name]),
   );
   const auditColumns = auditColumnDefs(names);
+  const outcomeCounts = auditLogs.reduce<Record<AuditOutcome, number>>(
+    (counts, log) => ({
+      ...counts,
+      [log.outcome]: (counts[log.outcome] ?? 0) + 1,
+    }),
+    { berhasil: 0, ditolak: 0, gagal: 0, dimulai: 0 },
+  );
+  const haystack = (log: AuditLog) =>
+    `${names.get(log.actor) ?? ""} ${log.actor} ${log.action} ${log.object} ${formatWIBDate(log.at)} ${formatWIBTime(log.at)}`;
+  const shown =
+    outcome === "all"
+      ? auditLogs
+      : auditLogs.filter((log) => log.outcome === outcome);
+  const needle = query.trim().toLowerCase();
+  const mobileShown = needle
+    ? shown.filter((log) => haystack(log).toLowerCase().includes(needle))
+    : shown;
+  const emptyOutcome =
+    outcome !== "all"
+      ? "Tidak ada entri dengan hasil ini."
+      : "Belum ada entri audit.";
+  const emptyMobile = needle
+    ? "Tidak ada entri yang cocok dengan pencarian."
+    : emptyOutcome;
   return (
     <>
       <StateView
@@ -1486,47 +2164,100 @@ function AdminAuditContent({ data }: { data: AdminData }) {
         permissionDetail="Log operasional hanya dapat dibaca sesuai tugas."
       >
         <div className="flex flex-col gap-5">
-          <Banner tone="info" title="Catatan aktivitas">
-            Kolom dibatasi pada informasi operasional. Log tidak memuat token,
-            kredensial, atau jawaban.
-          </Banner>
-          <DashCard className="gap-3">
+          <Card>
             <CardHeader>
-              <CardTitle>Entri operasional</CardTitle>
+              <CardTitle>Entri audit</CardTitle>
               <CardDescription>
-                Aktor yang dikenal tampil sebagai nama beserta ID; yang tidak
-                dikenal tampil sebagai ID.
+                Aktor dikenal tampil sebagai nama; entri publik atau sistem tampil
+                sebagai ID. Isi jawaban tidak pernah dicatat di sini.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <DataTable
-                columns={auditColumns}
-                data={auditLogs}
-                caption="Entri operasional: waktu, aktor, aksi, objek, dan hasil"
-                emptyMessage="Belum ada entri audit."
-                plain
-              />
+              <div className="hidden lg:block">
+                <DataTable
+                  columns={auditColumns}
+                  data={shown}
+                  caption="Entri audit: waktu, aktor, kejadian, dan hasil"
+                  emptyMessage={emptyOutcome}
+                  compact
+                  filter={query}
+                  onFilterChange={setQuery}
+                  filterPlaceholder="Cari aktor, aksi, atau objek"
+                  filterText={haystack}
+                  toolbarExtra={
+                    <AuditOutcomeSelect
+                      outcome={outcome}
+                      counts={outcomeCounts}
+                      total={auditLogs.length}
+                      onOutcome={setOutcome}
+                      className="w-40"
+                    />
+                  }
+                />
+              </div>
+
+              <div className="mb-3 flex flex-col gap-2 lg:hidden">
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Cari aktor, aksi, atau objek"
+                  aria-label="Cari entri audit"
+                />
+                <AuditOutcomeSelect
+                  outcome={outcome}
+                  counts={outcomeCounts}
+                  total={auditLogs.length}
+                  onOutcome={setOutcome}
+                  className="w-full"
+                />
+              </div>
+
+              <ul className="flex flex-col gap-3 lg:hidden">
+                {mobileShown.map((log) => {
+                  const name = names.get(log.actor);
+                  return (
+                    <li
+                      key={log.id}
+                      className="flex flex-col gap-2 rounded-lg border border-border p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-bold text-foreground">{log.action}</p>
+                          <p className="mt-0.5">
+                            <Code>{log.object}</Code>
+                          </p>
+                        </div>
+                        <OutcomeBadge outcome={log.outcome} />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Avatar className="size-6 bg-muted">
+                            <AvatarFallback className="text-annotation font-bold text-muted-foreground">
+                              {initials(name ?? log.actor)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="truncate">
+                            {name ?? <Code>{log.actor}</Code>}
+                          </span>
+                        </span>
+                        <span className="tabular-nums">
+                          {formatWIBTime(log.at)} · {formatWIBDate(log.at)}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+                {!mobileShown.length && (
+                  <li className="rounded-lg border border-dashed border-border p-6 text-center text-caption text-muted-foreground">
+                    {emptyMobile}
+                  </li>
+                )}
+              </ul>
             </CardContent>
-          </DashCard>
-          <SoftCard>
-            <h2 className="text-body font-bold text-[color:var(--ad-text)]">
-              Cakupan pencatatan
-            </h2>
-            <ul className="flex list-inside list-disc flex-col gap-1 text-body-sm text-[color:var(--ad-muted)]">
-              <li>Perubahan izin dan status.</li>
-              <li>Akses jawaban individual dan penolakan akses.</li>
-              <li>Publikasi, penutupan, dan ekspor beserta penerima.</li>
-              <li>Event integrasi dicatat dengan ID kejadian yang tetap.</li>
-            </ul>
-          </SoftCard>
-          <div className="flex flex-wrap gap-3">
-            <ActionLink to={ROUTES.adminIntegration} variant="secondary">
-              Lihat event integrasi
-            </ActionLink>
-            <ActionLink to={ROUTES.admin} variant="secondary">
-              Kembali ke ringkasan
-            </ActionLink>
-          </div>
+          </Card>
+
+          <RetentionCard />
         </div>
       </StateView>
     </>
@@ -1547,6 +2278,72 @@ const EVENT_STATUS_LABEL: Record<EventStatus, string> = {
   failed: "Gagal",
 };
 
+const EVENT_STATUS_DOT: Record<EventStatus, string> = {
+  delivered: "bg-emerald-600",
+  pending: "bg-amber-600",
+  failed: "bg-white/80",
+};
+
+const EVENT_FILTERS = [
+  { value: "all", label: "Semua status" },
+  { value: "delivered", label: "Terkirim" },
+  { value: "pending", label: "Menunggu" },
+  { value: "failed", label: "Gagal" },
+] as const;
+
+type EventFilter = (typeof EVENT_FILTERS)[number]["value"];
+
+function EventStatusBadge({ status }: { status: EventStatus }) {
+  return (
+    <Badge variant={EVENT_STATUS_VARIANT[status]} className="gap-1.5">
+      <span
+        aria-hidden="true"
+        className={cn("size-1.5 rounded-full", EVENT_STATUS_DOT[status])}
+      />
+      {EVENT_STATUS_LABEL[status]}
+    </Badge>
+  );
+}
+
+/** Pemilih status event ala Select shadcn; dipakai di toolbar tabel dan baris kontrol mobile. */
+function EventStatusSelect({
+  status,
+  counts,
+  total,
+  onStatus,
+  className,
+}: {
+  status: EventFilter;
+  counts: Record<EventStatus, number>;
+  total: number;
+  onStatus: (value: EventFilter) => void;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={status}
+      onValueChange={(value) => onStatus(value as EventFilter)}
+    >
+      <SelectTrigger
+        aria-label="Saring event menurut status"
+        className={cn("h-11", className)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {EVENT_FILTERS.map((filter) => {
+          const count = filter.value === "all" ? total : counts[filter.value];
+          return (
+            <SelectItem key={filter.value} value={filter.value}>
+              {`${filter.label} (${count})`}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** Kolom event integrasi; aksi ulang dinonaktifkan saat muat atau saat event itu sendiri sedang diulang. */
 function integrationColumns({
   busyEvent,
@@ -1562,20 +2359,29 @@ function integrationColumns({
   return [
     {
       accessorKey: "event_id",
-      header: "ID kejadian",
+      header: "Kejadian",
       cell: ({ row }) => (
         <div className="flex flex-col gap-1">
           <Code>{row.original.event_id}</Code>
-          <Badge variant="secondary">
-            {row.original.simulated ? "Simulasi" : "Nyata"}
-          </Badge>
+          <span className="text-caption text-muted-foreground">
+            {row.original.type} · {row.original.simulated ? "Simulasi" : "Nyata"}
+          </span>
         </div>
       ),
     },
     {
-      accessorKey: "type",
-      header: "Tipe",
-      cell: ({ row }) => row.original.type,
+      accessorKey: "at",
+      header: "Waktu",
+      cell: ({ row }) => (
+        <div className="flex flex-col">
+          <span className="tabular-nums font-bold text-foreground">
+            {formatWIBTime(row.original.at)}
+          </span>
+          <span className="text-annotation text-muted-foreground">
+            {formatWIBDate(row.original.at)}
+          </span>
+        </div>
+      ),
     },
     {
       accessorKey: "target",
@@ -1586,15 +2392,13 @@ function integrationColumns({
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => (
-        <Badge variant={EVENT_STATUS_VARIANT[row.original.status]}>
-          {EVENT_STATUS_LABEL[row.original.status]}
-        </Badge>
+        <div className="flex flex-col items-start gap-1">
+          <EventStatusBadge status={row.original.status} />
+          <span className="text-caption text-muted-foreground">
+            {row.original.attempts} percobaan
+          </span>
+        </div>
       ),
-    },
-    {
-      accessorKey: "attempts",
-      header: "Percobaan",
-      cell: ({ row }) => row.original.attempts,
     },
     {
       id: "action",
@@ -1612,7 +2416,7 @@ function integrationColumns({
               ? "Mengulang…"
               : replayed === event.id
                 ? "Diulang"
-                : "Ulangi event"}
+                : "Ulangi"}
           </DashButton>
         );
       },
@@ -1641,8 +2445,47 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
   const { integrationNote } = useStore();
   const [replayed, setReplayed] = useState<string | null>(null);
   const [busyEvent, setBusyEvent] = useState<string | null>(null);
-  const [retryError, setRetryError] = useState<string | null>(null);
-  const down = state === "error";
+  const [status, setStatus] = useState<EventFilter>("all");
+  const [query, setQuery] = useState("");
+  const statusCounts = integrationEvents.reduce<Record<EventStatus, number>>(
+    (counts, event) => {
+      counts[event.status] += 1;
+      return counts;
+    },
+    { delivered: 0, pending: 0, failed: 0 },
+  );
+  const byStatus =
+    status === "all"
+      ? integrationEvents
+      : integrationEvents.filter((event) => event.status === status);
+  const haystack = (event: IntegrationEvent) =>
+    `${event.event_id} ${event.type} ${event.target} ${EVENT_STATUS_LABEL[event.status]} ${formatWIBDate(event.at)} ${formatWIBTime(event.at)}`;
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? byStatus.filter((event) => haystack(event).toLowerCase().includes(needle))
+    : byStatus;
+  const emptyStatus =
+    status === "all"
+      ? "Belum ada event integrasi."
+      : "Tidak ada event dengan status ini.";
+  const emptyVisible = needle
+    ? "Tidak ada event yang cocok dengan pencarian."
+    : emptyStatus;
+
+  const handleReplay = (event: IntegrationEvent) => {
+    setBusyEvent(event.id);
+    void replayEvent(event.id)
+      .then(() => {
+        setReplayed(event.id);
+        notify(`Event ${event.event_id} diulang dengan ID yang sama.`);
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : "Event gagal diulang.";
+        notify(message, "danger");
+      })
+      .finally(() => setBusyEvent(null));
+  };
 
   return (
     <>
@@ -1660,171 +2503,195 @@ function AdminIntegrationContent({ data }: { data: AdminData }) {
               ID kejadian tetap dipakai dan tidak membuat respons kedua.
             </SuccessBanner>
           )}
-          {down && (
-            <Banner tone="danger" title="Layanan terputus">
-              Alur mandiri tetap berjalan tanpa layanan integrasi. Status
-              pengiriman dapat diulang setelah layanan kembali.
-            </Banner>
-          )}
-          {retryError && (
-            <Banner
-              tone="danger"
-              title="Pengulangan tidak membuktikan pengiriman"
-            >
-              {retryError}
-            </Banner>
-          )}
-          <Banner tone="info" title="Simulasi integrasi lokal">
-            Tidak ada pengiriman jaringan nyata pada MVP lokal ini. Event dan
-            status di bawah adalah simulasi yang dibuat saat respons tersimpan.
-          </Banner>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-          <DashCard className="gap-4">
+          <Card>
             <CardHeader>
-              <CardTitle>Layanan identitas (integrasi)</CardTitle>
-              <CardDescription>
-                Memberi identitas dan penugasan terverifikasi serta menerima
-                status pengiriman. Endpoint dan autentikasi nyata masih perlu
-                disepakati.
-              </CardDescription>
-              <CardAction>
-                <Badge variant={down ? "danger" : "success"}>
-                  {down ? "Terputus" : "Simulasi aktif"}
-                </Badge>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              <ul className="flex list-inside list-disc flex-col gap-1 text-body-sm text-[color:var(--ad-text)]">
-                <li>
-                  ID lokal dan kode individual dipakai selama daftar peserta
-                  belum tersedia.
-                </li>
-                <li>
-                  Bedakan LMS mencatat tautan dibuka dan sistem ini mencatat
-                  jawaban tersimpan.
-                </li>
-                <li>Jangan membuat identitas kedua otomatis.</li>
-              </ul>
-            </CardContent>
-          </DashCard>
-          <DashCard className="gap-4">
-            <CardHeader>
-              <CardTitle>Layanan konsumen data (integrasi)</CardTitle>
-              <CardDescription>
-                CSV adalah jalur keluaran wajib MVP. API adalah jalur integrasi
-                yang didukung rancangan; format final masih terbuka.
-              </CardDescription>
-              <CardAction>
-                <Badge variant={down ? "danger" : "success"}>
-                  {down ? "Terputus" : "Simulasi aktif"}
-                </Badge>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              <ul className="flex list-inside list-disc flex-col gap-1 text-body-sm text-[color:var(--ad-text)]">
-                <li>Filter cakupan dan kolom, catat penerima.</li>
-                <li>
-                  <Code>schema_version</Code>, versi survei, kode item, nilai
-                  atau teks sesuai izin.
-                </li>
-                <li>
-                  <Code>collection_mode</Code>: standalone (pengisian mandiri) /
-                  integrated (integrasi sistem); <Code>identity_source</Code>:
-                  local/module_13.
-                </li>
-              </ul>
-            </CardContent>
-          </DashCard>
-          </div>
-
-          <DashCard className="gap-3">
-            <CardHeader>
-              <CardTitle>Event integrasi (simulasi)</CardTitle>
+              <CardTitle>Event integrasi</CardTitle>
               <CardDescription>
                 Satu event per respons tersimpan. Mengulang memakai ID kejadian
-                yang sama.
+                yang sama; event selesai hanya untuk respons tersimpan.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <DataTable
-                columns={integrationColumns({
-                  busyEvent,
-                  replayed,
-                  locked: state === "loading",
-                  onReplay: (event) => {
-                    setBusyEvent(event.id);
-                    setRetryError(null);
-                    void replayEvent(event.id)
-                      .then(() => {
-                        setReplayed(event.id);
-                        notify(
-                          `Event ${event.event_id} diulang dengan ID yang sama.`,
-                        );
-                      })
-                      .catch((error: unknown) => {
-                        const message =
-                          error instanceof Error
-                            ? error.message
-                            : "Event gagal diulang.";
-                        setRetryError(message);
-                        notify(message, "danger");
-                      })
-                      .finally(() => setBusyEvent(null));
-                  },
-                })}
-                data={integrationEvents}
-                caption="Event integrasi: ID kejadian, tipe, tujuan, status, dan percobaan"
-                emptyMessage="Belum ada event integrasi."
-                plain
-              />
+              <div className="hidden lg:block">
+                <DataTable
+                  columns={integrationColumns({
+                    busyEvent,
+                    replayed,
+                    locked: state === "loading",
+                    onReplay: handleReplay,
+                  })}
+                  data={byStatus}
+                  caption="Event integrasi: kejadian, waktu, tujuan, status, dan aksi"
+                  emptyMessage={emptyStatus}
+                  compact
+                  filter={query}
+                  onFilterChange={setQuery}
+                  filterPlaceholder="Cari kejadian, tipe, tujuan"
+                  filterText={haystack}
+                  toolbarExtra={
+                    <EventStatusSelect
+                      status={status}
+                      counts={statusCounts}
+                      total={integrationEvents.length}
+                      onStatus={setStatus}
+                      className="w-40"
+                    />
+                  }
+                />
+              </div>
+              <div className="mb-3 flex flex-col gap-2 lg:hidden">
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Cari kejadian, tipe, tujuan"
+                  aria-label="Cari event integrasi"
+                  className="w-full"
+                />
+                <EventStatusSelect
+                  status={status}
+                  counts={statusCounts}
+                  total={integrationEvents.length}
+                  onStatus={setStatus}
+                  className="w-full"
+                />
+              </div>
+              {visible.length === 0 ? (
+                <p className="py-6 text-center text-body-sm text-muted-foreground lg:hidden">
+                  {emptyVisible}
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-3 lg:hidden">
+                  {visible.map((event) => (
+                    <li
+                      key={event.id}
+                      className="flex flex-col gap-3 rounded-lg border border-border p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <Code>{event.event_id}</Code>
+                          <span className="text-caption text-muted-foreground">
+                            {event.type} ·{" "}
+                            {event.simulated ? "Simulasi" : "Nyata"}
+                          </span>
+                        </div>
+                        <EventStatusBadge status={event.status} />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
+                        <Code>{event.target}</Code>
+                        <span className="tabular-nums">
+                          {formatWIBTime(event.at)} · {formatWIBDate(event.at)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-caption text-muted-foreground">
+                          {event.attempts} percobaan
+                        </span>
+                        <DashButton
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleReplay(event)}
+                          disabled={
+                            state === "loading" || busyEvent === event.id
+                          }
+                        >
+                          {busyEvent === event.id
+                            ? "Mengulang…"
+                            : replayed === event.id
+                              ? "Diulang"
+                              : "Ulangi"}
+                        </DashButton>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
-            <CardContent>
-              <p className="text-caption text-[color:var(--ad-muted)]">
-                Event selesai hanya untuk respons tersimpan. ID kejadian tetap
-                dipakai saat percobaan ulang.
-              </p>
-            </CardContent>
-          </DashCard>
+          </Card>
 
-          <DashCard className="gap-4">
+          <Card>
             <CardHeader>
-              <CardTitle>Mode mandiri</CardTitle>
+              <CardTitle>Layanan terhubung</CardTitle>
               <CardDescription>
-                Creator tetap dapat menerbitkan survei, menerima respons, melihat
-                ringkasan, dan mengekspor CSV tanpa layanan modul lain.
+                Dua layanan eksternal disimulasikan pada MVP lokal; endpoint dan
+                autentikasi nyata masih perlu disepakati.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-3">
-                <ActionLink to={ROUTES.respondentIntro("link-umum-demo")}>
-                  Buka alur responden mandiri
-                </ActionLink>
-                <ActionLink to={ROUTES.admin} variant="secondary">
-                  Lihat ringkasan operasional
-                </ActionLink>
-                <ActionLink to={ROUTES.adminAudit} variant="secondary">
-                  Lihat log audit
-                </ActionLink>
+            <CardContent className="flex flex-col gap-4">
+              <ul className="flex flex-col divide-y divide-border">
+                <li className="flex items-start justify-between gap-3 pb-4">
+                  <div className="min-w-0">
+                    <p className="font-bold text-foreground">
+                      Layanan identitas
+                    </p>
+                    <p className="mt-1 text-caption text-muted-foreground">
+                      Memberi identitas dan penugasan terverifikasi serta
+                      menerima status pengiriman.
+                    </p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-caption font-bold text-foreground">
+                        Catatan kontrak
+                      </summary>
+                      <ul className="mt-2 flex list-disc flex-col gap-1 ps-4 text-caption text-muted-foreground">
+                        <li>
+                          ID lokal dan kode individual dipakai selama daftar
+                          peserta belum tersedia.
+                        </li>
+                        <li>
+                          LMS mencatat tautan dibuka; sistem ini mencatat
+                          jawaban tersimpan.
+                        </li>
+                        <li>Tidak membuat identitas kedua otomatis.</li>
+                      </ul>
+                    </details>
+                  </div>
+                  <Badge variant="secondary">Simulasi</Badge>
+                </li>
+                <li className="flex items-start justify-between gap-3 py-4">
+                  <div className="min-w-0">
+                    <p className="font-bold text-foreground">Konsumen data</p>
+                    <p className="mt-1 text-caption text-muted-foreground">
+                      Menerima keluaran CSV wajib MVP; API masih sebatas
+                      rancangan.
+                    </p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-caption font-bold text-foreground">
+                        Catatan kontrak
+                      </summary>
+                      <ul className="mt-2 flex list-disc flex-col gap-1 ps-4 text-caption text-muted-foreground">
+                        <li>Filter cakupan dan kolom, catat penerima.</li>
+                        <li>
+                          <Code>schema_version</Code>, versi survei, kode item,
+                          nilai atau teks sesuai izin.
+                        </li>
+                        <li>
+                          <Code>collection_mode</Code>: standalone / integrated;{" "}
+                          <Code>identity_source</Code>: local/module_13.
+                        </li>
+                      </ul>
+                    </details>
+                  </div>
+                  <Badge variant="secondary">Simulasi</Badge>
+                </li>
+              </ul>
+              <Separator />
+              <div className="flex flex-col gap-2">
+                <Field id="integration-note" label="Kontak kontrak">
+                  {(aria) => (
+                    <Input
+                      {...aria}
+                      placeholder="Catatan untuk tim integrasi"
+                      value={integrationNote}
+                      onChange={(e) => setIntegrationNote(e.target.value)}
+                    />
+                  )}
+                </Field>
+                <p className="text-caption text-muted-foreground">
+                  Catatan tersimpan di peramban ini untuk referensi tim.
+                </p>
               </div>
             </CardContent>
-          </DashCard>
-
-          <SoftCard>
-            <Field id="integration-note" label="Kontak kontrak">
-              {(aria) => (
-                <Input
-                  {...aria}
-                  placeholder="Catatan untuk tim integrasi"
-                  value={integrationNote}
-                  onChange={(e) => setIntegrationNote(e.target.value)}
-                />
-              )}
-            </Field>
-            <p className="text-caption text-[color:var(--ad-muted)]">
-              Catatan tersimpan di peramban ini untuk referensi tim.
-            </p>
-          </SoftCard>
+          </Card>
         </div>
       </StateView>
     </>
@@ -1840,33 +2707,174 @@ const REQUEST_LABELS: Record<DataRequestStatus, string> = {
   rejected: "Ditolak",
 };
 
-/** Kanal yang dipakai pengelola untuk membalas pemohon; server mencatatnya sebagai jejak balasan `response_channel`. */
-const RESPONSE_CHANNEL_LABELS: Record<string, string> = {
-  email: "Email",
-  phone: "Telepon",
-  messaging: "Pesan singkat (SMS/WhatsApp)",
-  letter: "Surat",
-  in_person: "Tatap muka",
-};
-
-/**
- * Nilai kanonis yang dicatat server, bukan pilihan balasan admin: job retensi mengganti kanal teks bebas
- * dengan `dianonimkan`. Baris lama tetap menampilkannya sebagai label manusiawi, tanpa menawarkannya
- * sebagai pilihan kanal baru.
- */
-const SYSTEM_CHANNEL_LABELS: Record<string, string> = {
-  dianonimkan: "Dianonimkan",
-};
-
 const CHANNEL_REQUIRED =
   "Pilih kanal yang dipakai untuk membalas pemohon. Kanal ini dicatat sebagai bukti bahwa permintaan sudah dibalas.";
 
-function RequestRow({
+const REQUEST_STATUS_VARIANT: Record<
+  DataRequestStatus,
+  "success" | "warning" | "info" | "danger"
+> = {
+  pending: "warning",
+  in_progress: "info",
+  handled: "success",
+  rejected: "danger",
+};
+
+const REQUEST_STATUS_DOT: Record<DataRequestStatus, string> = {
+  pending: "bg-amber-600",
+  in_progress: "bg-sky-600",
+  handled: "bg-emerald-600",
+  rejected: "bg-white/80",
+};
+
+const REQUEST_FILTERS = [
+  { value: "all", label: "Semua status" },
+  { value: "pending", label: "Menunggu" },
+  { value: "in_progress", label: "Diproses" },
+  { value: "handled", label: "Selesai" },
+  { value: "rejected", label: "Ditolak" },
+] as const;
+
+type RequestFilter = (typeof REQUEST_FILTERS)[number]["value"];
+
+function RequestStatusBadge({ status }: { status: DataRequestStatus }) {
+  return (
+    <Badge variant={REQUEST_STATUS_VARIANT[status]} className="gap-1.5">
+      <span
+        aria-hidden="true"
+        className={cn("size-1.5 rounded-full", REQUEST_STATUS_DOT[status])}
+      />
+      {REQUEST_LABELS[status]}
+    </Badge>
+  );
+}
+
+/** Pemilih status permintaan ala Select shadcn; dipakai di toolbar tabel dan baris kontrol mobile. */
+function RequestStatusSelect({
+  status,
+  counts,
+  total,
+  onStatus,
+  className,
+}: {
+  status: RequestFilter;
+  counts: Record<DataRequestStatus, number>;
+  total: number;
+  onStatus: (value: RequestFilter) => void;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={status}
+      onValueChange={(value) => onStatus(value as RequestFilter)}
+    >
+      <SelectTrigger
+        aria-label="Saring permintaan menurut status"
+        className={cn("h-11", className)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {REQUEST_FILTERS.map((filter) => {
+          const count = filter.value === "all" ? total : counts[filter.value];
+          return (
+            <SelectItem key={filter.value} value={filter.value}>
+              {`${filter.label} (${count})`}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Kolom tabel permintaan; tombol aksi membuka dialog tindak lanjut. */
+function requestColumns(
+  onOpen: (request: DataRequest) => void,
+): ColumnDef<DataRequest>[] {
+  return [
+    {
+      accessorKey: "id",
+      header: "Permintaan",
+      cell: ({ row }) => (
+        <div className="flex min-w-0 flex-col gap-1">
+          <Code>{row.original.id}</Code>
+          <span className="text-caption text-muted-foreground">
+            {DATA_REQUEST_TYPE_LABEL[row.original.type] ?? row.original.type}
+          </span>
+          <span className="break-all whitespace-normal text-body-sm text-muted-foreground">
+            {row.original.contact}
+          </span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "created_at",
+      header: "Diajukan",
+      cell: ({ row }) => (
+        <div className="flex flex-col">
+          <span className="tabular-nums font-bold text-foreground">
+            {formatWIBTime(row.original.created_at)}
+          </span>
+          <span className="text-annotation text-muted-foreground">
+            {formatWIBDate(row.original.created_at)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "note",
+      header: "Keterangan",
+      cell: ({ row }) => (
+        <p className="line-clamp-2 whitespace-normal text-body-sm text-muted-foreground">
+          {row.original.note ?? "—"}
+        </p>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => {
+        const request = row.original;
+        const channelText = request.response_channel
+          ? channelLabel(request.response_channel)
+          : null;
+        return (
+          <div className="flex flex-col items-start gap-1">
+            <RequestStatusBadge status={request.status} />
+            {channelText ? (
+              <span className="text-caption text-muted-foreground">
+                {channelText}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      id: "action",
+      header: "Aksi",
+      cell: ({ row }) => (
+        <DashButton
+          variant="outline"
+          size="sm"
+          onClick={() => onOpen(row.original)}
+        >
+          Tinjau
+        </DashButton>
+      ),
+    },
+  ];
+}
+
+function RequestForm({
   request,
   onSaved,
+  onCancel,
 }: {
   request: DataRequest;
   onSaved: () => void;
+  onCancel: () => void;
 }) {
   const [status, setStatus] = useState<DataRequestStatus>(request.status);
   const [note, setNote] = useState(request.outcome_note ?? "");
@@ -1878,17 +2886,7 @@ function RequestRow({
   const fieldId = `request-${request.id}`;
   const channelId = `${fieldId}-channel`;
   // Kanal tersimpan di luar daftar (mis. teks bebas lewat API) tetap dapat dipilih agar simpan ulang tidak menggantinya.
-  const storedChannel = request.response_channel;
-  const channelOptions =
-    storedChannel && !Object.hasOwn(RESPONSE_CHANNEL_LABELS, storedChannel)
-      ? [
-          [
-            storedChannel,
-            SYSTEM_CHANNEL_LABELS[storedChannel] ?? storedChannel,
-          ],
-          ...Object.entries(RESPONSE_CHANNEL_LABELS),
-        ]
-    : Object.entries(RESPONSE_CHANNEL_LABELS);
+  const channelOptions = requestChannelOptions(request.response_channel);
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1930,32 +2928,36 @@ function RequestRow({
   };
 
   return (
-    <li className="flex flex-col gap-3 rounded-md border border-[var(--ad-border)] p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <Code>{request.id}</Code>
-          <p className="mt-1 text-caption text-[color:var(--ad-muted)]">
-            {formatWIB(request.created_at)}
-          </p>
-        </div>
-        <Badge variant="secondary">{REQUEST_LABELS[status]}</Badge>
-      </div>
-      <dl className="flex flex-col gap-2 text-body-sm">
-        <div className="flex flex-wrap gap-x-3">
-          <dt className="font-bold text-[color:var(--ad-muted)]">Jenis</dt>
-          <dd className="text-[color:var(--ad-text)]">
+    <div className="flex flex-col gap-4">
+      <dl className="grid gap-3 rounded-md border border-border bg-muted p-3 text-body-sm sm:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-caption font-bold text-muted-foreground">
+            Jenis
+          </dt>
+          <dd className="text-foreground">
             {DATA_REQUEST_TYPE_LABEL[request.type] ?? request.type}
           </dd>
         </div>
-        <div className="flex flex-wrap gap-x-3">
-          <dt className="font-bold text-[color:var(--ad-muted)]">Kontak</dt>
-          <dd className="min-w-0 break-words text-[color:var(--ad-text)]">
-            {request.contact}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-caption font-bold text-muted-foreground">
+            Diajukan
+          </dt>
+          <dd className="tabular-nums text-foreground">
+            {formatWIBTime(request.created_at)} ·{" "}
+            {formatWIBDate(request.created_at)}
           </dd>
         </div>
-        <div className="flex flex-wrap gap-x-3">
-          <dt className="font-bold text-[color:var(--ad-muted)]">Keterangan</dt>
-          <dd className="min-w-0 break-words text-[color:var(--ad-text)]">
+        <div className="flex min-w-0 flex-col gap-0.5 sm:col-span-2">
+          <dt className="text-caption font-bold text-muted-foreground">
+            Pemohon
+          </dt>
+          <dd className="break-all text-foreground">{request.contact}</dd>
+        </div>
+        <div className="flex min-w-0 flex-col gap-0.5 sm:col-span-2">
+          <dt className="text-caption font-bold text-muted-foreground">
+            Keterangan
+          </dt>
+          <dd className="break-words text-foreground">
             {request.note ?? "—"}
           </dd>
         </div>
@@ -1965,20 +2967,26 @@ function RequestRow({
           <Field id={`${fieldId}-status`} label="Status">
             {(aria) => (
               <Select
-                {...aria}
-                aria-label={`Status permintaan ${request.id}`}
                 value={status}
-                onChange={(event) => {
-                  setStatus(event.target.value as DataRequestStatus);
+                onValueChange={(value) => {
+                  setStatus(value as DataRequestStatus);
                   setChannelError(null);
                 }}
-                className="min-h-[44px] w-full"
               >
-                {Object.entries(REQUEST_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                <SelectTrigger
+                  {...aria}
+                  aria-label={`Status permintaan ${request.id}`}
+                  className="h-11 w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(REQUEST_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             )}
           </Field>
@@ -1992,21 +3000,28 @@ function RequestRow({
             >
               {(aria) => (
                 <Select
-                  {...aria}
-                  aria-label={`Kanal balasan permintaan ${request.id}`}
-                  value={channel}
-                  onChange={(event) => {
-                    setChannel(event.target.value);
+                  value={channel || undefined}
+                  onValueChange={(value) => {
+                    setChannel(value);
                     setChannelError(null);
                   }}
-                  className="min-h-[44px] w-full"
                 >
-                  <option value="">Pilih kanal</option>
-                  {channelOptions.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
+                  <SelectTrigger
+                    {...aria}
+                    aria-label={`Kanal balasan permintaan ${request.id}`}
+                    className="h-11 w-full"
+                  >
+                    <SelectValue placeholder="Pilih kanal">
+                      {channel ? channelLabel(channel) : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {channelOptions.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               )}
             </Field>
@@ -2025,31 +3040,90 @@ function RequestRow({
           </div>
         </div>
         {saveError && (
-          <ErrorState title="Perubahan belum tersimpan" detail={saveError} />
+          <Alert variant="destructive">
+            <AlertTitle>Perubahan belum tersimpan</AlertTitle>
+            <AlertDescription>{saveError}</AlertDescription>
+          </Alert>
         )}
-        <div>
-          <Button
-            type="submit"
-            variant="secondary"
-            loading={busy}
-            disabled={busy}
-          >
+        <div className="flex flex-wrap justify-end gap-2">
+          <DashButton type="button" variant="outline" onClick={onCancel}>
+            Batal
+          </DashButton>
+          <BusyButton type="submit" loading={busy} disabled={busy}>
             Simpan
-          </Button>
+          </BusyButton>
         </div>
       </form>
-    </li>
+    </div>
+  );
+}
+
+/** Dialog tindak lanjut: ringkasan pemohon di atas, form status/kanal/catatan di bawahnya. */
+function RequestDialog({
+  request,
+  onClose,
+  onSaved,
+}: {
+  request: DataRequest | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const typeLabel = request
+    ? (DATA_REQUEST_TYPE_LABEL[request.type] ?? request.type)
+    : "";
+  return (
+    <FormDialog
+      open={request !== null}
+      title="Tindak lanjuti permintaan"
+      description={request ? `${request.id} · ${typeLabel}` : ""}
+      onClose={onClose}
+    >
+      {request ? (
+        <RequestForm request={request} onSaved={onSaved} onCancel={onClose} />
+      ) : null}
+    </FormDialog>
   );
 }
 
 export function AdminRequestsPage() {
   const { state } = useScreenState("admin-requests");
   const { dataRequests: rows, dataRequestsError: error } = useStore();
+  const [active, setActive] = useState<DataRequest | null>(null);
+  const [status, setStatus] = useState<RequestFilter>("all");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     void loadDataRequests();
     return cancelDataRequestsLoad;
   }, []);
+
+  const requests = rows ?? [];
+  const statusCounts = requests.reduce<Record<DataRequestStatus, number>>(
+    (counts, request) => {
+      counts[request.status] += 1;
+      return counts;
+    },
+    { pending: 0, in_progress: 0, handled: 0, rejected: 0 },
+  );
+  const byStatus =
+    status === "all"
+      ? requests
+      : requests.filter((request) => request.status === status);
+  const haystack = (request: DataRequest) =>
+    `${request.id} ${DATA_REQUEST_TYPE_LABEL[request.type] ?? request.type} ${request.contact} ${request.note ?? ""} ${REQUEST_LABELS[request.status]} ${formatWIBDate(request.created_at)}`;
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? byStatus.filter((request) =>
+        haystack(request).toLowerCase().includes(needle),
+      )
+    : byStatus;
+  const emptyStatus =
+    status === "all"
+      ? "Belum ada permintaan data."
+      : "Tidak ada permintaan dengan status ini.";
+  const emptyVisible = needle
+    ? "Tidak ada permintaan yang cocok dengan pencarian."
+    : emptyStatus;
 
   return (
     <Shell
@@ -2059,12 +3133,7 @@ export function AdminRequestsPage() {
     >
       <StateView routeId="admin-requests" state={state}>
         <div className="flex flex-col gap-5">
-          <Banner tone="info" title="Verifikasi sebelum tindakan">
-            Kontak pada permintaan belum otomatis terverifikasi. Jangan memuat
-            jawaban individual di halaman ini; catat hanya status dan ringkasan
-            tindakan.
-          </Banner>
-          <DashCard className="gap-4">
+          <Card>
             <CardHeader>
               <CardTitle>Daftar permintaan</CardTitle>
               <CardDescription>
@@ -2072,46 +3141,136 @@ export function AdminRequestsPage() {
                 audit.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-            {error ? (
-              <ErrorState
-                title="Daftar permintaan gagal dimuat"
-                detail={`${error} Antrean tidak ditampilkan sampai data berhasil dimuat.`}
-                action={
-                  <Button
-                    variant="secondary"
-                    onClick={() => void loadDataRequests()}
-                  >
-                    Coba lagi
-                  </Button>
-                }
-              />
-            ) : rows === null ? (
-              <p role="status" className="text-body-sm text-[color:var(--ad-muted)]">
-                Memuat permintaan…
-              </p>
-            ) : rows.length === 0 ? (
-              <p className="text-body-sm text-[color:var(--ad-muted)]">
-                Belum ada permintaan data.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {rows.map((request) => (
-                  <RequestRow
-                    key={request.id}
-                    request={request}
-                    onSaved={() => void loadDataRequests()}
-                  />
-                ))}
-              </ul>
-            )}
+            <CardContent>
+              {error ? (
+                <ErrorState
+                  title="Daftar permintaan gagal dimuat"
+                  detail={`${error} Antrean tidak ditampilkan sampai data berhasil dimuat.`}
+                  action={
+                    <BusyButton
+                      variant="secondary"
+                      onClick={() => void loadDataRequests()}
+                    >
+                      Coba lagi
+                    </BusyButton>
+                  }
+                />
+              ) : rows === null ? (
+                <p role="status" className="text-body-sm text-muted-foreground">
+                  Memuat permintaan…
+                </p>
+              ) : rows.length === 0 ? (
+                <p className="text-body-sm text-muted-foreground">
+                  Belum ada permintaan data.
+                </p>
+              ) : (
+                <>
+                  <div className="hidden lg:block">
+                    <DataTable
+                      columns={requestColumns(setActive)}
+                      data={byStatus}
+                      caption="Permintaan data: ID, pemohon, keterangan, waktu, status, dan aksi"
+                      emptyMessage={emptyStatus}
+                      compact
+                      filter={query}
+                      onFilterChange={setQuery}
+                      filterPlaceholder="Cari ID, kontak, keterangan"
+                      filterText={haystack}
+                      toolbarExtra={
+                        <RequestStatusSelect
+                          status={status}
+                          counts={statusCounts}
+                          total={requests.length}
+                          onStatus={setStatus}
+                          className="w-44"
+                        />
+                      }
+                    />
+                  </div>
+                  <div className="mb-3 flex flex-col gap-2 lg:hidden">
+                    <Input
+                      type="search"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Cari ID, kontak, keterangan"
+                      aria-label="Cari permintaan data"
+                      className="w-full"
+                    />
+                    <RequestStatusSelect
+                      status={status}
+                      counts={statusCounts}
+                      total={requests.length}
+                      onStatus={setStatus}
+                      className="w-full"
+                    />
+                  </div>
+                  {visible.length === 0 ? (
+                    <p className="py-6 text-center text-body-sm text-muted-foreground lg:hidden">
+                      {emptyVisible}
+                    </p>
+                  ) : (
+                    <ul className="flex flex-col gap-3 lg:hidden">
+                      {visible.map((request) => (
+                        <li
+                          key={request.id}
+                          className="flex flex-col gap-3 rounded-lg border border-border p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              <Code>{request.id}</Code>
+                              <span className="text-caption text-muted-foreground">
+                                {DATA_REQUEST_TYPE_LABEL[request.type] ??
+                                  request.type}
+                              </span>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <RequestStatusBadge status={request.status} />
+                              {request.response_channel ? (
+                                <span className="text-caption text-muted-foreground">
+                                  {channelLabel(request.response_channel)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1 text-body-sm">
+                            <span className="break-all text-foreground">
+                              {request.contact}
+                            </span>
+                            {request.note ? (
+                              <span className="line-clamp-2 whitespace-normal text-caption text-muted-foreground">
+                                {request.note}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="tabular-nums text-caption text-muted-foreground">
+                              {formatWIBTime(request.created_at)} ·{" "}
+                              {formatWIBDate(request.created_at)}
+                            </span>
+                            <DashButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setActive(request)}
+                            >
+                              Tindak lanjuti
+                            </DashButton>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
             </CardContent>
-          </DashCard>
-          <div>
-            <ActionLink to={ROUTES.admin} variant="secondary">
-              Kembali ke ringkasan
-            </ActionLink>
-          </div>
+          </Card>
+          <RequestDialog
+            request={active}
+            onClose={() => setActive(null)}
+            onSaved={() => {
+              setActive(null);
+              void loadDataRequests();
+            }}
+          />
         </div>
       </StateView>
     </Shell>

@@ -219,7 +219,7 @@ export function RegisterPage() {
                 </Button>
               </form>
 
-              <p className="text-center text-body-sm text-muted">
+              <p className="text-center text-body-sm text-ink-muted">
                 Sudah punya akun? <PlainLink to={ROUTES.login} className="min-h-[44px]">Masuk</PlainLink>
               </p>
             </div>

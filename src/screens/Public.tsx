@@ -130,7 +130,7 @@ export function LoginPage() {
               <Button type="submit" block disabled={busy || state === 'loading'} loading={busy || state === 'loading'}>Masuk</Button>
             </form>
 
-            <p className="text-center text-body-sm text-muted">
+            <p className="text-center text-body-sm text-ink-muted">
               Belum punya akun? <PlainLink to={ROUTES.register} className="min-h-[44px]">Daftar</PlainLink>
             </p>
 
@@ -163,7 +163,7 @@ export function NotFoundPage() {
     <Shell kind="public" title="Halaman tidak ditemukan">
       <Card>
         <p className="text-body text-ink">Halaman yang Anda cari tidak tersedia.</p>
-        <p className="mt-2 text-body-sm text-muted">Periksa kembali alamat tautan. Bila Anda menerima kode undangan survei, buka undangan dengan kode itu.</p>
+        <p className="mt-2 text-body-sm text-ink-muted">Periksa kembali alamat tautan. Bila Anda menerima kode undangan survei, buka undangan dengan kode itu.</p>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <ActionLink to={ROUTES.home}>Kembali ke beranda</ActionLink>
           <ActionLink to={ROUTES.respondentCode} variant="secondary">Buka undangan</ActionLink>
@@ -312,14 +312,14 @@ function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
             {sections.map((section) => (
               <section key={section.title} aria-labelledby={`legal-${section.title.replace(/\s/g, '-')}`}>
                 <h2 id={`legal-${section.title.replace(/\s/g, '-')}`} className="text-h3 font-bold text-ink">{section.title}</h2>
-                <p className="mt-2 max-w-[70ch] text-body text-muted">{section.body}</p>
+                <p className="mt-2 max-w-[70ch] text-body text-ink-muted">{section.body}</p>
               </section>
             ))}
             <PolicyLinks className="border-t border-n200 pt-4" />
           </div>
           <Card className="h-fit">
             <SectionTitle>Kanal permintaan data</SectionTitle>
-            <p className="mt-2 text-body-sm text-muted">
+            <p className="mt-2 text-body-sm text-ink-muted">
               Akses, koreksi, penarikan persetujuan, dan penghapusan melalui kanal pengendali berikut. Verifikasi pemohon dicatat; log tidak memuat jawaban atau token.
             </p>
             <p className="mt-2 text-body-sm font-bold text-ink">
@@ -328,7 +328,7 @@ function LegalPage({ which }: { which: 'privacy' | 'terms' }) {
                 empty={contact === undefined ? 'Memuat kanal kontak…' : 'Kanal kontak pengendali belum ditetapkan.'}
               />
             </p>
-            <p className="mt-1 text-caption text-muted">
+            <p className="mt-1 text-caption text-ink-muted">
               Kanal organisasi yang menerbitkan survei Anda tercatat pada pemberitahuan sebelum item pertama dan dapat dibuka dari tautan survei.
             </p>
             <div className="mt-3 flex flex-col gap-2">

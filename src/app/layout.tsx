@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
-import '@fontsource-variable/inter';
-import '@fontsource-variable/jetbrains-mono';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { AppProviders } from '../components/AppProviders';
 
@@ -27,7 +27,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id">
+    <html lang="id" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body>
         <AppProviders>{children}</AppProviders>
       </body>

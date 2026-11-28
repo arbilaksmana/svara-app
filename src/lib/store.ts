@@ -35,6 +35,7 @@ import type {
   OrgAuditRow,
   OrgInvitation,
   OrgMember,
+  OrgNoticeVersion,
   OrgProfile,
   OrganizationSummary,
   PublicLink,
@@ -79,8 +80,12 @@ export interface DraftState {
 
 export interface OrgWorkspace {
   profile: OrgProfile;
+  /** Katalog versi notice yang sah untuk profil ini; kosong bila server lama tidak mengirimnya. */
+  notices: OrgNoticeVersion[];
   members: OrgMember[];
   invitations: OrgInvitation[];
+  /** Masa berlaku kode undangan dalam hari, dari server; copy tidak boleh mengangka sendiri. */
+  invitationTtlDays: number;
   audit: OrgAuditRow[];
 }
 
@@ -498,7 +503,14 @@ export async function loadOrgWorkspace(): Promise<void> {
       api.getOrgAudit(),
     ]);
     if (request !== orgRequest) return;
-    org = { profile: profile.profile, members, invitations: invitationList.invitations, audit };
+    org = {
+      profile: profile.profile,
+      notices: profile.notices ?? [],
+      members,
+      invitations: invitationList.invitations,
+      invitationTtlDays: invitationList.ttlDays,
+      audit,
+    };
   } catch (cause) {
     if (request !== orgRequest) return;
     orgError = cause instanceof Error ? cause.message : 'Data organisasi tidak dapat dimuat.';

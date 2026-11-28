@@ -11,7 +11,7 @@ import { ROUTES, homeForRole } from '../lib/routes';
 import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
 import { activeNavTo, navPath, type NavEntry } from '../lib/nav';
-import { AdminSidebar } from './AdminSidebar';
+import { AdminShell, ORG_NAV_GROUPS } from './AdminSidebar';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
 export type { NavEntry };
@@ -23,7 +23,13 @@ const ADMIN_CHROME_PATHS = new Set<string>([
   ROUTES.adminAudit,
   ROUTES.adminIntegration,
   ROUTES.adminRequests,
-  ROUTES.adminPlatform,
+]);
+
+/** Halaman ruang organisasi yang memakai chrome dasbor yang sama, dengan menu org_admin. */
+const ORG_CHROME_PATHS = new Set<string>([
+  ROUTES.adminOrg,
+  ROUTES.adminOrgEvidence,
+  ROUTES.creatorOrg,
 ]);
 
 /* Tamu memakai tautan bagian landing; anchor absolut agar tetap benar dari halaman lain. */
@@ -38,7 +44,7 @@ const GUEST_NAV: NavEntry[] = [
 const ORG_NAV: NavEntry[] = [
   { to: ROUTES.adminOrg, label: 'Organisasi' },
   { to: ROUTES.adminOrgEvidence, label: 'Bukti pendukung' },
-  { to: ROUTES.creator, label: 'Daftar survei' },
+  { to: ROUTES.creatorOrg, label: 'Daftar survei', aliases: [`${ROUTES.creator}/surveys`] },
 ];
 
 const NAV: Record<ShellKind, NavEntry[]> = {
@@ -49,7 +55,6 @@ const NAV: Record<ShellKind, NavEntry[]> = {
   admin: [
     { to: ROUTES.admin, label: 'Ringkasan' },
     { to: ROUTES.adminAccounts, label: 'Akun & izin' },
-    { to: ROUTES.adminPlatform, label: 'Profil platform' },
     { to: ROUTES.adminAudit, label: 'Log audit' },
     { to: ROUTES.adminIntegration, label: 'Integrasi' },
     { to: ROUTES.adminRequests, label: 'Permintaan data' },
@@ -349,41 +354,52 @@ export function Shell({
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const sidebarActiveTo = activeNavTo(sectionNav, pathname);
   const activePath = kind === 'respondent' ? ROUTES.home : sidebarActiveTo ?? pathname;
-  // Chrome baru untuk SELURUH halaman super admin: peran 'admin' (super_admin sudah dinormalisasi
-  // di store) DAN path salah satu halaman platform/operasional. Halaman organisasi (/admin/org*),
-  // org_admin, creator, dan responden tetap memakai pill + sidebar lama di bawah.
+  // Chrome baru untuk seluruh halaman super admin: peran 'admin' (super_admin sudah dinormalisasi
+  // di store) DAN path salah satu halaman platform/operasional. org_admin memakai chrome yang sama
+  // pada halaman organisasi dengan navigasi sendiri; creator dan responden tetap memakai chrome lama.
   // Hanya `session` (hasil bootstrap), bukan `activeSession` (memakai sesi mock saat request
   // /auth/me awal masih berjalan): sidebar tidak boleh berganti bentuk setelah bootstrap selesai.
   // Selama bootstrap belum selesai (`ready` false) chrome admin langsung dipakai agar sidebar tidak
   // berkedip pill lama lebih dulu; peran diverifikasi begitu sesi tersedia.
-  const usesAdminChrome = Boolean(kind === 'admin' && (!ready || session?.role === 'admin'));
+  const workspacePath = navPath(pathname);
+  const usesAdminChrome = Boolean(
+    kind === 'admin' && (!ready || session?.role === 'admin') && ADMIN_CHROME_PATHS.has(workspacePath),
+  );
+  // Ruang organisasi memakai chrome dasbor yang sama, dengan menu org_admin dan label peran.
+  // Path khusus org (/admin/org*, /creator/org) boleh optimistis selama bootstrap karena server memang
+  // menjaganya untuk org_admin; detail survei menunggu sesi agar creator tidak melihat chrome org.
+  const usesOrgChrome = Boolean(
+    (kind === 'creator' || kind === 'admin') &&
+      ((ORG_CHROME_PATHS.has(workspacePath) && (!ready || session?.role === 'org_admin')) ||
+        (ready && session?.role === 'org_admin' && workspacePath.startsWith(`${ROUTES.creator}/surveys/`))),
+  );
 
-  if (!chromeless && usesAdminChrome && ADMIN_CHROME_PATHS.has(navPath(pathname))) {
-    return (
-      <div className="admin-dash flex min-h-dvh flex-col bg-[var(--ad-bg)] text-[color:var(--ad-text)]">
-        <a
-          href="#konten-utama"
-          className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[60] focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-md focus:bg-action focus:px-4 focus:py-2 focus:text-n0"
-        >
-          Lewati ke konten utama
-        </a>
-
-        <AdminSidebar pathname={pathname} />
-
-        <div className="flex min-w-0 flex-1 flex-col lg:ps-64">
-          <main id="konten-utama" ref={mainRef} tabIndex={-1} className="flex-1 focus:outline-none">
-            <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 lg:px-8 lg:py-8">
-              {!hideHeading && (
-                <div className="flex flex-col gap-1.5">
-                  <h1 className="text-h1 font-bold wrap-break-word">{title}</h1>
-                  {subtitle && <p className="max-w-[70ch] text-body text-[color:var(--ad-muted)]">{subtitle}</p>}
-                </div>
-              )}
-              {children}
-            </div>
-          </main>
-        </div>
-      </div>
+  if (!chromeless && (usesAdminChrome || usesOrgChrome)) {
+    return usesOrgChrome ? (
+      <AdminShell
+        pathname={pathname}
+        title={title}
+        subtitle={subtitle}
+        hideHeading={hideHeading}
+        mainRef={mainRef}
+        navGroups={ORG_NAV_GROUPS}
+        navLabel="Navigasi organisasi"
+        brandLabel="Admin organisasi"
+        homeTo={ROUTES.adminOrg}
+        crumbFallback="Organisasi"
+      >
+        {children}
+      </AdminShell>
+    ) : (
+      <AdminShell
+        pathname={pathname}
+        title={title}
+        subtitle={subtitle}
+        hideHeading={hideHeading}
+        mainRef={mainRef}
+      >
+        {children}
+      </AdminShell>
     );
   }
 
@@ -433,7 +449,7 @@ export function Shell({
               <div className="mt-6 hidden lg:block">
                 <p className="font-mono text-annotation tracking-mono text-n600">AKUN</p>
                 <p className="mt-1 text-body-sm font-bold text-ink">{session.name}</p>
-                <p className="text-caption text-muted">{session.email}</p>
+                <p className="text-caption text-ink-muted">{session.email}</p>
               </div>
             )}
           </aside>
@@ -443,7 +459,7 @@ export function Shell({
           {!hideHeading && (
             <div className="mb-6 flex flex-col gap-2">
               <h1 className="text-h1 font-bold text-ink wrap-break-word">{title}</h1>
-              {subtitle && <p className="max-w-[70ch] text-body text-muted">{subtitle}</p>}
+              {subtitle && <p className="max-w-[70ch] text-body text-ink-muted">{subtitle}</p>}
             </div>
           )}
           {children}
@@ -456,7 +472,7 @@ export function Shell({
         <div className={`mx-auto flex max-w-[1200px] flex-col gap-2 px-4 lg:flex-row lg:items-center lg:justify-between lg:px-6 ${bottomInset ? 'pt-6 pb-24 lg:pb-6' : 'py-6'}`}>
           <div>
             <p className="text-body-sm font-bold text-ink">Svara</p>
-            <p className="text-caption text-muted">Instrumen berskala dan isian singkat, dikelola per versi.</p>
+            <p className="text-caption text-ink-muted">Instrumen berskala dan isian singkat, dikelola per versi.</p>
           </div>
           <PolicyLinks />
         </div>

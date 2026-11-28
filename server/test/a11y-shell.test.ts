@@ -106,7 +106,7 @@ function mobileAccessibleName(anchor: string): string {
   return [visible.replace(/<[^>]+>/g, ' '), ...alts].join(' ').replace(/\s+/g, ' ').trim();
 }
 
-async function signInAs(role: 'creator' | 'super_admin', mock: TestContext['mock']) {
+async function signInAs(role: 'creator' | 'super_admin' | 'org_admin', mock: TestContext['mock']) {
   const data: BootstrapData = {
     account: { id: 'u_uji', display_name: 'Akun Uji', email: 'uji@svara.local', role, status: 'active', organization_id: null },
     surveys: [], versions: [], profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [], invitations: [],
@@ -204,11 +204,17 @@ test('UIX-14: semua select, textarea, dan input di src memakai token batas denga
       checked.set(name, (checked.get(name) ?? 0) + 1);
     }
   }
-  const minimums = [['components/ui.tsx', 2], ['components/ui/input.tsx', 1], ['components/ui/select.tsx', 1], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2]] as const;
+  const minimums = [['components/ui.tsx', 2], ['components/ui/input.tsx', 1], ['screens/CreatorCore.tsx', 3], ['screens/CreatorData.tsx', 1], ['screens/Public.tsx', 2]] as const;
   for (const [file, minimum] of minimums) {
     const found = checked.get(file) ?? 0;
     assert.ok(found >= minimum, `Pemindaian harus memeriksa ≥ ${minimum} kontrol bertoken batas di ${file}, ditemukan ${found}`);
   }
+  /* Select registry memakai trigger tombol (Radix), bukan elemen <select>, jadi tidak terjaring
+     loop di atas. Kontraknya tetap sama: batas kontrol memakai token dengan kontras ≥ 3:1. */
+  const selectSource = readFileSync(new URL('../../src/components/ui/select.tsx', import.meta.url), 'utf8');
+  assert.ok(selectSource.includes('border-input'), 'Trigger Select harus memakai token batas --color-input');
+  const inputRatio = contrast('input', 'canvas');
+  assert.ok(inputRatio >= 3, `Batas input di atas canvas hanya ${inputRatio.toFixed(2)}:1 (butuh ≥ 3:1)`);
 });
 
 test('UIX-15: anotasi langkah di landing memakai token teks dengan kontras ≥ 4,5:1', () => {
@@ -262,7 +268,6 @@ test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda sel
   const CHROME_PAGES: Array<[string, string]> = [
     [ROUTES.admin, 'Ringkasan'],
     [ROUTES.adminAccounts, 'Akun &amp; izin'],
-    [ROUTES.adminPlatform, 'Profil platform'],
     [ROUTES.adminAudit, 'Log audit'],
     [ROUTES.adminIntegration, 'Integrasi'],
     [ROUTES.adminRequests, 'Permintaan data'],
@@ -277,9 +282,15 @@ test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda sel
     assert.match(current[0]!, new RegExp(`>${label}</a>$`));
   }
 
-  // Halaman di luar chrome (mis. organisasi) tetap memakai pill + sidebar lama, bukan sidebar admin.
+  // Ruang organisasi memakai sidebar organisasi, bukan chrome super admin atau pill lama.
+  await signInAs('org_admin', t.mock);
   const org = render(createElement(Shell, { kind: 'admin', title: 'Organisasi', children: 'isi' }), ROUTES.adminOrg);
-  assert.doesNotMatch(org, /aria-label="Navigasi admin"/, 'Chrome admin tidak boleh bocor ke halaman di luar daftar');
-  assert.match(org, /<nav\b[^>]*aria-label="Navigasi utama"/, 'Halaman di luar chrome tetap memakai pill lama');
-  assert.match(org, /aria-label="Navigasi bagian"/, 'Halaman di luar chrome tetap memakai sidebar lama');
+  assert.doesNotMatch(org, /aria-label="Navigasi admin"/, 'Chrome super admin tidak boleh bocor ke ruang organisasi');
+  assert.doesNotMatch(org, /<nav\b[^>]*aria-label="Navigasi utama"/, 'Ruang organisasi tidak boleh kembali ke pill lama');
+  const orgNav = /<nav\b[^>]*aria-label="Navigasi organisasi"[^>]*>[\s\S]*?<\/nav>/.exec(org)?.[0] ?? '';
+  assert.ok(orgNav, 'Halaman organisasi harus merender sidebar organisasi');
+  const orgItems = [...orgNav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
+  const orgCurrent = orgItems.filter((a) => /\baria-current="page"/.test(a));
+  assert.equal(orgCurrent.length, 1, 'Halaman organisasi harus menandai tepat satu item aktif');
+  assert.match(orgCurrent[0]!, />Organisasi<\/a>$/);
 });

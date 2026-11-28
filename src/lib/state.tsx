@@ -50,7 +50,6 @@ export const ROUTE_STATES: Record<RouteId, readonly StateCode[]> = {
   'admin-requests': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   'admin-org': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   'admin-org-evidence': ['default', 'empty', 'loading', 'error', 'validation', 'permission-denied', 'success'],
-  'admin-platform': ['default', 'loading', 'error', 'validation', 'permission-denied', 'success'],
   privacy: ['default', 'loading', 'error'],
   terms: ['default', 'loading', 'error'],
   notfound: ['default'],

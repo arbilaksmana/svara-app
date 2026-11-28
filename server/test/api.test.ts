@@ -2259,6 +2259,30 @@ test('GET/PUT /org/profile menghormati lingkup organisasi; mode persetujuan buka
   assert.equal('consent_mode' in savedProfile, false);
   assert.equal('respondent_age_category' in savedProfile, false);
 
+  // Tipe organisasi adalah daftar tertutup: nilai bebas ditolak, tipe baru yang terdaftar diterima.
+  const badType = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { organization_type: 'sekolah' },
+  });
+  assert.equal(badType.status, 422, 'tipe di luar daftar ditolak');
+  const badTypeBody = badType.json as { code?: string } | null;
+  assert.equal(badTypeBody?.code, 'validation_error');
+  const newType = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { organization_type: 'company' },
+  });
+  assert.equal(newType.status, 200, newType.text);
+  const newTypeProfile = (newType.json as { data: { profile: { organization_type: string } } }).data.profile;
+  assert.equal(newTypeProfile.organization_type, 'company');
+  const restoredType = await call('/org/profile', {
+    method: 'PUT',
+    cookie: orgAdmin,
+    body: { organization_type: 'school' },
+  });
+  assert.equal(restoredType.status, 200, restoredType.text);
+
   // BF-06: memperpendek retention_days menghapus data pada run retensi berikutnya -> wajib konfirmasi.
   await call('/org/profile', { method: 'PUT', cookie: orgAdmin, body: { retention_days: 365 } });
   const shrink = await call('/org/profile', {

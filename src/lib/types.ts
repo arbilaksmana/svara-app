@@ -1,6 +1,13 @@
 /** Tipe domain Modul 14. Mengikuti PRD §6 dan §1.2. Semua data bersifat sintetis. */
 
-export type OrganizationType = 'school' | 'organization';
+export type OrganizationType =
+  | 'school'
+  | 'higher_education'
+  | 'company'
+  | 'cooperative'
+  | 'government'
+  | 'community'
+  | 'organization';
 /** `wajib_upload` hanya berlaku untuk survei organisasi; survei personal selalu `tidak`. */
 export type ConsentRequired = 'tidak' | 'wajib_upload';
 
@@ -162,7 +169,7 @@ export interface Response {
 
 export type ConsentStatus = 'granted' | 'pending' | 'withdrawn';
 /** `self_attested`: referensi diisi responden dan belum diverifikasi pengelola. */
-export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'self_attested' | 'verified' | 'revoked';
+export type GuardianEvidenceStatus = 'not_required' | 'pending' | 'self_attested' | 'verified' | 'rejected' | 'revoked';
 
 export interface ConsentRecord {
   id: string;
@@ -221,6 +228,12 @@ export interface OrgProfile {
   notice_version: string;
 }
 
+/** Versi notice yang sah dipilih untuk notice_version profil; teksnya tampil ke responden di formulir publik. */
+export interface OrgNoticeVersion {
+  version: string;
+  effective_date: string;
+}
+
 /** Profil platform dipakai akun tanpa organisasi; diedit super_admin lewat /admin/platform. */
 export interface PlatformProfile {
   id: string;
@@ -273,7 +286,7 @@ export interface OrgGuardianEvidence {
   survey_title: string;
   basis: string;
   recorded_at: string;
-  guardian_evidence_status: 'self_attested' | 'verified' | 'rejected';
+  guardian_evidence_status: GuardianEvidenceStatus;
   guardian_evidence_ref: string | null;
   guardian_evidence_file: string | null;
   guardian_evidence_mime: string | null;

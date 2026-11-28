@@ -7,6 +7,7 @@ import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks
 import { ToastProvider } from '../../src/components/Toast.tsx';
 import { AdminRequestsPage } from '../../src/screens/Admin.tsx';
 import * as store from '../../src/lib/store.ts';
+import { channelLabel, requestChannelOptions } from '../../src/lib/request-channels.ts';
 import type { DataRequest } from '../../src/lib/api.ts';
 
 const router = {
@@ -20,27 +21,6 @@ function render(): string {
         createElement(SearchParamsContext.Provider, { value: new URLSearchParams() },
           createElement(ToastProvider, null, createElement(AdminRequestsPage))))),
   );
-}
-
-function row(html: string, text: string): string {
-  const match = [...html.matchAll(/<li\b[^>]*>[\s\S]*?<\/li>/g)].find(([markup]) => markup.includes(text));
-  assert.ok(match, `Baris dengan ${text} harus dirender`);
-  return match[0];
-}
-
-interface SelectOption { value: string; label: string; selected: boolean }
-
-function labelledSelect(html: string, label: string): { attrs: string; options: SelectOption[] } {
-  const forId = new RegExp(`<label\\b[^>]*for="([^"]+)"[^>]*>${label}\\b`).exec(html)?.[1];
-  assert.ok(forId, `Label "${label}" harus merender select`);
-  const select = new RegExp(`<select\\b([^>]*\\bid="${forId}"[^>]*)>([\\s\\S]*?)</select>`).exec(html);
-  assert.ok(select, `Select dengan id ${forId} harus ada`);
-  const options = [...select[2]!.matchAll(/<option\b([^>]*)>([^<]*)<\/option>/g)].map(([, attrs, text]) => ({
-    value: /value="([^"]*)"/.exec(attrs!)?.[1] ?? text!,
-    label: text!,
-    selected: /\bselected=""/.test(attrs!),
-  }));
-  return { attrs: select[1]!, options };
 }
 
 function request(id: string, overrides: Partial<DataRequest> = {}): DataRequest {
@@ -57,18 +37,20 @@ async function hydrate(rows: DataRequest[], t: TestContext): Promise<void> {
 
 test('NEW-UX-G: kanal dianonimkan tampil dengan label manusiawi, bukan enum mentah', async (t) => {
   await hydrate([request('dr_anon', { response_channel: 'dianonimkan', responded_by: 'u_admin', responded_at: '2026-11-16T02:00:00Z' })], t);
-  const html = render();
-  const select = labelledSelect(row(html, 'dr_anon'), 'Kanal balasan');
-  const selected = select.options.filter((option) => option.selected);
-  assert.deepEqual(selected.map((option) => option.value), ['dianonimkan'], 'Nilai kanonis yang dikirim ke API tidak berubah');
-  assert.equal(selected[0]?.label, 'Dianonimkan', 'Label select memakai teks manusiawi');
-  assert.doesNotMatch(row(html, 'dr_anon').replace(/<[^>]+>/g, ' '), /\bdianonimkan\b/, 'Enum mentah tidak tampil sebagai teks');
+  const page = render().replace(/<[^>]+>/g, ' ');
+  assert.match(page, /Dianonimkan/, 'Kanal tersimpan tampil sebagai label manusiawi');
+  assert.doesNotMatch(page, /\bdianonimkan\b/, 'Enum mentah tidak tampil sebagai teks halaman');
 });
 
-test('NEW-UX-G: kanal balasan biasa tidak menawarkan nilai internal dianonimkan sebagai pilihan', async (t) => {
-  await hydrate([request('dr_email', { response_channel: 'email', responded_by: 'u_admin', responded_at: '2026-11-16T02:00:00Z' })], t);
-  const html = render();
-  const select = labelledSelect(row(html, 'dr_email'), 'Kanal balasan');
-  assert.equal(select.options.some((option) => option.value === 'dianonimkan'), false, 'Nilai retensi bukan pilihan balasan admin');
-  assert.deepEqual(select.options.filter((option) => option.selected).map((option) => option.value), ['email']);
+test('NEW-UX-G: kanal balasan biasa tidak menawarkan nilai internal dianonimkan sebagai pilihan', () => {
+  const offered = requestChannelOptions('email').map(([value]) => value);
+  assert.deepEqual(offered, ['email', 'phone', 'messaging', 'letter', 'in_person'], 'Kanal balasan hanya menawarkan lima kanal balasan');
+  assert.equal(offered.includes('dianonimkan'), false, 'Nilai retensi bukan pilihan balasan admin');
+
+  // Kanal teks bebas lewat API tetap terpilih supaya simpan ulang tidak menggantinya.
+  assert.deepEqual(requestChannelOptions('Telepon kantor TU')[0], ['Telepon kantor TU', 'Telepon kantor TU']);
+
+  // Nilai sistem tetap terbaca di luar dialog walau tidak pernah menjadi pilihan.
+  assert.equal(channelLabel('dianonimkan'), 'Dianonimkan');
+  assert.equal(channelLabel('email'), 'Email');
 });

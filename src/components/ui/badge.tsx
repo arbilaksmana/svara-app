@@ -1,27 +1,56 @@
-import type { ComponentProps } from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
-import { cn } from '../../lib/utils';
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { cn } from "@/lib/utils"
+import { Slot } from "radix-ui"
 
-/** Lencana gaya shadcn bertoken Svara; varian success/warning/danger dipakai status kartu dan tabel Ringkasan. */
 const badgeVariants = cva(
-  'inline-flex w-fit shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-caption font-bold whitespace-nowrap',
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
-        default: 'bg-[var(--ad-accent-soft)] text-[color:var(--ad-accent)]',
-        secondary: 'bg-[var(--ad-soft)] text-[color:var(--ad-muted)]',
-        success: 'bg-[var(--ad-success-soft)] text-[color:var(--ad-success)]',
-        warning: 'bg-[var(--ad-warning-soft)] text-[color:var(--ad-text)]',
-        danger: 'bg-[var(--ad-danger-soft)] text-[color:var(--ad-danger)]',
-        outline: 'border border-[var(--ad-border)] text-[color:var(--ad-muted)]',
+        default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+        secondary:
+          "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+        /* Tone netral domain (mis. status "dinonaktifkan") memakai gaya secondary. */
+        neutral:
+          "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+        destructive:
+          "bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90",
+        outline:
+          "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 [a&]:hover:underline",
+        /* Status operasional admin memakai palet Tailwind default (bukan warna merek). */
+        success: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400",
+        warning: "bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-400",
+        info: "bg-sky-100 text-sky-900 dark:bg-sky-500/15 dark:text-sky-400",
+        danger:
+          "bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90",
       },
     },
-    defaultVariants: { variant: 'default' },
-  },
-);
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+)
 
-export interface BadgeProps extends ComponentProps<'span'>, VariantProps<typeof badgeVariants> {}
+function Badge({
+  className,
+  variant = "default",
+  asChild = false,
+  ...props
+}: React.ComponentProps<"span"> &
+  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+  const Comp = asChild ? Slot.Root : "span"
 
-export function Badge({ className, variant, ...props }: BadgeProps) {
-  return <span data-slot="badge" className={cn(badgeVariants({ variant }), className)} {...props} />;
+  return (
+    <Comp
+      data-slot="badge"
+      data-variant={variant}
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    />
+  )
 }
+
+export { Badge, badgeVariants }

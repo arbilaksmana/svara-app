@@ -6,6 +6,7 @@ import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared
 import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime.js';
 import { CreatorListPage, EditorPage, PublishPage, SurveyNav } from '../../src/screens/CreatorCore.tsx';
 import { HistoryPage, ResultsPage, SettingsPage, SharePage } from '../../src/screens/CreatorData.tsx';
+import { OrgSurveysPage } from '../../src/screens/OrgSurveys.tsx';
 import { ToastProvider } from '../../src/components/Toast.tsx';
 import * as store from '../../src/lib/store.ts';
 import type { BootstrapData } from '../../src/lib/api.ts';
@@ -120,6 +121,15 @@ test('ORS-02a: org_admin organisasi X mendapat tombol kelola di survei organisas
   ]) {
     assert.doesNotMatch(screen, /Survei tidak ditemukan/, 'Layar kelola tidak boleh menolak org_admin organisasi pemilik survei');
   }
+});
+
+test('ORS-02e: daftar survei org_admin menawarkan salin tanpa kontrol pembuatan draf creator', async (t) => {
+  await hydrate(ORG_X_ADMIN, t.mock);
+  const html = render(createElement(OrgSurveysPage));
+  const orgRow = row(html, IN_ORG_X.title);
+  assert.match(orgRow, /Buka editor/);
+  assert.match(orgRow, /Salin survei/);
+  assert.doesNotMatch(html, /Lingkup draf baru|Buat draf baru|Hanya creator dapat membuat survei/);
 });
 
 test('ORS-02b: org_admin organisasi X tidak mendapat tombol kelola di survei organisasi Y', async (t) => {

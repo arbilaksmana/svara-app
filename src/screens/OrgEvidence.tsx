@@ -2,21 +2,36 @@
 
 import { useEffect, useState } from 'react';
 import { Shell } from '../components/Shell';
+import { Code } from '../components/ui';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
+import { BusyButton } from '../components/BusyButton';
+import { Badge } from '../components/ui/badge';
 import {
-  Badge,
-  Button,
   Card,
-  Code,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  Field,
-  LoadingState,
-  SectionTitle,
-  Table,
-  Td,
-  TextArea,
-} from '../components/ui';
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import { DataTable } from '../components/data-table';
+import { Field } from '../components/ui/field';
+import { Skeleton } from '../components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import { Textarea } from '../components/ui/textarea';
 import { StateView } from '../components/StateView';
 import { useScreenState } from '../lib/state';
 import { useToast } from '../components/Toast';
@@ -27,16 +42,24 @@ import {
   reviewOrgGuardianEvidence,
 } from '../lib/api';
 import { GUARDIAN_EVIDENCE_STATUS_LABEL, GUARDIAN_EVIDENCE_STATUS_TONE } from '../lib/labels';
-import { formatBytes, formatWIB } from '../lib/summary';
+import { Check } from 'runeicons-react/icons/Check';
+import { X } from 'runeicons-react/icons/X';
+import { withIconClass } from '../components/rune-icon';
+import { formatBytes, formatWIB, formatWIBCompact } from '../lib/summary';
+import type { ColumnDef } from '@tanstack/react-table';
 import type { OrgGuardianEvidence } from '../lib/types';
 
-type EvidenceFilter = 'self_attested' | 'verified' | 'rejected';
+type EvidenceFilter = 'all' | 'self_attested' | 'verified' | 'rejected';
 type Decision = 'verified' | 'rejected';
+
+const CheckIcon = withIconClass(Check);
+const XIcon = withIconClass(X);
 
 const FILTERS: Array<{ value: EvidenceFilter; label: string }> = [
   { value: 'self_attested', label: 'Menunggu tinjauan' },
   { value: 'verified', label: 'Terverifikasi' },
   { value: 'rejected', label: 'Ditolak' },
+  { value: 'all', label: 'Semua bukti' },
 ];
 
 const DECISION_COPY: Record<Decision, { title: string; confirm: string }> = {
@@ -57,6 +80,10 @@ const EMPTY_COPY: Record<EvidenceFilter, { title: string; detail: string }> = {
     title: 'Belum ada bukti ditolak',
     detail: 'Bukti yang Anda tolak akan tercatat di sini beserta waktu dan catatannya.',
   },
+  all: {
+    title: 'Belum ada bukti pendukung',
+    detail: 'Unggahan bukti pendukung dari survei organisasi Anda akan muncul di sini.',
+  },
 };
 
 function fileLabel(row: OrgGuardianEvidence): string {
@@ -64,6 +91,149 @@ function fileLabel(row: OrgGuardianEvidence): string {
   return row.guardian_evidence_size === null
     ? row.guardian_evidence_file
     : `${row.guardian_evidence_file} · ${formatBytes(row.guardian_evidence_size)}`;
+}
+
+/** Kolom antrean bukti, gaya tabel dasbor: identitas, status, lalu aksi di ujung kanan. */
+function evidenceColumns(
+  onDecide: (row: OrgGuardianEvidence, decision: Decision) => void,
+): ColumnDef<OrgGuardianEvidence>[] {
+  return [
+    {
+      accessorKey: 'recorded_at',
+      header: 'Waktu',
+      meta: { className: 'hidden sm:table-cell align-top' },
+      cell: ({ row }) => (
+        <div className="min-w-0">
+          <p className="text-body-sm text-foreground">
+            <span className="sm:hidden">{formatWIBCompact(row.original.recorded_at)}</span>
+            <span className="hidden sm:inline">{formatWIB(row.original.recorded_at)}</span>
+          </p>
+          <span className="hidden font-mono text-annotation tracking-mono text-muted-foreground sm:inline">
+            <Code>{row.original.consent_id}</Code>
+          </span>
+        </div>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      meta: { className: 'min-w-40' },
+      cell: ({ row }) => (
+        <div className="min-w-0">
+          <Badge
+            variant={
+              GUARDIAN_EVIDENCE_STATUS_TONE[row.original.guardian_evidence_status] ?? 'secondary'
+            }
+            aria-label={
+              GUARDIAN_EVIDENCE_STATUS_LABEL[row.original.guardian_evidence_status] ??
+              row.original.guardian_evidence_status
+            }
+          >
+            <span className="sm:hidden" aria-hidden="true">
+              {row.original.guardian_evidence_status === 'self_attested'
+                ? 'Tunggu'
+                : (GUARDIAN_EVIDENCE_STATUS_LABEL[row.original.guardian_evidence_status] ??
+                  row.original.guardian_evidence_status)}
+            </span>
+            <span className="hidden sm:inline" aria-hidden="true">
+              {GUARDIAN_EVIDENCE_STATUS_LABEL[row.original.guardian_evidence_status] ??
+                row.original.guardian_evidence_status}
+            </span>
+          </Badge>
+          {row.original.guardian_evidence_reviewed_at && (
+            <p className="mt-1 text-caption text-muted-foreground">
+              {formatWIB(row.original.guardian_evidence_reviewed_at)}
+              {row.original.guardian_evidence_reviewed_by && (
+                <>
+                  {' · '}
+                  <Code>{row.original.guardian_evidence_reviewed_by}</Code>
+                </>
+              )}
+            </p>
+          )}
+          {row.original.guardian_evidence_review_note && (
+            <p className="mt-1 break-words text-caption text-foreground">
+              {row.original.guardian_evidence_review_note}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'survey_title',
+      header: 'Survei',
+      cell: ({ row }) => (
+        <div className="min-w-0">
+          <p className="min-w-0 truncate font-bold text-foreground">{row.original.survey_title}</p>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {row.original.has_file ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                {row.original.guardian_evidence_mime?.startsWith('image/') && (
+                  <img
+                    src={guardianEvidenceFileUrl(row.original.consent_id)}
+                    alt={`Pratinjau ${row.original.guardian_evidence_file ?? 'bukti pendukung'}`}
+                    width={32}
+                    height={32}
+                    loading="lazy"
+                    className="size-8 shrink-0 rounded-sm border border-border object-cover"
+                  />
+                )}
+                <a
+                  href={guardianEvidenceFileUrl(row.original.consent_id)}
+                  aria-label={`Unduh berkas ${row.original.guardian_evidence_file ?? 'bukti pendukung'}`}
+                  className="text-caption font-bold text-primary underline decoration-1 underline-offset-4"
+                >
+                  {fileLabel(row.original)}
+                </a>
+              </span>
+            ) : (
+              <span className="text-caption text-muted-foreground">Tanpa berkas</span>
+            )}
+            {row.original.guardian_evidence_ref && (
+              <span className="min-w-0 break-words text-caption text-muted-foreground">
+                {row.original.guardian_evidence_ref}
+              </span>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'decision',
+      header: '',
+      /** Aksi tetap terjangkau saat tabel bergulir horizontal di layar sempit. */
+      meta: { className: 'sticky right-0 z-10 border-l border-border bg-card sm:static sm:border-l-0' },
+      cell: ({ row }) =>
+        row.original.guardian_evidence_status === 'self_attested' ? (
+          <div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
+            <BusyButton
+              variant="ghost"
+              size="icon"
+              aria-label="Verifikasi bukti"
+              title="Verifikasi"
+              className="text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:hover:bg-emerald-500/15"
+              onClick={() => onDecide(row.original, 'verified')}
+            >
+              <CheckIcon className="size-4" />
+            </BusyButton>
+            <BusyButton
+              variant="ghost"
+              size="icon"
+              aria-label="Tolak bukti"
+              title="Tolak"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onDecide(row.original, 'rejected')}
+            >
+              <XIcon className="size-4" />
+            </BusyButton>
+          </div>
+        ) : (
+          <span className="block text-end text-caption text-muted-foreground">
+            {row.original.guardian_evidence_status === 'pending' ? 'Belum diunggah' : '—'}
+          </span>
+        ),
+    },
+  ];
 }
 
 export function OrgEvidencePage() {
@@ -116,6 +286,24 @@ export function OrgEvidencePage() {
       .finally(() => setBusy(false));
   };
 
+  const statusFilter = (
+    <Select
+      value={filter}
+      onValueChange={(value) => setFilter(value as EvidenceFilter)}
+    >
+      <SelectTrigger aria-label="Filter status bukti" className="w-48">
+        <SelectValue>{FILTERS.find((option) => option.value === filter)?.label}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {FILTERS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
   return (
     <Shell
       kind="admin"
@@ -130,130 +318,99 @@ export function OrgEvidencePage() {
         emptyDetail={EMPTY_COPY[filter].detail}
       >
         <div className="flex flex-col gap-5">
-          <Card className="flex flex-col gap-4">
-            <SectionTitle>Antrean tinjauan</SectionTitle>
-            <Field id="evidence-status" label="Status bukti">
-              {(aria) => (
-                <select
-                  {...aria}
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value as EvidenceFilter)}
-                  className="min-h-[52px] w-full rounded-md border border-control-border bg-n0 px-3 text-body-sm text-ink focus:border-action md:max-w-xs"
-                >
-                  {FILTERS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+          <Card>
+            <CardHeader>
+              <CardTitle>Antrean tinjauan</CardTitle>
+              <CardDescription>
+                Berkas hanya dapat diunduh oleh admin organisasi pemilik survei; tautan unduhan
+                memerlukan sesi aktif.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {error ? (
+                <Alert variant="destructive" className="flex flex-col items-start gap-3">
+                  <AlertTitle>Bukti pendukung gagal dimuat</AlertTitle>
+                  <AlertDescription className="text-body-sm">
+                    <p>{error} Tabel kosong bukan berarti tidak ada bukti.</p>
+                    <BusyButton
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() => setReloadKey((key) => key + 1)}
+                    >
+                      Coba lagi
+                    </BusyButton>
+                  </AlertDescription>
+                </Alert>
+              ) : rows === null ? (
+                <div aria-busy="true" aria-live="polite" className="flex flex-col gap-3">
+                  <div className="flex justify-end">{statusFilter}</div>
+                  <p className="text-body-sm text-muted-foreground">Memuat bukti pendukung…</p>
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <Skeleton key={index} className="h-16 w-full rounded-md" />
                   ))}
-                </select>
+                </div>
+              ) : (
+                <DataTable
+                  columns={evidenceColumns(openDecision)}
+                  data={rows}
+                  caption="Antrean bukti pendukung, status, dan keputusan"
+                  emptyMessage={EMPTY_COPY[filter].title}
+                  filterPlaceholder="Cari survei atau kode"
+                  filterText={(row) =>
+                    `${row.survey_title} ${row.consent_id} ${row.guardian_evidence_file ?? ''} ${
+                      row.guardian_evidence_ref ?? ''
+                    } ${GUARDIAN_EVIDENCE_STATUS_LABEL[row.guardian_evidence_status] ?? ''}`
+                  }
+                  toolbarExtra={statusFilter}
+                />
               )}
-            </Field>
-            <p className="text-body-sm text-muted">
-              Berkas hanya dapat diunduh oleh admin organisasi pemilik survei; tautan unduhan memerlukan sesi aktif.
-            </p>
-
-            {error ? (
-              <ErrorState
-                title="Bukti pendukung gagal dimuat"
-                detail={`${error} Tabel kosong bukan berarti tidak ada bukti.`}
-                action={<Button variant="secondary" onClick={() => setReloadKey((key) => key + 1)}>Coba lagi</Button>}
-              />
-            ) : rows === null ? (
-              <LoadingState label="Memuat bukti pendukung…" rows={3} />
-            ) : rows.length === 0 ? (
-              <EmptyState title={EMPTY_COPY[filter].title}>{EMPTY_COPY[filter].detail}</EmptyState>
-            ) : (
-              <Table head={['Waktu', 'Survei', 'Berkas', 'Catatan', 'Status', 'Keputusan']}>
-                {rows.map((row) => (
-                  <tr key={row.consent_id}>
-                    <Td>
-                      {formatWIB(row.recorded_at)}
-                      <span className="mt-1 block font-mono text-annotation tracking-mono text-muted"><Code>{row.consent_id}</Code></span>
-                    </Td>
-                    <Td>{row.survey_title}</Td>
-                    <Td>
-                      {row.has_file ? (
-                        <div className="flex min-w-0 items-center gap-2">
-                          {row.guardian_evidence_mime?.startsWith('image/') && (
-                            <img
-                              src={guardianEvidenceFileUrl(row.consent_id)}
-                              alt={`Pratinjau ${row.guardian_evidence_file ?? 'bukti pendukung'}`}
-                              width={44}
-                              height={44}
-                              loading="lazy"
-                              className="size-11 shrink-0 rounded-sm border border-n200 object-cover"
-                            />
-                          )}
-                          <div className="min-w-0">
-                            <a
-                              href={guardianEvidenceFileUrl(row.consent_id)}
-                              aria-label={`Unduh berkas ${row.guardian_evidence_file ?? 'bukti pendukung'}`}
-                              className="inline-flex min-h-[24px] items-center text-body-sm font-bold text-action underline decoration-1 underline-offset-4"
-                            >
-                              Unduh berkas
-                            </a>
-                            <p className="break-words text-caption text-muted">{fileLabel(row)}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-caption text-muted">Tanpa berkas</span>
-                      )}
-                    </Td>
-                    <Td>{row.guardian_evidence_ref ?? <span className="text-muted">—</span>}</Td>
-                    <Td>
-                      <Badge tone={GUARDIAN_EVIDENCE_STATUS_TONE[row.guardian_evidence_status] ?? 'neutral'}>
-                        {GUARDIAN_EVIDENCE_STATUS_LABEL[row.guardian_evidence_status] ?? row.guardian_evidence_status}
-                      </Badge>
-                      {row.guardian_evidence_reviewed_at && (
-                        <p className="mt-1 text-caption text-muted">
-                          {formatWIB(row.guardian_evidence_reviewed_at)}
-                          {row.guardian_evidence_reviewed_by && <> · <Code>{row.guardian_evidence_reviewed_by}</Code></>}
-                        </p>
-                      )}
-                      {row.guardian_evidence_review_note && (
-                        <p className="mt-1 break-words text-caption text-ink">{row.guardian_evidence_review_note}</p>
-                      )}
-                    </Td>
-                    <Td>
-                      {row.guardian_evidence_status === 'self_attested' ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button variant="secondary" onClick={() => openDecision(row, 'verified')}>Verifikasi</Button>
-                          <Button variant="danger" onClick={() => openDecision(row, 'rejected')}>Tolak</Button>
-                        </div>
-                      ) : (
-                        <span className="text-caption text-muted">Sudah diputuskan</span>
-                      )}
-                    </Td>
-                  </tr>
-                ))}
-              </Table>
-            )}
+            </CardContent>
           </Card>
         </div>
 
-        <ConfirmDialog
+        <Dialog
           open={target !== null}
-          title={target ? DECISION_COPY[target.decision].title : ''}
-          detail={target ? `${target.row.survey_title} · bukti dicatat ${formatWIB(target.row.recorded_at)}. Keputusan berlaku untuk catatan persetujuan ${target.row.consent_id} dan tercatat di audit organisasi.` : ''}
-          confirmLabel={target ? DECISION_COPY[target.decision].confirm : ''}
-          tone={target?.decision === 'rejected' ? 'danger' : 'primary'}
-          busy={busy}
-          onClose={() => { if (!busy) setTarget(null); }}
-          onConfirm={submitDecision}
+          onOpenChange={(next) => {
+            if (!next && !busy) setTarget(null);
+          }}
         >
-          <Field
-            id="evidence-note"
-            label="Catatan keputusan (opsional)"
-            hint="Maksimal 500 karakter. Catatan tampil di riwayat bukti pendukung."
-          >
-            {(aria) => (
-              <TextArea
-                {...aria}
-                value={note}
-                maxLength={500}
-                onChange={(event) => setNote(event.target.value)}
-              />
-            )}
-          </Field>
-        </ConfirmDialog>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{target ? DECISION_COPY[target.decision].title : ''}</DialogTitle>
+              <DialogDescription>
+                {target
+                  ? `${target.row.survey_title} · bukti dicatat ${formatWIB(target.row.recorded_at)}. Keputusan berlaku untuk catatan persetujuan ${target.row.consent_id} dan tercatat di audit organisasi.`
+                  : ''}
+              </DialogDescription>
+            </DialogHeader>
+            <Field
+              id="evidence-note"
+              label="Catatan keputusan (opsional)"
+              hint="Maksimal 500 karakter. Catatan tampil di riwayat bukti pendukung."
+            >
+              {(aria) => (
+                <Textarea
+                  {...aria}
+                  value={note}
+                  maxLength={500}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+              )}
+            </Field>
+            <DialogFooter>
+              <BusyButton variant="outline" disabled={busy} onClick={() => setTarget(null)}>
+                Batal
+              </BusyButton>
+              <BusyButton
+                variant={target?.decision === 'rejected' ? 'destructive' : 'default'}
+                loading={busy}
+                onClick={submitDecision}
+              >
+                {target ? DECISION_COPY[target.decision].confirm : ''}
+              </BusyButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </StateView>
     </Shell>
   );

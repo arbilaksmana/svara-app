@@ -1,5 +1,5 @@
-/** Entri navigasi: tujuan rute dan label yang tampil. */
-export type NavEntry = { to: string; label: string };
+/** Entri navigasi: tujuan rute dan label yang tampil. `aliases` ikut menyorot entri untuk rute turunan di luar prefix `to`. */
+export type NavEntry = { to: string; label: string; aliases?: readonly string[] };
 
 /** Normalisasi path: buang query/hash dan garis miring penutup (kecuali akar). */
 export function navPath(value: string): string {
@@ -13,12 +13,14 @@ export function navPath(value: string): string {
  */
 export function activeNavTo(entries: NavEntry[], pathname: string): string | undefined {
   const path = navPath(pathname);
-  let best: NavEntry | undefined;
+  let best: { entry: NavEntry; length: number } | undefined;
   for (const entry of entries) {
-    const to = navPath(entry.to);
-    if (path === to || path.startsWith(to === '/' ? '/' : `${to}/`)) {
-      if (!best || to.length > navPath(best.to).length) best = entry;
+    for (const target of [entry.to, ...(entry.aliases ?? [])]) {
+      const to = navPath(target);
+      if (path === to || path.startsWith(to === '/' ? '/' : `${to}/`)) {
+        if (!best || to.length > best.length) best = { entry, length: to.length };
+      }
     }
   }
-  return best?.to;
+  return best?.entry.to;
 }

@@ -30,7 +30,7 @@ export function GuardianEvidenceSummary({ status }: { status: string }) {
   const { text, badge } = guardianEvidencePresentation(status);
   return (
     <div>
-      <dt className="text-caption font-bold text-muted">Bukti pendukung</dt>
+      <dt className="text-caption font-bold text-ink-muted">Bukti pendukung</dt>
       <dd className="mt-1 flex flex-wrap items-center gap-2 text-ink">
         <span>{text}</span>
         <Badge tone={status === 'verified' ? 'success' : status === 'revoked' ? 'danger' : 'neutral'}>{badge}</Badge>

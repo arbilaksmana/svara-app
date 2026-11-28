@@ -29,7 +29,7 @@ export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: st
 }
 
 export function Muted({ children }: { children: ReactNode }) {
-  return <p className="text-body-sm text-muted">{children}</p>;
+  return <p className="text-body-sm text-ink-muted">{children}</p>;
 }
 
 /* ---------- Surface ---------- */
@@ -251,7 +251,7 @@ export function Field({ id, label, hint, error, required, announceError = true, 
         {required && <span className="sr-only"> (wajib)</span>}
       </label>
       {children({ id, 'aria-describedby': describedBy, 'aria-invalid': Boolean(error), 'aria-required': required || undefined })}
-      {hint && <p id={`${id}-hint`} className="text-caption text-muted">{hint}</p>}
+      {hint && <p id={`${id}-hint`} className="text-caption text-ink-muted">{hint}</p>}
       {error && <p id={`${id}-error`} role={announceError ? 'alert' : undefined} className="text-caption font-bold text-danger">{error}</p>}
     </div>
   );
@@ -351,7 +351,7 @@ export function EmptyState({ title, children, action }: { title: string; childre
   return (
     <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-n200 bg-n50 p-6">
       <p className="text-h3 font-bold text-ink">{title}</p>
-      <div className="text-body-sm text-muted">{children}</div>
+      <div className="text-body-sm text-ink-muted">{children}</div>
       {action}
     </div>
   );
@@ -418,7 +418,7 @@ export function ConfirmDialog({
     >
       <div className="p-5">
         <h2 id={titleId} className="text-h3 font-bold text-ink">{title}</h2>
-        <p id={detailId} className="mt-2 text-body-sm text-muted">{detail}</p>
+        <p id={detailId} className="mt-2 text-body-sm text-ink-muted">{detail}</p>
         {children && <div className="mt-4">{children}</div>}
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={busy}>{cancelLabel}</Button>
@@ -432,7 +432,7 @@ export function ConfirmDialog({
 export function LoadingState({ label = 'Memuat data contoh…', rows = 3 }: { label?: string; rows?: number }) {
   return (
     <div aria-busy="true" aria-live="polite" className="flex flex-col gap-3">
-      <p className="text-body-sm text-muted">{label}</p>
+      <p className="text-body-sm text-ink-muted">{label}</p>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="h-12 animate-pulse rounded-md bg-n100 motion-reduce:animate-none" />
       ))}
@@ -507,7 +507,7 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
   const [viewportRef, overflows] = useOverflowX<HTMLDivElement>();
   return (
     <div className="min-w-0">
-      {overflows && <p className="mb-2 text-caption text-muted">Geser tabel ke samping untuk melihat semua kolom.</p>}
+      {overflows && <p className="mb-2 text-caption text-ink-muted">Geser tabel ke samping untuk melihat semua kolom.</p>}
       <div
         ref={minWidth ? viewportRef : undefined}
         className="-mx-4 overflow-x-auto overscroll-x-contain px-4 sm:mx-0 sm:px-0"
@@ -524,7 +524,7 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
           <thead>
             <tr className="border-b border-n200">
               {head.map((h) => (
-                <th key={h} scope="col" className="break-words py-2 pe-2 font-bold text-muted last:pe-0">{h}</th>
+                <th key={h} scope="col" className="break-words py-2 pe-2 font-bold text-ink-muted last:pe-0">{h}</th>
               ))}
             </tr>
           </thead>
@@ -547,7 +547,7 @@ export function Th({ children, className = '' }: { children: ReactNode; classNam
 
 export function PolicyLinks({ className = '' }: { className?: string }) {
   return (
-    <p className={`flex flex-wrap items-center gap-x-4 text-body-sm text-muted ${className}`}>
+    <p className={`flex flex-wrap items-center gap-x-4 text-body-sm text-ink-muted ${className}`}>
       <PlainLink to="/privacy" className="min-h-[44px]">Kebijakan privasi</PlainLink>
       <PlainLink to="/terms" className="min-h-[44px]">Ketentuan layanan</PlainLink>
     </p>
@@ -560,7 +560,7 @@ export function PolicyLinks({ className = '' }: { className?: string }) {
  */
 export function ContactChannel({ contact, empty = 'Belum ditetapkan pengendali.' }: { contact: string | null; empty?: string }) {
   const value = contact?.trim() ?? '';
-  if (!value) return <span className="text-muted">{empty}</span>;
+  if (!value) return <span className="text-ink-muted">{empty}</span>;
   const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   const href = email ? `mailto:${value}` : /^https?:\/\//.test(value) ? value : null;
   if (!href) return <>{value}</>;

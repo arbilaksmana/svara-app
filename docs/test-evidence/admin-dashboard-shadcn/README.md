@@ -2,27 +2,32 @@
 
 Diambil dari worktree `admin-dashboard-shadcn-2` pada dev server terisolasi
 (`next dev -p 4100`, API `:4101`, database `svara_admin2` di container `svara-app-db-1`)
-dengan data seed demo + 18 respons historis tambahan (Jun–Okt 2026) di database uji
-itu saja, supaya grafik 6 bulan dan badge tren terisi nyata.
+dengan data seed demo. Capture ringkasan/tren memakai 18 respons historis tambahan (Jun–Okt 2026)
+di database uji itu saja, supaya grafik 6 bulan dan badge tren terisi nyata; capture akun/izin dan
+retensi (27 Nov 2026) memakai seed demo saja karena database uji sudah di-reset ulang.
 
 App belum punya mode gelap; halaman admin hanya dirender terang, termasuk saat OS memakai
 `prefers-color-scheme: dark`.
 
-Chrome admin (sidebar + header) kini dipakai keenam halaman; pill lama hanya bertahan
+Chrome admin (sidebar + header) kini dipakai kelima halaman; pill lama hanya bertahan
 di luar `/admin`.
 
 | Berkas | Isi |
 | --- | --- |
 | `ringkasan-desktop-1440-light.png` | `/admin` desktop 1440 — empat kartu KPI (label + angka saja), tren 6 bulan dengan pemilih rentang, tabel per pembuat/survei |
-| `akun-izin-desktop-1440-light.png` | `/admin/accounts` desktop — tabel akun, peran, organisasi, 6 akun seed |
-| `profil-platform-desktop-1440-light.png` | `/admin/platform` desktop — kartu profil platform |
-| `log-audit-desktop-1440-light.png` | `/admin/audit` desktop — filter + DataTable, 40 entri operasional |
+| `akun-izin-desktop-1440-light.png` | `/admin/accounts` desktop 1440 — tabel akun compact, peran/organisasi/status bisa diubah, 6 akun seed; tabel organisasi (Nama/ID/Tipe/Akun) dengan filter tipe + cari sebaris; kartu "Izin terpisah per grant" berisi keadaan kosong (tanpa grant) dan tombol Simpan izin |
+| `akun-izin-mobile-390-light.png` | `/admin/accounts` mobile 390, halaman penuh — daftar akun versi kartu, organisasi berupa baris ringkas dengan filter tipe lebar penuh, kartu grant menampilkan keadaan kosong; header kartu menumpuk (aksi di bawah deskripsi) |
+| `akun-izin-cakupan-dialog-desktop-1440-light.png` | `/admin/accounts` desktop 1440 — dialog "Tambah cakupan izin" (modal terpusat, akun + survei + tiga izin, Simpan cakupan) |
+| `akun-izin-cakupan-dialog-mobile-390-light.png` | `/admin/accounts` mobile 390 — dialog cakupan memakai lebar 352px dengan isian bertumpuk |
+| `akun-izin-mobile-organisasi-390-light.png` | `/admin/accounts` mobile 390 — bagian organisasi dan formulir organisasi baru |
+| `log-audit-desktop-1440-light.png` | `/admin/audit` desktop — filter + DataTable, 40 entri operasional (sebelum kartu retensi) |
+| `retensi-audit-desktop-1440-light.png` | `/admin/audit` desktop 1440 — kartu "Retensi data" ringkas sebaris (isian + Simpan) dan tabel dengan judul + kontrol cari/pagination dalam satu baris |
+| `retensi-audit-mobile-390-light.png` | `/admin/audit` mobile 390, halaman penuh — kartu retensi bertumpuk, kontrol tabel membungkus di bawah judul |
 | `integrasi-desktop-1440-light.png` | `/admin/integration` desktop — kartu event, 3 event simulasi |
 | `permintaan-data-desktop-1440-light.png` | `/admin/requests` desktop — kartu permintaan menunggu (1 permintaan seed) |
 | `log-audit-tablet-768-light.png` | `/admin/audit` tablet 768 — tabel 6 kolom muat tanpa geser, petunjuk geser tersembunyi |
 | `ringkasan-mobile-390-light.png` | `/admin` mobile 390, halaman penuh |
 | `ringkasan-mobile-390-drawer-light.png` | Mobile 390, drawer navigasi terbuka |
-| `akun-izin-mobile-390-light.png` | `/admin/accounts` mobile 390, halaman penuh (daftar kartu, tabel hanya ≥1024px) |
 | `audit-mobile-390-light.png` | `/admin/audit` mobile 390 — tabel menggeser + petunjuk geser tampil |
 | `admin-accounts-desktop-1440-pill-light.png` | Pembanding sebelum restyle: `/admin/accounts` masih pill + sidebar lama |
 | `admin-accounts-mobile-390-pill-light.png` | Pembanding sebelum restyle: `/admin/accounts` mobile, pill lama |

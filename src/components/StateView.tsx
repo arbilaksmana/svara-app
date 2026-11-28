@@ -135,7 +135,7 @@ export function ValidationSummary({ items }: { items: string[] }) {
       <ul className="mt-2 flex list-inside list-disc flex-col gap-1 text-body-sm text-ink">
         {items.map((item) => <li key={item}>{item}</li>)}
       </ul>
-      <p className="mt-2 text-caption text-muted">Simpan draf untuk mempertahankan perubahan; meninggalkan halaman tanpa menyimpan akan membuang perubahan.</p>
+      <p className="mt-2 text-caption text-ink-muted">Simpan draf untuk mempertahankan perubahan; meninggalkan halaman tanpa menyimpan akan membuang perubahan.</p>
     </div>
   );
 }

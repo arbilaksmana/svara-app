@@ -49,7 +49,7 @@ export function MissingSurvey() {
   return (
     <Card>
       <h2 className="text-h2 font-bold text-ink">Survei tidak ditemukan</h2>
-      <p className="mt-2 text-body text-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
+      <p className="mt-2 text-body text-ink-muted">Survei ini tidak ada dalam cakupan akun Anda.</p>
       <div className="mt-4"><ActionLink to={ROUTES.creator}>Kembali ke daftar survei</ActionLink></div>
     </Card>
   );
@@ -181,7 +181,7 @@ export function CreatorListPage() {
               </div>
             ) : null}
             {session?.organizationId ? (
-              <p id="new-survey-scope-hint" className="text-caption text-muted lg:order-last lg:basis-full">{scopeHint}</p>
+              <p id="new-survey-scope-hint" className="text-caption text-ink-muted lg:order-last lg:basis-full">{scopeHint}</p>
             ) : null}
             <Button
               disabled={busy || !canCreate || state === 'closed'}
@@ -205,7 +205,7 @@ export function CreatorListPage() {
             query !== '' ? (
               <div className="rounded-lg border border-dashed border-n200 bg-n50 p-6">
                 <p className="text-h3 font-bold text-ink">Hasil pencarian kosong</p>
-                <p className="mt-1 text-body-sm text-muted">Tidak ada survei yang cocok dengan “{query}”.</p>
+                <p className="mt-1 text-body-sm text-ink-muted">Tidak ada survei yang cocok dengan “{query}”.</p>
                 <button
                   type="button"
                   onClick={() => setQuery('')}
@@ -233,7 +233,7 @@ export function CreatorListPage() {
                     <tr key={s.id}>
                       <Th className="w-[38%]">
                         <span className="block">{s.title}</span>
-                        <span className="mt-1 block text-caption text-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {formatWIB(s.updated_at)}</span>
+                        <span className="mt-1 block text-caption text-ink-muted">{canCreate && !canManage ? 'Diberikan akses · ' : ''}{vs.length} versi · {s.organization_id ? 'Lingkup organisasi' : 'Lingkup individu'} · diperbarui {formatWIB(s.updated_at)}</span>
                       </Th>
                       <Td><Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge></Td>
                       <Td>{vs.length} versi</Td>
@@ -741,11 +741,11 @@ export function EditorPage({ id }: { id: string }) {
               <Panel className="h-fit">
                 <SectionTitle>Kebijakan yang berlaku</SectionTitle>
                 <p className="mt-2 text-body-sm text-ink">{profile?.organization_name ?? 'Belum dimuat'}</p>
-                <p className="mt-2 text-caption text-muted">
+                <p className="mt-2 text-caption text-ink-muted">
                   Bukti pendukung persetujuan:{' '}
                   {CONSENT_REQUIRED_LABEL[survey.consent_required ?? 'tidak']}
                 </p>
-                <p className="mt-1 text-annotation text-muted">
+                <p className="mt-1 text-annotation text-ink-muted">
                   {profile?.source === 'organization'
                     ? 'Kebijakan organisasi'
                     : profile?.source === 'platform'
@@ -763,7 +763,7 @@ export function EditorPage({ id }: { id: string }) {
                   <ActionLink to={ROUTES.creatorPreview(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lihat pratinjau</ActionLink>
                   <ActionLink to={ROUTES.creatorPublish(id)} variant="secondary" block disabled={dirty} disabledReason="Simpan draf atau batalkan perubahan terlebih dahulu">Lanjut ke publikasi</ActionLink>
                 </div>
-                <p className="mt-3 text-caption text-muted">
+                <p className="mt-3 text-caption text-ink-muted">
                   Satu tombol Simpan draf menyimpan seluruh draf, semua item sekaligus. Pratinjau dan publikasi baru tersedia
                   setelah perubahan disimpan. Menyalin survei tidak membawa respons, undangan, atau bukti persetujuan.
                 </p>
@@ -868,7 +868,7 @@ export function PreviewPage({ id }: { id: string }) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <SectionTitle>{survey.title}</SectionTitle>
-                <p className="mt-1 text-body-sm text-muted">{survey.purpose}</p>
+                <p className="mt-1 text-body-sm text-ink-muted">{survey.purpose}</p>
               </div>
               <Badge tone="info">Versi {version?.number ?? 'Belum ada'} · <Code>{version?.id}</Code></Badge>
             </div>
@@ -884,14 +884,14 @@ export function PreviewPage({ id }: { id: string }) {
                     {optionsFor(q.id).map((o) => (
                       <label key={o.id} className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-md border border-n200 px-3 text-body-sm text-ink">
                         <input type="radio" name={`preview-${q.id}`} className="size-5 accent-action" />
-                        {o.label} <span className="font-mono text-caption text-muted">({o.value})</span>
+                        {o.label} <span className="font-mono text-caption text-ink-muted">({o.value})</span>
                       </label>
                     ))}
                   </div>
                 ) : (
                   <ShortTextAnswer id={`preview-${q.id}-text`} required={q.required} hint={q.hint} />
                 )}
-                {q.type !== 'short_text' && q.hint && <p className="text-caption text-muted">{q.hint}</p>}
+                {q.type !== 'short_text' && q.hint && <p className="text-caption text-ink-muted">{q.hint}</p>}
               </fieldset>
             ))}
           </Card>
@@ -1041,7 +1041,7 @@ export function PublishPage({ id }: { id: string }) {
                 Kelola tautan
               </ActionLink>
             </div>
-            <p className="text-caption text-muted">
+            <p className="text-caption text-ink-muted">
               {session ? `Diterbitkan oleh ${session.name}. ` : ''}Perubahan isi setelah terbit memerlukan versi baru.
             </p>
             {publishedToken && (

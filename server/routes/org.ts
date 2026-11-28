@@ -5,6 +5,7 @@ import { all, get, nowIso, run, withTx } from '../db.ts';
 import { readGuardianEvidence } from '../guardian-evidence.ts';
 import { redactAuditRow, revokeSessionsOnStatusChange, type AuthedRequest } from '../security.ts';
 import { asString, audit, fail, newId, pathParam, sendError } from '../http.ts';
+import { ORGANIZATION_TYPE_SET, ORGANIZATION_TYPES } from '../organization-types.ts';
 import {
   INVITATION_LIST_LIMIT, INVITATION_TTL_DAYS,
   ORGANIZATION_INVITATION_COLUMNS,
@@ -53,8 +54,19 @@ orgRouter.get('/org/profile', async (req: AuthedRequest, res: Response) => {
       ? await get<OrgProfileRow>(`SELECT ${ORG_COLUMNS} FROM organizations WHERE id = ?`, req.account.organization_id)
       : await get<PlatformProfileRow>(`SELECT ${PLATFORM_COLUMNS} FROM platform_profile WHERE id = 'platform'`);
     if (!row) fail(404, 'profile_missing', 'Profil organisasi belum dikonfigurasi.');
+    // Katalog versi notice yang sah untuk notice_version: organisasi membaca salinannya sendiri,
+    // pemilik profil platform membaca katalog platform. Teks notice tidak dibocorkan di sini; daftar
+    // ini hanya memuat versi + tanggal efektif untuk pemilih di formulir profil.
+    const notices = req.account.organization_id
+      ? await all<{ version: string; effective_date: string }>(
+          'SELECT version, effective_date FROM organization_notices WHERE organization_id = ? ORDER BY version',
+          req.account.organization_id,
+        )
+      : await all<{ version: string; effective_date: string }>(
+          'SELECT version, effective_date FROM platform_notices ORDER BY version',
+        );
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ data: { source: req.account.organization_id ? 'organization' : 'platform', profile: row } });
+    res.json({ data: { source: req.account.organization_id ? 'organization' : 'platform', profile: row, notices } });
   } catch (error) {
     sendError(res, error);
   }
@@ -79,6 +91,11 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
       if (!value) fail(422, 'validation_error', `${key} wajib diisi.`);
       return value;
     };
+
+    const organizationType = required('organization_type', current.organization_type, 50);
+    if (!ORGANIZATION_TYPE_SET.has(organizationType)) {
+      fail(422, 'validation_error', `organization_type harus salah satu: ${ORGANIZATION_TYPES.join(', ')}.`);
+    }
 
     let retentionDays: number | null = current.retention_days;
     if (body.retention_days !== undefined) {
@@ -131,7 +148,7 @@ orgRouter.put('/org/profile', async (req: AuthedRequest, res: Response) => {
                 data_request_contact = ?, cross_border_transfer = ?, notice_version = ?
           WHERE id = ?`,
         required('organization_name', current.organization_name, 200),
-        required('organization_type', current.organization_type, 50),
+        organizationType,
         required('policy_url', current.policy_url, 500),
         required('terms_url', current.terms_url, 500),
         retentionDays,

@@ -18,10 +18,12 @@ const nextConfig: NextConfig = {
     return [{ source: '/api/:path*', destination: `${apiOrigin}/api/:path*` }];
   },
   // Bookmark lama sebelum rute dipindah ke /auth/login dan /creator (T4).
+  // Profil platform tidak punya halaman lagi: masa retensi diatur di /admin/audit.
   async redirects() {
     return [
       { source: '/login', destination: '/auth/login', permanent: true },
       { source: '/surveys', destination: '/creator', permanent: true },
+      { source: '/admin/platform', destination: '/admin/audit', permanent: true },
     ];
   },
 };

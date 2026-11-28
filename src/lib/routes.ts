@@ -24,7 +24,6 @@ export const ROUTE_IDS = [
   'admin-requests',
   'admin-org',
   'admin-org-evidence',
-  'admin-platform',
   'privacy',
   'terms',
   'notfound',
@@ -42,6 +41,8 @@ export const ROUTES = {
   login: '/auth/login',
   register: '/auth/register',
   creator: '/creator',
+  /** Daftar survei lingkup organisasi untuk org_admin, memakai chrome dasbor yang sama. */
+  creatorOrg: '/creator/org',
   creatorEdit: (id: string) => `/creator/surveys/${id}/edit`,
   creatorPreview: (id: string) => `/creator/surveys/${id}/preview`,
   creatorPublish: (id: string) => `/creator/surveys/${id}/publish`,
@@ -61,14 +62,13 @@ export const ROUTES = {
   adminRequests: '/admin/requests',
   adminOrg: '/admin/org',
   adminOrgEvidence: '/admin/org/evidence',
-  adminPlatform: '/admin/platform',
   privacy: '/privacy',
   terms: '/terms',
 } as const;
 
 /**
  * Rumah per peran; satu-satunya peta "sesudah masuk mendarat di mana". `org_admin` mengelola
- * organisasinya di `/admin/org` dan survei organisasinya di `/creator` (tautan sidebar).
+ * organisasinya di `/admin/org` dan survei organisasinya di `/creator/org` (tautan sidebar).
  */
 export type HomeRole = 'admin' | 'org_admin' | 'creator';
 
