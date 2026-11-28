@@ -106,7 +106,7 @@ function mobileAccessibleName(anchor: string): string {
   return [visible.replace(/<[^>]+>/g, ' '), ...alts].join(' ').replace(/\s+/g, ' ').trim();
 }
 
-async function signInAs(role: 'creator' | 'super_admin', mock: TestContext['mock']) {
+async function signInAs(role: 'creator' | 'super_admin' | 'org_admin', mock: TestContext['mock']) {
   const data: BootstrapData = {
     account: { id: 'u_uji', display_name: 'Akun Uji', email: 'uji@svara.local', role, status: 'active', organization_id: null },
     surveys: [], versions: [], profiles: [], notices: [], surveyProfiles: {}, questions: [], options: [], invitations: [],
@@ -282,9 +282,15 @@ test('UIX-25: item navigasi Ringkasan aktif memakai aria-current dan penanda sel
     assert.match(current[0]!, new RegExp(`>${label}</a>$`));
   }
 
-  // Halaman di luar chrome (mis. organisasi) tetap memakai pill + sidebar lama, bukan sidebar admin.
+  // Ruang organisasi memakai sidebar organisasi, bukan chrome super admin atau pill lama.
+  await signInAs('org_admin', t.mock);
   const org = render(createElement(Shell, { kind: 'admin', title: 'Organisasi', children: 'isi' }), ROUTES.adminOrg);
-  assert.doesNotMatch(org, /aria-label="Navigasi admin"/, 'Chrome admin tidak boleh bocor ke halaman di luar daftar');
-  assert.match(org, /<nav\b[^>]*aria-label="Navigasi utama"/, 'Halaman di luar chrome tetap memakai pill lama');
-  assert.match(org, /aria-label="Navigasi bagian"/, 'Halaman di luar chrome tetap memakai sidebar lama');
+  assert.doesNotMatch(org, /aria-label="Navigasi admin"/, 'Chrome super admin tidak boleh bocor ke ruang organisasi');
+  assert.doesNotMatch(org, /<nav\b[^>]*aria-label="Navigasi utama"/, 'Ruang organisasi tidak boleh kembali ke pill lama');
+  const orgNav = /<nav\b[^>]*aria-label="Navigasi organisasi"[^>]*>[\s\S]*?<\/nav>/.exec(org)?.[0] ?? '';
+  assert.ok(orgNav, 'Halaman organisasi harus merender sidebar organisasi');
+  const orgItems = [...orgNav.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)].map(([a]) => a);
+  const orgCurrent = orgItems.filter((a) => /\baria-current="page"/.test(a));
+  assert.equal(orgCurrent.length, 1, 'Halaman organisasi harus menandai tepat satu item aktif');
+  assert.match(orgCurrent[0]!, />Organisasi<\/a>$/);
 });

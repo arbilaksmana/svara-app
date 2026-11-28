@@ -11,7 +11,7 @@ import { ROUTES, homeForRole } from '../lib/routes';
 import { allowNavigation, confirmIfDirty, useNavigationGuard } from '../lib/navigation-guard';
 import { signOut, useStore } from '../lib/store';
 import { activeNavTo, navPath, type NavEntry } from '../lib/nav';
-import { AdminShell } from './AdminSidebar';
+import { AdminShell, ORG_NAV_GROUPS } from './AdminSidebar';
 
 type ShellKind = 'public' | 'creator' | 'admin' | 'respondent';
 export type { NavEntry };
@@ -23,6 +23,13 @@ const ADMIN_CHROME_PATHS = new Set<string>([
   ROUTES.adminAudit,
   ROUTES.adminIntegration,
   ROUTES.adminRequests,
+]);
+
+/** Halaman ruang organisasi yang memakai chrome dasbor yang sama, dengan menu org_admin. */
+const ORG_CHROME_PATHS = new Set<string>([
+  ROUTES.adminOrg,
+  ROUTES.adminOrgEvidence,
+  ROUTES.creatorOrg,
 ]);
 
 /* Tamu memakai tautan bagian landing; anchor absolut agar tetap benar dari halaman lain. */
@@ -37,7 +44,7 @@ const GUEST_NAV: NavEntry[] = [
 const ORG_NAV: NavEntry[] = [
   { to: ROUTES.adminOrg, label: 'Organisasi' },
   { to: ROUTES.adminOrgEvidence, label: 'Bukti pendukung' },
-  { to: ROUTES.creator, label: 'Daftar survei' },
+  { to: ROUTES.creatorOrg, label: 'Daftar survei', aliases: [`${ROUTES.creator}/surveys`] },
 ];
 
 const NAV: Record<ShellKind, NavEntry[]> = {
@@ -347,17 +354,43 @@ export function Shell({
   const sectionNav = session?.role === 'org_admin' && inWorkspace ? ORG_NAV : NAV[kind];
   const sidebarActiveTo = activeNavTo(sectionNav, pathname);
   const activePath = kind === 'respondent' ? ROUTES.home : sidebarActiveTo ?? pathname;
-  // Chrome baru untuk SELURUH halaman super admin: peran 'admin' (super_admin sudah dinormalisasi
-  // di store) DAN path salah satu halaman platform/operasional. Halaman organisasi (/admin/org*),
-  // org_admin, creator, dan responden tetap memakai pill + sidebar lama di bawah.
+  // Chrome baru untuk seluruh halaman super admin: peran 'admin' (super_admin sudah dinormalisasi
+  // di store) DAN path salah satu halaman platform/operasional. org_admin memakai chrome yang sama
+  // pada halaman organisasi dengan navigasi sendiri; creator dan responden tetap memakai chrome lama.
   // Hanya `session` (hasil bootstrap), bukan `activeSession` (memakai sesi mock saat request
   // /auth/me awal masih berjalan): sidebar tidak boleh berganti bentuk setelah bootstrap selesai.
   // Selama bootstrap belum selesai (`ready` false) chrome admin langsung dipakai agar sidebar tidak
   // berkedip pill lama lebih dulu; peran diverifikasi begitu sesi tersedia.
-  const usesAdminChrome = Boolean(kind === 'admin' && (!ready || session?.role === 'admin'));
+  const workspacePath = navPath(pathname);
+  const usesAdminChrome = Boolean(
+    kind === 'admin' && (!ready || session?.role === 'admin') && ADMIN_CHROME_PATHS.has(workspacePath),
+  );
+  // Ruang organisasi memakai chrome dasbor yang sama, dengan menu org_admin dan label peran.
+  // Path khusus org (/admin/org*, /creator/org) boleh optimistis selama bootstrap karena server memang
+  // menjaganya untuk org_admin; detail survei menunggu sesi agar creator tidak melihat chrome org.
+  const usesOrgChrome = Boolean(
+    (kind === 'creator' || kind === 'admin') &&
+      ((ORG_CHROME_PATHS.has(workspacePath) && (!ready || session?.role === 'org_admin')) ||
+        (ready && session?.role === 'org_admin' && workspacePath.startsWith(`${ROUTES.creator}/surveys/`))),
+  );
 
-  if (!chromeless && usesAdminChrome && ADMIN_CHROME_PATHS.has(navPath(pathname))) {
-    return (
+  if (!chromeless && (usesAdminChrome || usesOrgChrome)) {
+    return usesOrgChrome ? (
+      <AdminShell
+        pathname={pathname}
+        title={title}
+        subtitle={subtitle}
+        hideHeading={hideHeading}
+        mainRef={mainRef}
+        navGroups={ORG_NAV_GROUPS}
+        navLabel="Navigasi organisasi"
+        brandLabel="Admin organisasi"
+        homeTo={ROUTES.adminOrg}
+        crumbFallback="Organisasi"
+      >
+        {children}
+      </AdminShell>
+    ) : (
       <AdminShell
         pathname={pathname}
         title={title}

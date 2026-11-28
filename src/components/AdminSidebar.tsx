@@ -4,7 +4,10 @@ import type { CSSProperties, ReactNode, RefObject } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  Building2,
   ChevronsUpDown,
+  ClipboardList,
+  FileCheck2,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -47,14 +50,14 @@ import {
 
 /**
  * Chrome seluruh halaman super admin (/admin, /admin/accounts, /admin/audit,
- * /admin/integration, /admin/requests): Sidebar block shadcn (`inset`, drawer Sheet di
- * mobile) + SidebarInset berisi header halaman. Halaman organisasi (/admin/org*) dan peran
- * lain tetap memakai chrome lama di Shell.
+ * /admin/integration, /admin/requests) dan ruang organisasi (/admin/org*): Sidebar block
+ * shadcn (`inset`, drawer Sheet di mobile) + SidebarInset berisi header halaman.
+ * Peran lain tetap memakai chrome lama di Shell.
  */
 
-type AdminNavEntry = NavEntry & { icon: LucideIcon };
+export type WorkspaceNavGroup = { label: string; items: Array<NavEntry & { icon: LucideIcon }> };
 
-const NAV_GROUPS: Array<{ label: string; items: AdminNavEntry[] }> = [
+const ADMIN_NAV_GROUPS: WorkspaceNavGroup[] = [
   {
     label: 'Platform',
     items: [{ to: ROUTES.admin, label: 'Ringkasan', icon: LayoutDashboard }],
@@ -70,14 +73,27 @@ const NAV_GROUPS: Array<{ label: string; items: AdminNavEntry[] }> = [
   },
 ];
 
-const ALL_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+/** Navigasi ruang organisasi untuk org_admin: profil, bukti pendukung, dan daftar survei. */
+export const ORG_NAV_GROUPS: WorkspaceNavGroup[] = [
+  {
+    label: 'Organisasi',
+    items: [
+      { to: ROUTES.adminOrg, label: 'Organisasi', icon: Building2 },
+      { to: ROUTES.adminOrgEvidence, label: 'Bukti pendukung', icon: FileCheck2 },
+    ],
+  },
+  {
+    label: 'Survei',
+    items: [{ to: ROUTES.creatorOrg, label: 'Daftar survei', icon: ClipboardList, aliases: [`${ROUTES.creator}/surveys`] }],
+  },
+];
 
-function NavMenu({ pathname }: { pathname: string }) {
+function NavMenu({ pathname, groups, label }: { pathname: string; groups: WorkspaceNavGroup[]; label: string }) {
   const guard = useNavigationGuard();
-  const activeTo = activeNavTo(ALL_ITEMS, pathname);
+  const activeTo = activeNavTo(groups.flatMap((group) => group.items), pathname);
   return (
-    <nav aria-label="Navigasi admin" className="flex flex-col gap-2">
-      {NAV_GROUPS.map((group) => (
+    <nav aria-label={label} className="flex flex-col gap-2">
+      {groups.map((group) => (
         <SidebarGroup key={group.label}>
           <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -178,15 +194,15 @@ function NavUser() {
   );
 }
 
-function Wordmark() {
+function Wordmark({ label, homeTo }: { label: string; homeTo: string }) {
   const guard = useNavigationGuard();
   return (
     <SidebarMenu>
       <SidebarMenuItem>
         <SidebarMenuButton asChild size="lg" className="data-[slot=sidebar-menu-button]:p-1.5!">
           <Link
-            href={ROUTES.admin}
-            aria-label="Svara — Ringkasan admin"
+            href={homeTo}
+            aria-label={`Svara — ${label}`}
             onClick={(event) => {
               if (!allowNavigation(event, guard)) event.preventDefault();
             }}
@@ -194,7 +210,7 @@ function Wordmark() {
             <BrandMark className="size-8 shrink-0" />
             <span className="grid flex-1 text-start text-base leading-tight">
               <span className="truncate font-semibold">Svara</span>
-              <span className="truncate text-xs text-muted-foreground">Super admin</span>
+              <span className="truncate text-xs text-muted-foreground">{label}</span>
             </span>
           </Link>
         </SidebarMenuButton>
@@ -203,9 +219,10 @@ function Wordmark() {
   );
 }
 
-function crumbFor(pathname: string): string {
-  const entry = ALL_ITEMS.find((item) => item.to === activeNavTo(ALL_ITEMS, pathname));
-  return entry?.label ?? 'Admin';
+function crumbFor(groups: WorkspaceNavGroup[], pathname: string, fallback: string): string {
+  const items = groups.flatMap((group) => group.items);
+  const entry = items.find((item) => item.to === activeNavTo(items, pathname));
+  return entry?.label ?? fallback;
 }
 
 export function AdminShell({
@@ -214,6 +231,11 @@ export function AdminShell({
   subtitle,
   hideHeading,
   mainRef,
+  navGroups = ADMIN_NAV_GROUPS,
+  navLabel = 'Navigasi admin',
+  brandLabel = 'Super admin',
+  homeTo = ROUTES.admin,
+  crumbFallback = 'Admin',
   children,
 }: {
   pathname: string;
@@ -221,9 +243,15 @@ export function AdminShell({
   subtitle?: string;
   hideHeading?: boolean;
   mainRef: RefObject<HTMLElement | null>;
+  /** Grup navigasi sidebar; bawaan menu super admin. */
+  navGroups?: WorkspaceNavGroup[];
+  navLabel?: string;
+  brandLabel?: string;
+  homeTo?: string;
+  crumbFallback?: string;
   children: ReactNode;
 }) {
-  const pageLabel = crumbFor(pathname);
+  const pageLabel = crumbFor(navGroups, pathname, crumbFallback);
 
   return (
     <SidebarProvider
@@ -244,10 +272,10 @@ export function AdminShell({
 
       <Sidebar variant="inset" collapsible="offcanvas">
         <SidebarHeader>
-          <Wordmark />
+          <Wordmark label={brandLabel} homeTo={homeTo} />
         </SidebarHeader>
         <SidebarContent>
-          <NavMenu pathname={pathname} />
+          <NavMenu pathname={pathname} groups={navGroups} label={navLabel} />
         </SidebarContent>
         <SidebarFooter>
           <NavUser />

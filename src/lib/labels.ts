@@ -40,14 +40,19 @@ export const COLLECTION_MODE_LABEL: Partial<Record<string, string>> = {
   integrated: 'Integrasi sistem',
 };
 
-/** Status bukti pendukung pada layar moderasi; tiga status ini yang dapat diputuskan operator. */
+/** Status bukti pendukung pada layar moderasi, termasuk status konsen yang tak perlu ditinjau. */
 export const GUARDIAN_EVIDENCE_STATUS_LABEL: Record<string, string> = {
+  not_required: 'Tidak wajib',
+  pending: 'Belum diunggah',
   self_attested: 'Menunggu tinjauan',
   verified: 'Terverifikasi',
   rejected: 'Ditolak',
+  revoked: 'Dicabut',
 };
 
-export const GUARDIAN_EVIDENCE_STATUS_TONE: Record<string, 'success' | 'danger' | 'neutral'> = {
+export const GUARDIAN_EVIDENCE_STATUS_TONE: Record<string, 'success' | 'danger' | 'neutral' | 'warning'> = {
+  not_required: 'neutral',
+  pending: 'warning',
   self_attested: 'neutral',
   verified: 'success',
   rejected: 'danger',

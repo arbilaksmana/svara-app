@@ -7,7 +7,7 @@ import { PathnameContext, SearchParamsContext } from 'next/dist/shared/lib/hooks
 import { Shell } from '../../src/components/Shell.tsx';
 import { ToastProvider } from '../../src/components/Toast.tsx';
 import { homeForRole, ROUTES } from '../../src/lib/routes.ts';
-import { refreshBootstrap } from '../../src/lib/store.ts';
+import { loadBootstrap } from '../../src/lib/store.ts';
 import type { BootstrapData } from '../../src/lib/api.ts';
 
 const router = {
@@ -29,7 +29,7 @@ async function orgAdminSession(): Promise<void> {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ data: payload })) as typeof fetch;
   try {
-    await refreshBootstrap();
+    await loadBootstrap();
   } finally {
     globalThis.fetch = original;
   }
@@ -44,10 +44,11 @@ function render(pathname: string, kind: 'creator' | 'admin'): string {
   );
 }
 
-/** Entri sidebar yang menyorot dirinya: `aria-current="page"` beserta teks tautannya. */
-function highlighted(html: string): string[] {
-  const nav = /<nav class="flex flex-row flex-wrap gap-2 lg:flex-col">([\s\S]*?)<\/nav>/u.exec(html)?.[1] ?? '';
-  return [...nav.matchAll(/<a[^>]*class="[^"]*bg-n100 text-action"[^>]*>([\s\S]*?)<\/a>/gu)].map((match) => match[1]!.trim());
+/** Label semua tautan aria-current pada chrome yang dirender. */
+function currentLabels(html: string): string[] {
+  return [...html.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gu)]
+    .filter(([markup]) => markup.includes('aria-current="page"'))
+    .map(([markup]) => markup.replace(/<[^>]+>/gu, '').trim());
 }
 
 test('homeForRole: org_admin mendarat di /admin/org, admin di /admin, sisanya /creator', () => {
@@ -56,25 +57,26 @@ test('homeForRole: org_admin mendarat di /admin/org, admin di /admin, sisanya /c
   assert.equal(homeForRole('creator'), ROUTES.creator);
 });
 
-test('sidebar org_admin: entri organisasi, bukti pendukung, dan daftar survei tersedia', async () => {
+test('chrome organisasi: entri organisasi, bukti pendukung, dan daftar survei tersedia', async () => {
   await orgAdminSession();
-  const html = render('', 'admin');
-  const nav = /<nav class="flex flex-row flex-wrap gap-2 lg:flex-col">([\s\S]*?)<\/nav>/u.exec(html)?.[1] ?? '';
-  assert.ok(nav.includes(`href="${ROUTES.adminOrg}"`), nav);
-  assert.ok(nav.includes(`href="${ROUTES.adminOrgEvidence}"`), nav);
-  assert.ok(nav.includes(`href="${ROUTES.creator}"`), nav);
-  assert.ok(nav.includes('Daftar survei'), nav);
+  const html = render(ROUTES.adminOrg, 'admin');
+  assert.ok(html.includes('Navigasi organisasi'), html);
+  assert.ok(html.includes(`href="${ROUTES.adminOrg}"`), html);
+  assert.ok(html.includes(`href="${ROUTES.adminOrgEvidence}"`), html);
+  assert.ok(html.includes(`href="${ROUTES.creatorOrg}"`), html);
+  assert.ok(html.includes('Daftar survei'), html);
 });
 
-test('sidebar org_admin: sorot satu entri per halaman, tanpa sorot ganda', async () => {
+test('chrome organisasi: sorot satu entri per halaman, termasuk detail survei', async () => {
   await orgAdminSession();
   for (const [pathname, kind, label] of [
     [ROUTES.adminOrg, 'admin', 'Organisasi'],
     [ROUTES.adminOrgEvidence, 'admin', 'Bukti pendukung'],
-    [ROUTES.creator, 'creator', 'Daftar survei'],
+    [ROUTES.creatorOrg, 'creator', 'Daftar survei'],
     [ROUTES.creatorEdit('s_contoh'), 'creator', 'Daftar survei'],
   ] as const) {
-    const active = highlighted(render(pathname, kind));
-    assert.deepEqual(active, [label], `${pathname} menyorot tepat "${label}"`);
+    const html = render(pathname, kind);
+    assert.ok(html.includes('Navigasi organisasi'), `${pathname} harus memakai chrome organisasi`);
+    assert.deepEqual(currentLabels(html), [label], `${pathname} menyorot tepat "${label}"`);
   }
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -19,6 +19,7 @@ import { ChevronLeft } from "runeicons-react/icons/ChevronLeft";
 import { ChevronRight } from "runeicons-react/icons/ChevronRight";
 import { Columns3 } from "runeicons-react/icons/Columns3";
 import { withIconClass } from "./rune-icon";
+import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
@@ -139,16 +140,18 @@ export function DataTable<TData, TValue>({
   // Ambang lebar minimum dihitung dari kolom yang terlihat: menyembunyikan kolom lewat menu
   // "Kolom" mengubah kebutuhan min-w.
   const visibleCount = table.getVisibleLeafColumns().length;
-  const minWidth =
-    visibleCount >= 6
-      ? "min-w-[44rem]"
-      : visibleCount >= 5
-        ? "min-w-[36rem]"
-        : visibleCount >= 4
-          ? "min-w-[32rem]"
-          : "";
+  // 4 kolom (mis. antrean bukti) harus muat di 390px tanpa menggeser kolom aksi; mulai 5 kolom
+  // tabel diberi lebar minimum dan digulir di dalam kontainernya.
+  const minWidth = visibleCount >= 6 ? "min-w-[44rem]" : visibleCount >= 5 ? "min-w-[36rem]" : "";
   const { pageIndex, pageSize } = table.getState().pagination;
   const pageCount = table.getPageCount();
+  // Pagination boleh terkunci ke halaman kosong setelah pemanggil mengganti `data` (mis. filter status
+  // baru). Tarik halaman ke halaman terakhir yang ada agar baris dengan aksi tidak tersembunyi.
+  useEffect(() => {
+    if (pageCount > 0 && pageIndex >= pageCount) {
+      setPagination((current) => ({ ...current, pageIndex: pageCount - 1 }));
+    }
+  }, [pageCount, pageIndex]);
   // `plain` memakai baris sebelum pagination: kontrol halaman disembunyikan, jadi semua baris harus terlihat.
   const rows = plain ? table.getPrePaginationRowModel().rows : table.getPaginationRowModel().rows;
   const filteredCount = table.getFilteredRowModel().rows.length;
@@ -255,7 +258,7 @@ export function DataTable<TData, TValue>({
                   return (
                     <TableHead
                       key={header.id}
-                      className={cellClassName}
+                      className={cn(cellClassName, (header.column.columnDef.meta as { className?: string } | undefined)?.className)}
                       aria-sort={
                         sorted === "asc"
                           ? "ascending"
@@ -311,7 +314,13 @@ export function DataTable<TData, TValue>({
                   data-state={row.getIsSelected() ? "selected" : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className={cellClassName}>
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        cellClassName,
+                        (cell.column.columnDef.meta as { className?: string } | undefined)?.className,
+                      )}
+                    >
                       {flexRender(
                         cell.column.columnDef.cell,
                         cell.getContext(),
@@ -323,7 +332,7 @@ export function DataTable<TData, TValue>({
             ) : (
               <TableRow className="hover:bg-transparent">
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={table.getVisibleLeafColumns().length}
                   className="py-8 text-center text-muted-foreground"
                 >
                   {filter.trim() ? "Tidak ada entri yang cocok dengan pencarian." : emptyMessage}
