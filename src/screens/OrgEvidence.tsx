@@ -286,6 +286,24 @@ export function OrgEvidencePage() {
       .finally(() => setBusy(false));
   };
 
+  const statusFilter = (
+    <Select
+      value={filter}
+      onValueChange={(value) => setFilter(value as EvidenceFilter)}
+    >
+      <SelectTrigger aria-label="Filter status bukti" className="w-48">
+        <SelectValue>{FILTERS.find((option) => option.value === filter)?.label}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {FILTERS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
   return (
     <Shell
       kind="admin"
@@ -325,6 +343,7 @@ export function OrgEvidencePage() {
                 </Alert>
               ) : rows === null ? (
                 <div aria-busy="true" aria-live="polite" className="flex flex-col gap-3">
+                  <div className="flex justify-end">{statusFilter}</div>
                   <p className="text-body-sm text-muted-foreground">Memuat bukti pendukung…</p>
                   {Array.from({ length: 3 }, (_, index) => (
                     <Skeleton key={index} className="h-16 w-full rounded-md" />
@@ -342,23 +361,7 @@ export function OrgEvidencePage() {
                       row.guardian_evidence_ref ?? ''
                     } ${GUARDIAN_EVIDENCE_STATUS_LABEL[row.guardian_evidence_status] ?? ''}`
                   }
-                  toolbarExtra={
-                    <Select
-                      value={filter}
-                      onValueChange={(value) => setFilter(value as EvidenceFilter)}
-                    >
-                      <SelectTrigger aria-label="Filter status bukti" className="w-48">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FILTERS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  }
+                  toolbarExtra={statusFilter}
                 />
               )}
             </CardContent>

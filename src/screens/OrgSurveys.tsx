@@ -244,7 +244,7 @@ export function OrgSurveysPage() {
                     onValueChange={(value) => setFilter(value as typeof filter)}
                   >
                     <SelectTrigger aria-label="Filter status" className="w-40">
-                      <SelectValue />
+                      <SelectValue>{FILTERS.find((option) => option.value === filter)?.label}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {FILTERS.map((option) => (

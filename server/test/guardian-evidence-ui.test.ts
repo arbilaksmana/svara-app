@@ -47,7 +47,8 @@ test('SEC-04: layar moderasi bukti wali merender antrean dan filter status', () 
   );
   assert.match(html, /Bukti pendukung/);
   assert.match(html, /Antrean tinjauan/);
-  assert.match(html, /Status bukti/);
+  assert.match(html, /aria-label="Filter status bukti"/);
+  assert.match(html, /Menunggu tinjauan/);
   assert.match(html, /Memuat bukti pendukung/);
   // Istilah netral: layar tidak menyebut umur, anak, atau wali.
   assert.doesNotMatch(html, /wali|anak|orang tua/i);

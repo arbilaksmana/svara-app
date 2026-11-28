@@ -540,7 +540,7 @@ export function AdminOrgPage() {
                         onValueChange={(value) => setField('organization_type', value as OrganizationType)}
                       >
                         <SelectTrigger {...aria} aria-label="Tipe organisasi" className="h-11 w-full">
-                          <SelectValue />
+                          <SelectValue>{ORGANIZATION_TYPE_LABEL[form.organization_type]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {ORGANIZATION_TYPES.map((value) => (
@@ -609,7 +609,7 @@ export function AdminOrgPage() {
                           onValueChange={(value) => setField('notice_version', value)}
                         >
                           <SelectTrigger {...aria} aria-label="Versi pemberitahuan responden" className="h-11 w-full">
-                            <SelectValue />
+                            <SelectValue>{`Versi ${form.notice_version}`}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {noticeVersions.map((row) => (
